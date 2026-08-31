@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { compareSeasonNames, nextSeasonName, parseSeasonName, suggestSeasonName } from './season'
+import { compareSeasonNames, nextSeasonName, parseSeasonName, suggestSeasonName } from '../season'
 
 describe('parseSeasonName', () => {
   test('parses a cross-year season', () => {

@@ -17,10 +17,12 @@ import {
   type CreateSeasonOptions
 } from './lib/operations'
 import { scanLeaguesRoot } from './lib/scanner'
+import * as Sentry from '@sentry/electron/main'
 
 interface Settings {
   rootPath?: string
   posthogKey?: string
+  sentryDSN?: string
   machineId?: string
 }
 
@@ -34,6 +36,29 @@ function machineId(): string {
   }
   return id
 }
+
+/** Runtime env var beats the build-time MAIN_VITE_ value beats the stored setting. */
+function posthogKey(): string | undefined {
+  return (
+    process.env.LEAGUES_POSTHOG_KEY ||
+    import.meta.env.MAIN_VITE_POSTHOG_KEY ||
+    store.get('posthogKey') ||
+    undefined
+  )
+}
+
+function sentryDSN(): string | undefined {
+  return (
+    process.env.LEAGUES_SENTRY_DSN ||
+    import.meta.env.MAIN_VITE_SENTRY_DSN ||
+    store.get('sentryDSN') ||
+    undefined
+  )
+}
+
+// As early as possible so Sentry's error hooks and the IPC bridge for the
+// renderer SDK are in place before any window loads.
+initAnalytics(posthogKey(), sentryDSN(), machineId())
 
 function bundledTemplatesDir(): string {
   return app.isPackaged
@@ -52,6 +77,10 @@ function watchRoot(root: string): void {
     if (timer) clearTimeout(timer)
     timer = setTimeout(() => mainWindow?.webContents.send('tree:changed'), 500)
   })
+  watcher.on('error', (err) => {
+    console.error(err)
+    Sentry.captureException(err)
+  })
 }
 
 /** LEAGUES_ROOT overrides the stored root — used for dev/test fixtures. */
@@ -59,15 +88,35 @@ function currentRoot(): string | undefined {
   return process.env.LEAGUES_ROOT ?? store.get('rootPath')
 }
 
+/** ipcMain.handle, but failures are reported to Sentry before rejecting the invoke. */
+function handle<Args extends unknown[], Result>(
+  channel: string,
+  listener: (event: Electron.IpcMainInvokeEvent, ...args: Args) => Result
+): void {
+  ipcMain.handle(channel, async (event, ...args) => {
+    try {
+      // SAFETY: ipcMain delivers whatever the renderer invoked with; the
+      // listener's parameter types document the expected shape, exactly as
+      // when these listeners were passed to ipcMain.handle directly.
+      return await listener(event, ...(args as Args))
+    } catch (err) {
+      Sentry.captureException(err, { tags: { ipc_channel: channel } })
+      throw err
+    }
+  })
+}
+
 function registerIpc(): void {
-  ipcMain.handle('analytics:config', () => ({
-    apiKey: process.env.LEAGUES_POSTHOG_KEY ?? store.get('posthogKey') ?? null,
+  // The renderer's Sentry SDK inherits its config from the main process,
+  // so only PostHog needs anything over IPC.
+  handle('analytics:config', () => ({
+    apiKey: posthogKey() ?? null,
     distinctId: machineId()
   }))
 
-  ipcMain.handle('root:get', () => currentRoot() ?? null)
+  handle('root:get', () => currentRoot() ?? null)
 
-  ipcMain.handle('root:choose', async (_e, mode: 'select' | 'init') => {
+  handle('root:choose', async (_e, mode: 'select' | 'init') => {
     if (!mainWindow) return null
     const result = await dialog.showOpenDialog(mainWindow, {
       title:
@@ -88,20 +137,20 @@ function registerIpc(): void {
     return root
   })
 
-  ipcMain.handle('root:forget', () => {
+  handle('root:forget', () => {
     store.delete('rootPath')
     void watcher?.close()
     watcher = null
   })
 
-  ipcMain.handle('leagues:scan', async () => {
+  handle('leagues:scan', async () => {
     const root = currentRoot()
     if (!root) return null
     if (!watcher) watchRoot(root)
     return scanLeaguesRoot(root, { heal: true })
   })
 
-  ipcMain.handle('league:create', async (_e, day: Weekday, name: string) => {
+  handle('league:create', async (_e, day: Weekday, name: string) => {
     const root = currentRoot()
     if (!root) throw new Error('No leagues folder selected')
     const path = await createLeague(root, day, name)
@@ -109,7 +158,7 @@ function registerIpc(): void {
     return path
   })
 
-  ipcMain.handle('season:create', async (_e, opts: Omit<CreateSeasonOptions, 'root'>) => {
+  handle('season:create', async (_e, opts: Omit<CreateSeasonOptions, 'root'>) => {
     const root = currentRoot()
     if (!root) throw new Error('No leagues folder selected')
     const result = await createSeason({ ...opts, root })
@@ -117,7 +166,7 @@ function registerIpc(): void {
     return result
   })
 
-  ipcMain.handle('archive:zip', async (_e, leagueFolder: string, seasons: string[]) => {
+  handle('archive:zip', async (_e, leagueFolder: string, seasons: string[]) => {
     const root = currentRoot()
     if (!root) throw new Error('No leagues folder selected')
     const zips = await zipArchivedSeasons(root, leagueFolder, seasons)
@@ -125,16 +174,16 @@ function registerIpc(): void {
     return zips
   })
 
-  ipcMain.handle('file:open', async (_e, path: string) => {
+  handle('file:open', async (_e, path: string) => {
     capture('document_opened', { onedrive: (await oneDriveStatus(path)).availability })
     return shell.openPath(path)
   })
 
-  ipcMain.handle('file:reveal', (_e, path: string) => {
+  handle('file:reveal', (_e, path: string) => {
     shell.showItemInFolder(path)
   })
 
-  ipcMain.handle('file:import', async (_e, dest: string, sources: string[]) => {
+  handle('file:import', async (_e, dest: string, sources: string[]) => {
     const copied = await importFiles(dest, sources)
     capture('files_imported', { count: copied.length })
     return copied
@@ -178,7 +227,6 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window)
   })
 
-  initAnalytics(process.env.LEAGUES_POSTHOG_KEY ?? store.get('posthogKey'), machineId())
   capture('app_opened', { platform: process.platform })
 
   registerIpc()
@@ -195,7 +243,12 @@ app.on('window-all-closed', () => {
   }
 })
 
-app.on('before-quit', () => {
-  void watcher?.close()
-  void shutdownAnalytics()
+// Defer the first quit so PostHog/Sentry finish flushing; both flushes
+// carry their own short timeouts, so this can't hang the app.
+let flushedOnQuit = false
+app.on('before-quit', (event) => {
+  if (flushedOnQuit) return
+  flushedOnQuit = true
+  event.preventDefault()
+  void Promise.allSettled([watcher?.close(), shutdownAnalytics()]).then(() => app.quit())
 })

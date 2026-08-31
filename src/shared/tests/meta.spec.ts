@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
-import { healMeta, parseLeagueMetaInput, type ScanFacts } from './meta'
-import { parseSeasonName } from './season'
+import { healMeta, parseLeagueMetaInput, type ScanFacts } from '../meta'
+import { parseSeasonName } from '../season'
 
 const scan: ScanFacts = {
   folderName: 'Mens Triples',

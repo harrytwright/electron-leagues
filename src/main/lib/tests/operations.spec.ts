@@ -9,7 +9,7 @@ import {
   importFiles,
   initialiseRoot,
   zipArchivedSeasons
-} from './operations'
+} from '../operations'
 
 let root: string
 let outside: string
