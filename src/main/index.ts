@@ -60,6 +60,11 @@ function currentRoot(): string | undefined {
 }
 
 function registerIpc(): void {
+  ipcMain.handle('analytics:config', () => ({
+    apiKey: process.env.LEAGUES_POSTHOG_KEY ?? store.get('posthogKey') ?? null,
+    distinctId: machineId()
+  }))
+
   ipcMain.handle('root:get', () => currentRoot() ?? null)
 
   ipcMain.handle('root:choose', async (_e, mode: 'select' | 'init') => {
