@@ -137,19 +137,20 @@ function registerIpc(): void {
 }
 
 function createWindow(): void {
-  mainWindow = new BrowserWindow({
+  const options: Electron.BrowserWindowConstructorOptions = {
     width: 1100,
     height: 720,
     minWidth: 800,
     minHeight: 500,
     show: false,
     autoHideMenuBar: true,
-    ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
     }
-  })
+  }
+  if (process.platform === 'linux') options.icon = icon
+  mainWindow = new BrowserWindow(options)
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
 

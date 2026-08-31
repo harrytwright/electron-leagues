@@ -1,9 +1,9 @@
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { healMeta } from '../../shared/meta'
+import { healMeta, parseLeagueMetaInput, type LeagueMetaInput } from '../../shared/meta'
 import { compareSeasonNames, parseSeasonName, type SeasonName } from '../../shared/season'
 import type { FileEntry, LeagueNode, LeaguesTree, SeasonNode } from '../../shared/tree'
-import { WEEKDAYS, type Weekday } from '../../shared/weekday'
+import { isWeekday, WEEKDAYS, type Weekday } from '../../shared/weekday'
 
 export type { FileEntry, LeagueNode, LeaguesTree, SeasonNode }
 
@@ -37,11 +37,17 @@ function sortSeasonNames(names: string[]): string[] {
   })
 }
 
-async function readExistingMeta(path: string): Promise<unknown> {
+interface ExistingMeta {
+  raw: string | null
+  input: LeagueMetaInput | null
+}
+
+async function readExistingMeta(path: string): Promise<ExistingMeta> {
   try {
-    return JSON.parse(await readFile(path, 'utf8'))
+    const raw = await readFile(path, 'utf8')
+    return { raw, input: parseLeagueMetaInput(JSON.parse(raw)) }
   } catch {
-    return null
+    return { raw: null, input: null }
   }
 }
 
@@ -73,7 +79,7 @@ async function scanLeague(
 
   const metaPath = join(leagueDir.path, META_FILE)
   const existing = await readExistingMeta(metaPath)
-  const meta = healMeta(existing, {
+  const meta = healMeta(existing.input, {
     folderName: leagueDir.name,
     day,
     liveSeasons: seasonFolders.map((s) => s.season),
@@ -81,9 +87,9 @@ async function scanLeague(
   })
 
   if (heal) {
-    const serialised = JSON.stringify(meta, null, 2)
-    if (serialised !== JSON.stringify(existing, null, 2)) {
-      await writeFile(metaPath, serialised + '\n', 'utf8')
+    const serialised = JSON.stringify(meta, null, 2) + '\n'
+    if (serialised !== existing.raw) {
+      await writeFile(metaPath, serialised, 'utf8')
     }
   }
 
@@ -121,6 +127,7 @@ export async function scanLeaguesRoot(
   const heal = opts.heal ?? false
   const rootEntries = await listEntries(root)
 
+  // SAFETY: fromEntries over the full WEEKDAYS tuple yields exactly one entry per Weekday key.
   const days = Object.fromEntries(WEEKDAYS.map((d) => [d, [] as LeagueNode[]])) as Record<
     Weekday,
     LeagueNode[]
@@ -129,8 +136,8 @@ export async function scanLeaguesRoot(
 
   for (const entry of rootEntries) {
     if (entry.name.startsWith('_')) continue
-    const day = entry.name as Weekday
-    if (entry.kind === 'folder' && WEEKDAYS.includes(day)) {
+    if (entry.kind === 'folder' && isWeekday(entry.name)) {
+      const day = entry.name
       const leagueDirs = (await listEntries(entry.path)).filter((e) => e.kind === 'folder')
       days[day] = await Promise.all(leagueDirs.map((dir) => scanLeague(day, dir, root, heal)))
     } else {

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { sanitiseFolderName } from '@shared/sanitise'
-import { WEEKDAYS, type Weekday } from '@shared/weekday'
+import { isWeekday, WEEKDAYS, type Weekday } from '@shared/weekday'
 
 interface Props {
   onClose: () => void
@@ -41,7 +41,7 @@ function NewLeagueModal({ onClose, onCreated }: Props): React.JSX.Element {
         <h2>New league</h2>
         <label>
           League night
-          <select value={day} onChange={(e) => setDay(e.target.value as Weekday)}>
+          <select value={day} onChange={(e) => isWeekday(e.target.value) && setDay(e.target.value)}>
             {WEEKDAYS.map((d) => (
               <option key={d} value={d}>
                 {title(d)}

@@ -8,6 +8,17 @@ const TYPES: { value: SeasonType; label: string; example: string }[] = [
   { value: 'quarter', label: 'Quarter', example: '2026-Q1' }
 ]
 
+const SOURCES = ['templates', 'previous', 'empty'] as const
+type Source = (typeof SOURCES)[number]
+
+function isSeasonType(value: string): value is SeasonType {
+  return TYPES.some((t) => t.value === value)
+}
+
+function isSource(value: string): value is Source {
+  return SOURCES.some((s) => s === value)
+}
+
 interface Props {
   league: LeagueNode
   onClose: () => void
@@ -22,9 +33,7 @@ function NewSeasonModal({ league, onClose, onCreated }: Props): React.JSX.Elemen
 
   const [type, setType] = useState<SeasonType>(current?.type ?? 'cross-year')
   const [name, setName] = useState(() => suggestSeasonName(type, current, new Date()))
-  const [source, setSource] = useState<'templates' | 'previous' | 'empty'>(
-    league.running ? 'previous' : 'templates'
-  )
+  const [source, setSource] = useState<Source>(league.running ? 'previous' : 'templates')
   const [archiveOldest, setArchiveOldest] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -69,7 +78,10 @@ function NewSeasonModal({ league, onClose, onCreated }: Props): React.JSX.Elemen
 
         <label>
           Season type
-          <select value={type} onChange={(e) => changeType(e.target.value as SeasonType)}>
+          <select
+            value={type}
+            onChange={(e) => isSeasonType(e.target.value) && changeType(e.target.value)}
+          >
             {TYPES.map((t) => (
               <option key={t.value} value={t.value}>
                 {t.label} (e.g. {t.example})
@@ -87,7 +99,7 @@ function NewSeasonModal({ league, onClose, onCreated }: Props): React.JSX.Elemen
           Starting documents
           <select
             value={source}
-            onChange={(e) => setSource(e.target.value as 'templates' | 'previous' | 'empty')}
+            onChange={(e) => isSource(e.target.value) && setSource(e.target.value)}
           >
             <option value="templates">Copy from templates</option>
             <option value="previous" disabled={!league.running}>

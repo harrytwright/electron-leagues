@@ -163,7 +163,7 @@ describe('createSeason', () => {
     })
     const meta = JSON.parse(await readFile(join(root, 'monday/Mens Triples/meta.json'), 'utf8'))
     expect(meta.seasons[0].name).toBe('2025-26')
-    expect(typeof meta.seasons[0].createdAt).toBe('string')
+    expect(meta.seasons[0].createdAt).toEqual(expect.any(String))
   })
 
   test('rejects an invalid season name', async () => {

@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { compareSeasonNames, type SeasonName, type SeasonType } from './season'
 import type { Weekday } from './weekday'
 
@@ -16,7 +17,55 @@ export interface LeagueMeta {
   day: Weekday
   seasons: SeasonMeta[]
   archivedSeasons: string[]
-  extra: Record<string, unknown>
+  extra: Record<string, JsonValue>
+}
+
+export type JsonValue =
+  string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
+
+const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(jsonValueSchema),
+    z.record(z.string(), jsonValueSchema)
+  ])
+)
+
+const seasonInputSchema = z.object({
+  name: z.string(),
+  createdAt: z.string().optional()
+})
+
+/**
+ * The fields of a prior meta.json this app trusts. Parsing is tolerant:
+ * unusable fields fall back to their empty value instead of failing the file.
+ */
+const leagueMetaInputSchema = z.object({
+  name: z.string().catch(''),
+  seasons: z
+    .array(jsonValueSchema)
+    .catch([])
+    .transform((items) =>
+      items.flatMap((item) => {
+        const season = seasonInputSchema.safeParse(item)
+        return season.success ? [season.data] : []
+      })
+    ),
+  extra: z.record(z.string(), jsonValueSchema).catch({})
+})
+
+export type LeagueMetaInput = z.infer<typeof leagueMetaInputSchema>
+
+/**
+ * Parse whatever a meta.json contained into the fields healMeta trusts.
+ * Anything that is not an object yields null (treated as no prior meta).
+ */
+export function parseLeagueMetaInput(raw: JsonValue | undefined): LeagueMetaInput | null {
+  const result = leagueMetaInputSchema.safeParse(raw)
+  return result.success ? result.data : null
 }
 
 export interface ScanFacts {
@@ -26,36 +75,28 @@ export interface ScanFacts {
   archivedSeasons: string[]
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
 /**
- * Reconcile whatever is on disk in meta.json with what a scan of the folder
- * tree actually found. Scan-derived truth always wins for seasons/archives;
+ * Reconcile a parsed prior meta.json with what a scan of the folder tree
+ * actually found. Scan-derived truth always wins for seasons/archives;
  * user-facing fields (display name, extra, per-season createdAt) survive.
  */
-export function healMeta(existing: unknown, scan: ScanFacts): LeagueMeta {
-  const prior = isRecord(existing) ? existing : {}
-  const priorSeasons = Array.isArray(prior.seasons)
-    ? prior.seasons.filter(isRecord).filter((s) => typeof s.name === 'string')
-    : []
-
+export function healMeta(prior: LeagueMetaInput | null, scan: ScanFacts): LeagueMeta {
   const sorted = [...scan.liveSeasons].sort(compareSeasonNames)
   const seasons: SeasonMeta[] = sorted.map((season, index) => {
     const status: SeasonStatus =
       index === sorted.length - 1 ? 'active' : index === sorted.length - 2 ? 'previous' : 'live'
-    const priorSeason = priorSeasons.find((s) => s.name === season.name)
-    const createdAt = typeof priorSeason?.createdAt === 'string' ? priorSeason.createdAt : undefined
-    return { name: season.name, type: season.type, status, ...(createdAt ? { createdAt } : {}) }
+    const entry: SeasonMeta = { name: season.name, type: season.type, status }
+    const createdAt = prior?.seasons.find((s) => s.name === season.name)?.createdAt
+    if (createdAt) entry.createdAt = createdAt
+    return entry
   })
 
   return {
     schemaVersion: 1,
-    name: typeof prior.name === 'string' && prior.name.trim() ? prior.name : scan.folderName,
+    name: prior?.name.trim() ? prior.name : scan.folderName,
     day: scan.day,
     seasons,
     archivedSeasons: [...scan.archivedSeasons],
-    extra: isRecord(prior.extra) ? prior.extra : {}
+    extra: prior?.extra ?? {}
   }
 }

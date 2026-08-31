@@ -12,7 +12,7 @@ import {
   writeFile
 } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
-import { healMeta } from '../../shared/meta'
+import { healMeta, parseLeagueMetaInput } from '../../shared/meta'
 import { compareSeasonNames, parseSeasonName, type SeasonName } from '../../shared/season'
 import { sanitiseFolderName } from '../../shared/sanitise'
 import type { Weekday } from '../../shared/weekday'
@@ -62,10 +62,12 @@ export async function createLeague(
   if (await exists(path)) throw new Error(`A league folder named "${folderName}" already exists`)
 
   await mkdir(path, { recursive: true })
-  const meta = healMeta(
-    { name: displayName.trim() },
-    { folderName, day, liveSeasons: [], archivedSeasons: [] }
-  )
+  const meta = healMeta(parseLeagueMetaInput({ name: displayName.trim() }), {
+    folderName,
+    day,
+    liveSeasons: [],
+    archivedSeasons: []
+  })
   await writeFile(join(path, 'meta.json'), JSON.stringify(meta, null, 2) + '\n', 'utf8')
   return path
 }
@@ -146,7 +148,7 @@ export async function createSeason(opts: CreateSeasonOptions): Promise<CreateSea
 
   const metaPath = join(leaguePath, 'meta.json')
   const existing = await readFile(metaPath, 'utf8')
-    .then((raw) => JSON.parse(raw) as unknown)
+    .then((raw) => parseLeagueMetaInput(JSON.parse(raw)))
     .catch(() => null)
   const meta = healMeta(existing, {
     folderName: opts.leagueFolder,

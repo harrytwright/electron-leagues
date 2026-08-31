@@ -11,5 +11,5 @@ export const WEEKDAYS = [
 export type Weekday = (typeof WEEKDAYS)[number]
 
 export function isWeekday(value: string): value is Weekday {
-  return (WEEKDAYS as readonly string[]).includes(value)
+  return WEEKDAYS.some((day) => day === value)
 }
