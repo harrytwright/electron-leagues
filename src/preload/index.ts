@@ -12,6 +12,8 @@ export interface SeasonCreateRequest {
 }
 
 const api = {
+  getAnalyticsConfig: (): Promise<{ apiKey: string | null; distinctId: string }> =>
+    ipcRenderer.invoke('analytics:config'),
   getRoot: (): Promise<string | null> => ipcRenderer.invoke('root:get'),
   chooseRoot: (mode: 'select' | 'init'): Promise<string | null> =>
     ipcRenderer.invoke('root:choose', mode),

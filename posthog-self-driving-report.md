@@ -132,10 +132,10 @@ Credit spend sizing: the `creating-replay-vision-scanners` skill was not availab
 
 ## Follow-ups
 
-- [ ] **Add `posthog-js` to the Electron renderer** to activate Session Replay and Error Tracking. The renderer currently has no PostHog SDK; `posthog-node` in the main process captures product events only. Once `posthog-js` is initialised in the renderer, check that `disable_session_recording` and `capture_exceptions` are not overridden to `false` in the `init` call.
-- [ ] **Connect a Support inbound channel** (email / inbox / Slack) in PostHog so Conversations tickets start flowing. [Support settings](https://eu.posthog.com/project/262555/settings/environment-integrations)
-- [ ] **Connect GitHub Issues warehouse source** for `harrytwright/electron-leagues`. [New source](https://eu.posthog.com/project/262555/pipeline/new/source)
-- [ ] **Connect Sentry credentials** at [https://eu.posthog.com/project/262555/data-warehouse/connect?kind=Sentry](https://eu.posthog.com/project/262555/data-warehouse/connect?kind=Sentry) — then the Sentry responder will start syncing issues automatically.
+- [x] **Add `posthog-js` to the Electron renderer** — done (2026-08-31). `posthog-js` is initialised in `src/renderer/src/lib/analytics.ts` with the recorder and exception-autocapture bundles imported locally (no remote code loading), `capture_exceptions: true`, session recording left enabled, `bootstrap.distinctID` matching the main-process machine id, and the CSP extended with `connect-src https://eu.i.posthog.com`.
+- [ ] **Connect a Support inbound channel** (email / inbox / Slack) in PostHog so Conversations tickets start flowing. [Support settings](https://eu.posthog.com/project/262555/settings/environment-integrations) — _attempted via MCP on 2026-08-31; blocked: API key lacks the `task:write` scope required by `channel-create`._
+- [ ] **Connect GitHub Issues warehouse source** for `harrytwright/electron-leagues`. [New source](https://eu.posthog.com/project/262555/pipeline/new/source) — _attempted via MCP on 2026-08-31; blocked: API key lacks `external_data_source:read/write` scopes._
+- [ ] **Connect Sentry credentials** at [https://eu.posthog.com/project/262555/data-warehouse/connect?kind=Sentry](https://eu.posthog.com/project/262555/data-warehouse/connect?kind=Sentry) — then the Sentry responder will start syncing issues automatically. _Requires you to enter credentials — cannot be done by the agent._
 
 ---
 
