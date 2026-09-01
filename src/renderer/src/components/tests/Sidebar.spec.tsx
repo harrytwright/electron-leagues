@@ -2,7 +2,8 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Sidebar as KumoSidebar } from '@cloudflare/kumo'
 import { expect, it, vi, type Mock } from 'vitest'
-import Sidebar, { type Selection } from '../Sidebar'
+import Sidebar from '../Sidebar'
+import { HOME, type Selection } from '../../lib/selection'
 import { makeLeague, makeTree } from '../../tests/fixtures'
 import { installMockApi } from '../../tests/mock-api'
 import { renderWithProviders } from '../../tests/render-helpers'
@@ -17,11 +18,9 @@ interface SidebarHarness {
   onSelect: Mock<(next: Selection) => void>
 }
 
-const SHARED_SELECTION: Selection = { kind: 'shared' }
-
 function renderSidebar(options: RenderSidebarOptions = {}): SidebarHarness {
   const tree = options.tree ?? makeTree()
-  const selection = options.selection ?? SHARED_SELECTION
+  const selection = options.selection ?? HOME
   const onChanged = vi.fn<() => void>()
   const onSelect = vi.fn<(next: Selection) => void>()
 
@@ -109,7 +108,7 @@ it('selects shared documents', async () => {
 
   await user.click(screen.getByRole('button', { name: 'Shared documents' }))
 
-  expect(onSelect).toHaveBeenCalledWith({ kind: 'shared' })
+  expect(onSelect).toHaveBeenCalledWith({ kind: 'home' })
 })
 
 it('shows “Not running” on stopped leagues', () => {

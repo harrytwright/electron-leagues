@@ -4,8 +4,10 @@ import { Button, Loader, Sidebar as KumoSidebar, Text, ToastProvider } from '@cl
 import FirstRun from './components/FirstRun'
 import LeagueView from './components/LeagueView'
 import SharedView from './components/SharedView'
-import Sidebar, { type Selection } from './components/Sidebar'
+import Sidebar from './components/Sidebar'
 import { ipcErrorMessage } from './lib/ipc-error'
+import { loadSelection, saveSelection } from './lib/local-store'
+import { findLeague, HOME, restoreSelection, type Selection } from './lib/selection'
 
 type Phase = 'loading' | 'no-root' | 'ready' | 'error'
 
@@ -57,11 +59,13 @@ function AppContent(): React.JSX.Element {
   const [phase, setPhase] = useState<Phase>('loading')
   const [tree, setTree] = useState<LeaguesTree | null>(null)
   const [scanError, setScanError] = useState<string | null>(null)
-  const [selection, setSelection] = useState<Selection>({ kind: 'shared' })
+  const [selection, setSelection] = useState<Selection>(HOME)
 
   // Concurrent refreshes (watcher + retry click) settle in any order; only the
   // most recently started one may write state.
   const scanGeneration = useRef(0)
+  // The location whose remembered selection has already been restored.
+  const restoredRoot = useRef<string | null>(null)
 
   const refresh = useCallback(async () => {
     const ticket = (scanGeneration.current += 1)
@@ -71,6 +75,13 @@ function AppContent(): React.JSX.Element {
       if (scanned) {
         setTree(scanned)
         setPhase('ready')
+        if (restoredRoot.current !== scanned.root) {
+          restoredRoot.current = scanned.root
+          setSelection(restoreSelection(scanned, loadSelection(scanned.root)))
+        } else {
+          // A league deleted or renamed on disk must not strand the selection.
+          setSelection((current) => restoreSelection(scanned, current))
+        }
       } else {
         setTree(null)
         setPhase('no-root')
@@ -86,9 +97,17 @@ function AppContent(): React.JSX.Element {
 
   const forgetAndRestart = useCallback(async () => {
     await window.api.forgetRoot()
+    restoredRoot.current = null
     setScanError(null)
     setTree(null)
     setPhase('no-root')
+  }, [])
+
+  // Remembered per location, but only what the user chose: a league that is
+  // merely missing from one scan (sync lag, mid-rename) must not erase it.
+  const select = useCallback((next: Selection) => {
+    setSelection(next)
+    if (restoredRoot.current) saveSelection(restoredRoot.current, next)
   }, [])
 
   useEffect(() => {
@@ -115,11 +134,10 @@ function AppContent(): React.JSX.Element {
     return <FirstRun onChosen={() => void refresh()} />
   }
 
-  const selectedLeague =
-    selection.kind === 'league'
-      ? (tree.days[selection.day].find((l) => l.folderName === selection.folderName) ?? null)
-      : null
+  const selectedLeague = findLeague(tree, selection)
 
+  // Keyed on the location / league so each view's local state starts fresh
+  // when they change.
   return (
     <KumoSidebar.Provider
       defaultOpen
@@ -127,12 +145,22 @@ function AppContent(): React.JSX.Element {
       resizable={false}
       className="flex h-full min-h-0"
     >
-      <Sidebar tree={tree} selection={selection} onSelect={setSelection} onChanged={refresh} />
+      <Sidebar
+        key={tree.root}
+        tree={tree}
+        selection={selection}
+        onSelect={select}
+        onChanged={refresh}
+      />
       <main className="h-full min-w-0 flex-1 overflow-auto">
-        {selection.kind === 'shared' || !selectedLeague ? (
-          <SharedView tree={tree} />
+        {selectedLeague ? (
+          <LeagueView
+            key={selectedLeague.path}
+            league={selectedLeague}
+            onChanged={() => void refresh()}
+          />
         ) : (
-          <LeagueView league={selectedLeague} onChanged={() => void refresh()} />
+          <SharedView tree={tree} />
         )}
       </main>
     </KumoSidebar.Provider>

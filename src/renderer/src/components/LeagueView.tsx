@@ -59,14 +59,7 @@ function LeagueView({ league, onChanged }: Props): React.JSX.Element {
   const [newSeason, setNewSeason] = useState(false)
   const [selectedArchives, setSelectedArchives] = useState<string[]>([])
   const [zipping, setZipping] = useState(false)
-  const [lastLeague, setLastLeague] = useState(league.folderName)
   const { add } = useKumoToastManager()
-
-  // Selection belongs to one league — drop it when the view switches leagues.
-  if (lastLeague !== league.folderName) {
-    setLastLeague(league.folderName)
-    setSelectedArchives([])
-  }
 
   // The tree can change under us (watcher rescans); only names that still
   // exist are actionable, for both the button label and the IPC call.

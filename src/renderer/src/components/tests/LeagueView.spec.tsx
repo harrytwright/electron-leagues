@@ -178,27 +178,6 @@ it('LeagueView sections match snapshot', () => {
   expect(normalised).toMatchSnapshot()
 })
 
-it('drops the archive selection when the view switches leagues', async () => {
-  installMockApi()
-  const user = userEvent.setup()
-  const view = renderWithProviders(
-    <LeagueView league={leagueWithArchives(['2024-25'])} onChanged={vi.fn()} />
-  )
-
-  await user.click(screen.getByRole('checkbox', { name: '2024-25' }))
-  expect(screen.getByRole('button', { name: 'Zip 1 selected' })).toBeInTheDocument()
-
-  view.rerender(
-    <LeagueView
-      league={{ ...leagueWithArchives(['2024-25']), folderName: 'Another league' }}
-      onChanged={vi.fn()}
-    />
-  )
-
-  expect(screen.queryByRole('button', { name: /zip \d+ selected/i })).not.toBeInTheDocument()
-  expect(screen.getByRole('checkbox', { name: '2024-25' })).not.toBeChecked()
-})
-
 it('only offers to zip archives that still exist after a rescan', async () => {
   installMockApi()
   const user = userEvent.setup()

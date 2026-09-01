@@ -2,10 +2,9 @@ import { useState } from 'react'
 import { Button, Sidebar as KumoSidebar, Text } from '@cloudflare/kumo'
 import { FilesIcon, FolderOpenIcon, FolderPlusIcon, UsersThreeIcon } from '@phosphor-icons/react'
 import type { LeaguesTree } from '@shared/tree'
-import { WEEKDAYS, type Weekday } from '@shared/weekday'
+import { WEEKDAYS } from '@shared/weekday'
+import { HOME, type Selection } from '../lib/selection'
 import NewLeagueDialog from './NewLeagueDialog'
-
-export type Selection = { kind: 'shared' } | { kind: 'league'; day: Weekday; folderName: string }
 
 function title(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1)
@@ -30,9 +29,9 @@ function Sidebar({ tree, selection, onSelect, onChanged }: Props): React.JSX.Ele
             <KumoSidebar.MenuButton
               icon={FilesIcon}
               tooltip="Shared documents"
-              active={selection.kind === 'shared'}
-              aria-current={selection.kind === 'shared' ? 'true' : undefined}
-              onClick={() => onSelect({ kind: 'shared' })}
+              active={selection.kind === 'home'}
+              aria-current={selection.kind === 'home' ? 'true' : undefined}
+              onClick={() => onSelect(HOME)}
             >
               Shared documents
             </KumoSidebar.MenuButton>
