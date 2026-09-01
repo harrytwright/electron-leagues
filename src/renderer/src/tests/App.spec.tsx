@@ -129,10 +129,7 @@ it('falls back to home when the remembered league is not where it was, keeping t
   render(<App />)
 
   expect(await screen.findByRole('heading', { name: 'Shared documents' })).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Shared documents' })).toHaveAttribute(
-    'aria-current',
-    'true'
-  )
+  expect(screen.getByRole('button', { name: 'Home' })).toHaveAttribute('aria-current', 'true')
   expect(localStorage.getItem('leagues:/root:selection')).toBe(stored)
 })
 
@@ -163,15 +160,13 @@ it('drops the selection to home when the selected league disappears from a resca
   act(() => emitTreeChanged())
 
   expect(await screen.findByRole('heading', { name: 'Shared documents' })).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Shared documents' })).toHaveAttribute(
-    'aria-current',
-    'true'
-  )
+  expect(screen.getByRole('button', { name: 'Home' })).toHaveAttribute('aria-current', 'true')
 })
 
 it('switching location restores that location’s memory without touching the other’s', async () => {
   const storedA = remember('/a', 'monday', 'Pairs')
   remember('/b', 'monday', 'Trios')
+  localStorage.setItem('leagues:/a:collapsed-days', JSON.stringify(['monday']))
   const scan = vi
     .fn()
     .mockResolvedValueOnce(treeWithMondayLeagues('/a', 'Pairs'))
@@ -180,10 +175,12 @@ it('switching location restores that location’s memory without touching the ot
 
   render(<App />)
   expect(await screen.findByRole('heading', { name: 'Pairs' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Monday' })).toHaveAttribute('aria-expanded', 'false')
 
   act(() => emitTreeChanged())
 
   expect(await screen.findByRole('heading', { name: 'Trios' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Monday' })).toHaveAttribute('aria-expanded', 'true')
   expect(localStorage.getItem('leagues:/a:selection')).toBe(storedA)
 })
 

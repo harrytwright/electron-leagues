@@ -1,125 +1,146 @@
 import { useState } from 'react'
-import { Button, Sidebar as KumoSidebar, Text } from '@cloudflare/kumo'
-import { FilesIcon, FolderOpenIcon, FolderPlusIcon, UsersThreeIcon } from '@phosphor-icons/react'
+import { Sidebar as KumoSidebar, Text, useSidebar } from '@cloudflare/kumo'
+import { CalendarBlankIcon, HouseIcon } from '@phosphor-icons/react'
 import type { LeaguesTree } from '@shared/tree'
-import { WEEKDAYS } from '@shared/weekday'
+import { WEEKDAYS, type Weekday } from '@shared/weekday'
+import { loadCollapsedDays, saveCollapsedDays } from '../lib/local-store'
 import { HOME, type Selection } from '../lib/selection'
-import NewLeagueDialog from './NewLeagueDialog'
-
-function title(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1)
-}
+import { sentenceCase } from '../lib/sentence-case'
+import LocationSwitcher from './LocationSwitcher'
 
 interface Props {
   tree: LeaguesTree
   selection: Selection
   onSelect: (selection: Selection) => void
-  /** May be async — creation waits for the rescan before selecting the new league. */
+  /** The location or its contents changed; the caller rescans. */
   onChanged: () => void | Promise<void>
 }
 
+function toggled(days: ReadonlySet<Weekday>, day: Weekday): Set<Weekday> {
+  const next = new Set(days)
+  if (next.has(day)) next.delete(day)
+  else next.add(day)
+  return next
+}
+
 function Sidebar({ tree, selection, onSelect, onChanged }: Props): React.JSX.Element {
-  const [creating, setCreating] = useState(false)
+  const { state, setOpen } = useSidebar()
+  // Remembered per location; App remounts this component when the location
+  // changes, so the initialiser reads the right one.
+  const [collapsedDays, setCollapsedDays] = useState(
+    () => new Set<Weekday>(loadCollapsedDays(tree.root))
+  )
+  const daysWithLeagues = WEEKDAYS.filter((day) => tree.days[day].length > 0)
+  const rail = state === 'collapsed'
 
   return (
     <KumoSidebar role="navigation" aria-label="Leagues" className="select-none">
+      <KumoSidebar.Header className="px-2">
+        <LocationSwitcher root={tree.root} onChanged={onChanged} />
+      </KumoSidebar.Header>
+
       <KumoSidebar.Content>
         <KumoSidebar.Group>
           <KumoSidebar.Menu>
             <KumoSidebar.MenuButton
-              icon={FilesIcon}
-              tooltip="Shared documents"
+              icon={HouseIcon}
+              tooltip="Home"
               active={selection.kind === 'home'}
               aria-current={selection.kind === 'home' ? 'true' : undefined}
               onClick={() => onSelect(HOME)}
             >
-              Shared documents
+              Home
             </KumoSidebar.MenuButton>
           </KumoSidebar.Menu>
         </KumoSidebar.Group>
 
-        {WEEKDAYS.map((day) => {
-          const leagues = tree.days[day]
-          if (leagues.length === 0) return null
-
-          return (
-            <KumoSidebar.Group key={day}>
-              <KumoSidebar.GroupLabel>{title(day)}</KumoSidebar.GroupLabel>
-              <KumoSidebar.Menu>
-                {leagues.map((league) => {
-                  const active =
-                    selection.kind === 'league' &&
-                    selection.day === day &&
-                    selection.folderName === league.folderName
-
-                  return (
-                    <KumoSidebar.MenuButton
-                      key={league.folderName}
-                      icon={UsersThreeIcon}
-                      tooltip={league.meta.name}
-                      active={active}
-                      aria-current={active ? 'true' : undefined}
-                      aria-label={league.running ? undefined : `${league.meta.name}, not running`}
-                      onClick={() =>
-                        onSelect({ kind: 'league', day, folderName: league.folderName })
+        <KumoSidebar.Group>
+          <KumoSidebar.GroupLabel>Leagues</KumoSidebar.GroupLabel>
+          {daysWithLeagues.length === 0 ? (
+            <div className="px-2 py-1">
+              <Text variant="secondary" size="sm">
+                No leagues yet — create one from Home.
+              </Text>
+            </div>
+          ) : (
+            <KumoSidebar.Menu>
+              {daysWithLeagues.map((day) => (
+                <KumoSidebar.MenuItem key={day}>
+                  {/* Kumo also toggles on focus traversal; only a click is a
+                      choice worth remembering. In the icon rail the day can't
+                      expand, so a click expands the sidebar instead. */}
+                  <KumoSidebar.Collapsible
+                    open={!collapsedDays.has(day)}
+                    onOpenChange={(open) => {
+                      if (rail) return
+                      setCollapsedDays((current) => {
+                        const next = new Set(current)
+                        if (open) next.delete(day)
+                        else next.add(day)
+                        return next
+                      })
+                    }}
+                  >
+                    <KumoSidebar.CollapsibleTrigger
+                      render={
+                        <KumoSidebar.MenuButton
+                          icon={CalendarBlankIcon}
+                          tooltip={sentenceCase(day)}
+                          onClick={() => {
+                            if (rail) setOpen(true)
+                            else saveCollapsedDays(tree.root, [...toggled(collapsedDays, day)])
+                          }}
+                        >
+                          {sentenceCase(day)}
+                          <KumoSidebar.MenuChevron />
+                        </KumoSidebar.MenuButton>
                       }
-                    >
-                      <span className="grid min-w-0 flex-1 gap-0.5">
-                        <Text as="span" truncate>
-                          {league.meta.name}
-                        </Text>
-                        {!league.running ? (
-                          <Text as="span" size="sm" variant="secondary" aria-hidden="true">
-                            Not running
-                          </Text>
-                        ) : null}
-                      </span>
-                    </KumoSidebar.MenuButton>
-                  )
-                })}
-              </KumoSidebar.Menu>
-            </KumoSidebar.Group>
-          )
-        })}
+                    />
+                    <KumoSidebar.CollapsibleContent>
+                      <KumoSidebar.MenuSub>
+                        {tree.days[day].map((league) => {
+                          const active =
+                            selection.kind === 'league' &&
+                            selection.day === day &&
+                            selection.folderName === league.folderName
+                          return (
+                            <KumoSidebar.MenuSubButton
+                              key={league.folderName}
+                              active={active}
+                              aria-current={active ? 'true' : undefined}
+                              aria-label={
+                                league.running ? undefined : `${league.meta.name}, not running`
+                              }
+                              onClick={() =>
+                                onSelect({ kind: 'league', day, folderName: league.folderName })
+                              }
+                            >
+                              <span className="grid min-w-0 flex-1 gap-0.5">
+                                <Text as="span" truncate>
+                                  {league.meta.name}
+                                </Text>
+                                {!league.running ? (
+                                  <Text as="span" size="sm" variant="secondary" aria-hidden="true">
+                                    Not running
+                                  </Text>
+                                ) : null}
+                              </span>
+                            </KumoSidebar.MenuSubButton>
+                          )
+                        })}
+                      </KumoSidebar.MenuSub>
+                    </KumoSidebar.CollapsibleContent>
+                  </KumoSidebar.Collapsible>
+                </KumoSidebar.MenuItem>
+              ))}
+            </KumoSidebar.Menu>
+          )}
+        </KumoSidebar.Group>
       </KumoSidebar.Content>
 
-      <KumoSidebar.Footer className="h-auto flex-col items-stretch gap-2 p-3">
-        <Button
-          aria-label="New league"
-          className="w-full justify-start overflow-hidden group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0"
-          icon={<FolderPlusIcon aria-hidden />}
-          variant="primary"
-          onClick={() => setCreating(true)}
-        >
-          <span className="truncate group-data-[state=collapsed]/sidebar:hidden">New league…</span>
-        </Button>
-        <Button
-          aria-label="Show leagues folder"
-          className="w-full justify-start overflow-hidden group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0"
-          icon={<FolderOpenIcon aria-hidden />}
-          variant="ghost"
-          onClick={() => void window.api.revealFile(tree.root)}
-        >
-          <span className="truncate group-data-[state=collapsed]/sidebar:hidden">
-            Show leagues folder
-          </span>
-        </Button>
-        <KumoSidebar.Trigger className="self-start group-data-[state=collapsed]/sidebar:self-center" />
+      <KumoSidebar.Footer>
+        <KumoSidebar.Trigger />
       </KumoSidebar.Footer>
-
-      <NewLeagueDialog
-        open={creating}
-        onOpenChange={setCreating}
-        onCreated={(day, folderName) => {
-          setCreating(false)
-          // Wait for the rescan so the new league exists in the tree before it
-          // becomes the selection — selecting early flashes the shared view.
-          void (async () => {
-            await onChanged()
-            onSelect({ kind: 'league', day, folderName })
-          })()
-        }}
-      />
     </KumoSidebar>
   )
 }
