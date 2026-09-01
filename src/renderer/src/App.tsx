@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LeaguesTree } from '@shared/tree'
 import { Button, Loader, Sidebar as KumoSidebar, Text, ToastProvider } from '@cloudflare/kumo'
 import FirstRun from './components/FirstRun'
+import HomeView from './components/HomeView'
 import LeagueView from './components/LeagueView'
-import SharedView from './components/SharedView'
 import Sidebar from './components/Sidebar'
 import { ipcErrorMessage } from './lib/ipc-error'
 import { loadSelection, saveSelection } from './lib/local-store'
@@ -117,6 +117,23 @@ function AppContent(): React.JSX.Element {
     return window.api.onTreeChanged(() => void refresh())
   }, [refresh])
 
+  useEffect(() => {
+    // A file dropped anywhere but a drop target would otherwise navigate the
+    // whole window to it. Drop targets handle their own events first; here we
+    // only refuse what nothing else accepted.
+    const refuse = (event: DragEvent): void => {
+      if (event.defaultPrevented) return
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'none'
+      event.preventDefault()
+    }
+    document.addEventListener('dragover', refuse)
+    document.addEventListener('drop', refuse)
+    return () => {
+      document.removeEventListener('dragover', refuse)
+      document.removeEventListener('drop', refuse)
+    }
+  }, [])
+
   if (phase === 'loading') {
     return (
       <div role="status" className="flex h-full items-center justify-center gap-2 bg-kumo-base">
@@ -154,13 +171,9 @@ function AppContent(): React.JSX.Element {
       />
       <main className="h-full min-w-0 flex-1 overflow-auto">
         {selectedLeague ? (
-          <LeagueView
-            key={selectedLeague.path}
-            league={selectedLeague}
-            onChanged={() => void refresh()}
-          />
+          <LeagueView key={selectedLeague.path} league={selectedLeague} onChanged={refresh} />
         ) : (
-          <SharedView tree={tree} />
+          <HomeView tree={tree} onSelect={select} onChanged={refresh} />
         )}
       </main>
     </KumoSidebar.Provider>
