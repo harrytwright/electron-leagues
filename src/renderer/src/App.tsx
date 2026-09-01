@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { LeaguesTree } from '@shared/tree'
+import { Loader, Text, ToastProvider } from '@cloudflare/kumo'
 import FirstRun from './components/FirstRun'
 import LeagueView from './components/LeagueView'
 import SharedView from './components/SharedView'
@@ -7,7 +8,7 @@ import Sidebar, { type Selection } from './components/Sidebar'
 
 type Phase = 'loading' | 'no-root' | 'ready'
 
-function App(): React.JSX.Element {
+function AppContent(): React.JSX.Element {
   const [phase, setPhase] = useState<Phase>('loading')
   const [tree, setTree] = useState<LeaguesTree | null>(null)
   const [selection, setSelection] = useState<Selection>({ kind: 'shared' })
@@ -30,7 +31,14 @@ function App(): React.JSX.Element {
     return window.api.onTreeChanged(() => void refresh())
   }, [refresh])
 
-  if (phase === 'loading') return <div className="first-run">Loading…</div>
+  if (phase === 'loading') {
+    return (
+      <div role="status" className="flex h-full items-center justify-center gap-2 bg-kumo-base">
+        <Loader />
+        <Text>Loading…</Text>
+      </div>
+    )
+  }
 
   if (phase === 'no-root' || !tree) {
     return <FirstRun onChosen={() => void refresh()} />
@@ -57,6 +65,14 @@ function App(): React.JSX.Element {
         )}
       </main>
     </div>
+  )
+}
+
+function App(): React.JSX.Element {
+  return (
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
   )
 }
 

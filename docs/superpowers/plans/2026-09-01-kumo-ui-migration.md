@@ -728,6 +728,10 @@ season to start it").
 
 **Interfaces:** consumes everything; produces the finished branch.
 
+- [ ] **Step 0: Scan-failure phase** — cold review of Task 3 flagged that a rejected
+  `window.api.scan()` leaves the app on the loading spinner forever (no error phase in
+  `Phase`). Add a minimal failure state (error text + retry button, error toast) with a test.
+
 - [ ] **Step 1: Sweep the findings table** — walk all 20 spec findings against the code;
   for each, note file:line proof it's closed. Specifically verify the ones delegated to Kumo:
   focus-visible rings on buttons/menu items, hover feedback on ghost + primary buttons,
