@@ -38,6 +38,11 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
       distinctId: 'test'
     }),
     getRoot: vi.fn<RendererApi['getRoot']>().mockResolvedValue(null),
+    // Echo the path back, like the real handler does for a folder that exists.
+    setRoot: vi.fn<RendererApi['setRoot']>((path) => Promise.resolve(path)),
+    recentRoots: vi.fn<RendererApi['recentRoots']>().mockResolvedValue([]),
+    listDir: vi.fn<RendererApi['listDir']>().mockResolvedValue([]),
+    trashFolder: vi.fn<RendererApi['trashFolder']>().mockResolvedValue(undefined),
     pickFiles: vi.fn<RendererApi['pickFiles']>().mockResolvedValue([]),
     ...overrides
   }

@@ -1,6 +1,6 @@
 import { electronAPI } from '@electron-toolkit/preload'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { LeaguesTree } from '../shared/tree'
+import type { DirEntry, LeaguesTree } from '../shared/tree'
 import type { Weekday } from '../shared/weekday'
 
 export interface SeasonCreateRequest {
@@ -18,7 +18,13 @@ const api = {
   chooseRoot: (mode: 'select' | 'init'): Promise<string | null> =>
     ipcRenderer.invoke('root:choose', mode),
   forgetRoot: (): Promise<void> => ipcRenderer.invoke('root:forget'),
+  /** Switch to a known location; null when it can't be used (missing or unreadable). */
+  setRoot: (path: string): Promise<string | null> => ipcRenderer.invoke('root:set', path),
+  recentRoots: (): Promise<string[]> => ipcRenderer.invoke('root:recents'),
   scan: (): Promise<LeaguesTree | null> => ipcRenderer.invoke('leagues:scan'),
+  listDir: (path: string): Promise<DirEntry[]> => ipcRenderer.invoke('dir:list', path),
+  /** Move a league or season folder (and a league's archives) to the OS trash. */
+  trashFolder: (path: string): Promise<void> => ipcRenderer.invoke('folder:trash', path),
   createLeague: (day: Weekday, name: string): Promise<string> =>
     ipcRenderer.invoke('league:create', day, name),
   createSeason: (

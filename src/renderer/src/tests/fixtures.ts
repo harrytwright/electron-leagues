@@ -1,5 +1,15 @@
 import { parseSeasonName } from '@shared/season'
-import type { LeagueNode, LeaguesTree } from '@shared/tree'
+import type { DirEntry, LeagueNode, LeaguesTree } from '@shared/tree'
+
+export function makeDirEntry(overrides: Partial<DirEntry> = {}): DirEntry {
+  const name = overrides.name ?? 'Rules.docx'
+  return {
+    name,
+    path: overrides.path ?? `/root/_shared/${name}`,
+    kind: overrides.kind ?? 'file',
+    mtime: overrides.mtime ?? Date.UTC(2026, 0, 15)
+  }
+}
 
 export function makeLeague(overrides: Partial<LeagueNode> = {}): LeagueNode {
   const folderName = overrides.folderName ?? 'Mixed triples'
