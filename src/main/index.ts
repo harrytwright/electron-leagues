@@ -1,6 +1,6 @@
 import { electronApp, is, optimizer } from '@electron-toolkit/utils'
 import { watch, type FSWatcher } from 'chokidar'
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import Store from 'electron-store'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
@@ -198,6 +198,9 @@ function createWindow(): void {
     minHeight: 500,
     show: false,
     autoHideMenuBar: true,
+    // Match Kumo's --color-kumo-base (light #fff, dark oklch(17% 0 0)) so the
+    // window doesn't flash the wrong colour before the renderer paints.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#0f0f0f' : '#ffffff',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
@@ -205,6 +208,13 @@ function createWindow(): void {
   }
   if (process.platform === 'linux') options.icon = icon
   mainWindow = new BrowserWindow(options)
+
+  // Keep the backing surface in step when the OS theme changes at runtime,
+  // otherwise resize/reload regions paint the stale colour.
+  const onThemeUpdated = (): void =>
+    mainWindow?.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#0f0f0f' : '#ffffff')
+  nativeTheme.on('updated', onThemeUpdated)
+  mainWindow.on('closed', () => nativeTheme.removeListener('updated', onThemeUpdated))
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
 
