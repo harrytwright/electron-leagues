@@ -166,9 +166,16 @@ it('LeagueView sections match snapshot', () => {
     <LeagueView league={fullLeague()} onChanged={vi.fn()} />
   )
 
-  // useId values depend on how many components rendered before this test —
-  // normalise them so the snapshot only changes when the markup does.
-  expect(container.innerHTML.replace(/base-ui-_r[a-z0-9_]+_/g, 'base-ui-id')).toMatchSnapshot()
+  // useId values depend on how many components rendered before this test.
+  // Replace each distinct id with a stable ordinal so id *wiring* still
+  // shows up in the snapshot while the counter offsets do not.
+  const seen = new Map<string, string>()
+  const normalised = container.innerHTML.replace(/(?:base-ui-)?_r_[a-z0-9]+_/g, (id) => {
+    if (!seen.has(id)) seen.set(id, `generated-id-${seen.size + 1}`)
+    // SAFETY: the id was inserted on the line above when missing.
+    return seen.get(id) as string
+  })
+  expect(normalised).toMatchSnapshot()
 })
 
 it('drops the archive selection when the view switches leagues', async () => {

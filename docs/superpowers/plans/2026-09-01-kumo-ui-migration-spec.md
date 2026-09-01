@@ -76,25 +76,30 @@ fixing all 20 findings from the web-interface-guidelines review in the process.
 
 ## Review findings to close (all in scope)
 
-| # | Finding | Where fixed |
-|---|---------|-------------|
-| 1 | No `color-scheme`/theme handling (index.html) | Theme task |
-| 2 | FileList `<span onClick>` not keyboard-accessible | FileList task |
-| 3 | 📁 emoji not `aria-hidden` | FileList task (Phosphor) |
-| 4 | Drag-drop only import path | FileList task (Add files…) |
-| 5 | Import completes silently (no aria-live) | FileList task (toast) |
-| 6 | Archive checkbox unlabeled / dead zones | LeagueView task |
-| 7 | Archive name `<span onClick>` | LeagueView task |
-| 8 | NewLeagueModal missing dialog semantics/Escape/focus trap | Dialogs task |
-| 9 | Backdrop dismiss click-only | Dialogs task (Kumo) |
-| 10 | No `<form>`/Enter submit (league) | Dialogs task |
-| 11 | League input lacks `name`/`autocomplete="off"` | Dialogs task |
-| 12 | Placeholder `"e.g. Mens Triples"` → `"e.g. Men's Triples…"` | Dialogs task |
-| 13 | League error needs aria-live + focus-on-error | Dialogs task |
-| 14 | NewSeasonModal same dialog issues | Dialogs task |
-| 15 | Season input lacks `name`/`autocomplete="off"` | Dialogs task |
-| 16 | Season error needs aria-live | Dialogs task |
-| 17 | Season fields not in `<form>` | Dialogs task |
-| 18 | FirstRun busy state invisible | FirstRun/App task |
-| 19 | Blanket `user-select: none` on body | Sweep task (scope to nav chrome) |
-| 20 | No hover feedback on `.link`/`.primary`; no `:focus-visible`; modal `overscroll-behavior` | Kumo components; verified in sweep task |
+All 20 verified closed in the Task 8 sweep (2026-09-01):
+
+| # | Finding | Closed by |
+|---|---------|-----------|
+| 1 | ✅ No `color-scheme`/theme handling | `theme.ts` `data-mode` watcher (Kumo sets `color-scheme`), themed `BrowserWindow` background |
+| 2 | ✅ FileList `<span onClick>` not keyboard-accessible | Real `<button>` rows with `focus-visible` outline (`FileList.tsx`), keyboard test |
+| 3 | ✅ 📁 emoji not `aria-hidden` | Phosphor `Folder`/`File` icons in `aria-hidden` wrappers |
+| 4 | ✅ Drag-drop only import path | "Add files…" button + `files:pick` IPC + `pickFiles()` preload |
+| 5 | ✅ Import completes silently | Success/error toasts with honest copied counts (`aria-live` via Kumo Toast) |
+| 6 | ✅ Archive checkbox unlabeled / dead zones | `ArchiveRow`: label wraps Checkbox + name, `useId`-based `aria-labelledby` |
+| 7 | ✅ Archive name `<span onClick>` | Label toggles; separate labelled reveal `Button` |
+| 8 | ✅ League modal dialog semantics/Escape/focus trap | Kumo `Dialog` (`role=dialog`, Escape, trap) — `NewLeagueDialog.tsx` |
+| 9 | ✅ Backdrop dismiss click-only | Kumo Dialog handles Escape + backdrop; both guarded while busy |
+| 10 | ✅ No `<form>`/Enter submit (league) | Real `<form onSubmit>`, Enter test |
+| 11 | ✅ League input `name`/`autocomplete` | `name="league-name"` `autoComplete="off"` |
+| 12 | ✅ Placeholder copy | `"e.g. Men's Triples…"` |
+| 13 | ✅ League error a11y + focus | `role="alert"` + `aria-invalid`/`aria-describedby` + focus-on-error |
+| 14 | ✅ Season modal same issues | `NewSeasonDialog.tsx`, same pattern |
+| 15 | ✅ Season input `name`/`autocomplete` | `name="season-name"` `autoComplete="off"` |
+| 16 | ✅ Season error a11y | Same alert + describedby pattern |
+| 17 | ✅ Season fields in `<form>` | Real form, Enter test |
+| 18 | ✅ FirstRun busy state invisible | Per-button `loading` + "Opening…"/"Initialising…" labels |
+| 19 | ✅ Blanket `user-select: none` | Body rule removed with legacy CSS; `select-none` now only on app chrome (sidebar nav explicitly, Kumo controls via their own styles) — content panes are selectable |
+| 20 | ✅ Hover/focus/overscroll gaps | Kumo buttons ship `hover:bg-kumo-tint` + `focus-visible:ring` (visible in the LeagueView snapshot); dialog scroll containment comes from Kumo/Base UI scroll lock (`overscroll-behavior` rules in Kumo's shipped CSS — not separately asserted by a test) |
+
+Bonus (from cold review): failing `leagues:scan` no longer strands the loading spinner —
+dedicated error phase with retry (`App.tsx`).
