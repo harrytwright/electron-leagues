@@ -1,6 +1,9 @@
 import { defineConfig } from 'vitest/config'
 import { resolve } from 'path'
 
+// Dates are formatted in the local zone; pin it so assertions hold everywhere.
+process.env.TZ = 'UTC'
+
 export default defineConfig({
   test: {
     projects: [
