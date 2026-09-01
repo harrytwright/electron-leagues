@@ -3,7 +3,8 @@ import { watch, type FSWatcher } from 'chokidar'
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
 import Store from 'electron-store'
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
+import { stat } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
 import icon from '../../resources/icon.png?asset'
 import type { Weekday } from '../shared/weekday'
 import { capture, initAnalytics, shutdownAnalytics } from './lib/analytics'
@@ -16,11 +17,16 @@ import {
   zipArchivedSeasons,
   type CreateSeasonOptions
 } from './lib/operations'
-import { scanLeaguesRoot } from './lib/scanner'
+import { isMissing, toUserFacing, UserFacingError } from './lib/fs-errors'
+import { assertInsideRoot, planTrash } from './lib/paths'
+import { pruneRecents, seedRecents, updateRecents, type RootProbe } from './lib/recents'
+import { listDirEntries, scanLeaguesRoot } from './lib/scanner'
 import * as Sentry from '@sentry/electron/main'
 
 interface Settings {
   rootPath?: string
+  /** Most-recently-used first; the last activated root is at index 0. */
+  recentRoots?: string[]
   posthogKey?: string
   sentryDSN?: string
   machineId?: string
@@ -68,14 +74,23 @@ function bundledTemplatesDir(): string {
 
 let mainWindow: BrowserWindow | null = null
 let watcher: FSWatcher | null = null
+let watchTimer: NodeJS.Timeout | null = null
+
+function stopWatching(): void {
+  void watcher?.close()
+  watcher = null
+  if (watchTimer) clearTimeout(watchTimer)
+  watchTimer = null
+}
 
 function watchRoot(root: string): void {
-  void watcher?.close()
-  let timer: NodeJS.Timeout | null = null
-  watcher = watch(root, { ignoreInitial: true, depth: 5 })
+  stopWatching()
+  // Depth 6 reaches two levels below a season folder; edits deeper than that
+  // won't auto-refresh until the user navigates.
+  watcher = watch(root, { ignoreInitial: true, depth: 6 })
   watcher.on('all', () => {
-    if (timer) clearTimeout(timer)
-    timer = setTimeout(() => mainWindow?.webContents.send('tree:changed'), 500)
+    if (watchTimer) clearTimeout(watchTimer)
+    watchTimer = setTimeout(() => mainWindow?.webContents.send('tree:changed'), 500)
   })
   watcher.on('error', (err) => {
     console.error(err)
@@ -83,12 +98,54 @@ function watchRoot(root: string): void {
   })
 }
 
-/** LEAGUES_ROOT overrides the stored root — used for dev/test fixtures. */
+/**
+ * LEAGUES_ROOT overrides the stored root at launch — used for dev/test
+ * fixtures. Choosing or switching a location clears it so the switch sticks.
+ */
+let envRootOverride = process.env.LEAGUES_ROOT
+
 function currentRoot(): string | undefined {
-  return process.env.LEAGUES_ROOT ?? store.get('rootPath')
+  return envRootOverride ?? store.get('rootPath')
 }
 
-/** ipcMain.handle, but failures are reported to Sentry before rejecting the invoke. */
+function requireRoot(): string {
+  const root = currentRoot()
+  if (!root) throw new Error('No leagues folder selected')
+  return root
+}
+
+function storedRecents(): string[] {
+  return seedRecents(store.get('recentRoots'), store.get('rootPath'))
+}
+
+/**
+ * Make `root` the current location: persist it, record it as recent, watch it.
+ * Roots only ever arrive here already `resolve()`d, so the exact-string dedupe
+ * in `updateRecents` holds without case-folding.
+ */
+function activateRoot(root: string): void {
+  envRootOverride = undefined
+  store.set({ rootPath: root, recentRoots: updateRecents(storedRecents(), root) })
+  watchRoot(root)
+}
+
+async function probeRoot(path: string): Promise<RootProbe> {
+  try {
+    return (await stat(path)).isDirectory() ? 'dir' : 'missing'
+  } catch (err) {
+    return isMissing(err) ? 'missing' : 'unavailable'
+  }
+}
+
+/** Recent roots minus any that are definitely gone; the stored list is pruned to match. */
+async function recentRoots(): Promise<string[]> {
+  const stored = storedRecents()
+  const alive = await pruneRecents(stored, probeRoot)
+  if (alive.length !== stored.length) store.set('recentRoots', alive)
+  return alive
+}
+
+/** ipcMain.handle, but unexpected failures are reported to Sentry before rejecting the invoke. */
 function handle<Args extends unknown[], Result>(
   channel: string,
   listener: (event: Electron.IpcMainInvokeEvent, ...args: Args) => Result
@@ -100,7 +157,9 @@ function handle<Args extends unknown[], Result>(
       // when these listeners were passed to ipcMain.handle directly.
       return await listener(event, ...(args as Args))
     } catch (err) {
-      Sentry.captureException(err, { tags: { ipc_channel: channel } })
+      if (!(err instanceof UserFacingError)) {
+        Sentry.captureException(err, { tags: { ipc_channel: channel } })
+      }
       throw err
     }
   })
@@ -126,21 +185,40 @@ function registerIpc(): void {
       properties: ['openDirectory', 'createDirectory']
     })
     if (result.canceled || result.filePaths.length === 0) return null
-    const root = result.filePaths[0]
+    const root = resolve(result.filePaths[0])
     if (mode === 'init') {
       await initialiseRoot(root, bundledTemplatesDir())
       capture('root_initialised')
     }
-    store.set('rootPath', root)
-    watchRoot(root)
+    activateRoot(root)
     capture('root_selected', { onedrive: (await oneDriveStatus(root)).underOneDrive })
     return root
   })
 
+  handle('root:set', async (_e, path: string) => {
+    const root = resolve(path)
+    const probe = await probeRoot(root)
+    if (probe !== 'dir') {
+      if (probe === 'missing') {
+        store.set(
+          'recentRoots',
+          storedRecents().filter((r) => r !== root)
+        )
+      }
+      return null
+    }
+    if (root === currentRoot() && envRootOverride === undefined) return root
+    activateRoot(root)
+    capture('root_switched')
+    return root
+  })
+
+  handle('root:recents', () => recentRoots())
+
   handle('root:forget', () => {
+    envRootOverride = undefined
     store.delete('rootPath')
-    void watcher?.close()
-    watcher = null
+    stopWatching()
   })
 
   handle('leagues:scan', async () => {
@@ -150,28 +228,39 @@ function registerIpc(): void {
     return scanLeaguesRoot(root, { heal: true })
   })
 
+  handle('dir:list', async (_e, path: string) => {
+    const root = requireRoot()
+    try {
+      return await listDirEntries(await assertInsideRoot(root, path))
+    } catch (err) {
+      throw toUserFacing(err)
+    }
+  })
+
   handle('league:create', async (_e, day: Weekday, name: string) => {
-    const root = currentRoot()
-    if (!root) throw new Error('No leagues folder selected')
-    const path = await createLeague(root, day, name)
+    const path = await createLeague(requireRoot(), day, name)
     capture('league_created', { day })
     return path
   })
 
   handle('season:create', async (_e, opts: Omit<CreateSeasonOptions, 'root'>) => {
-    const root = currentRoot()
-    if (!root) throw new Error('No leagues folder selected')
-    const result = await createSeason({ ...opts, root })
+    const result = await createSeason({ ...opts, root: requireRoot() })
     capture('season_created', { source: opts.source, archived: result.archived !== null })
     return result
   })
 
   handle('archive:zip', async (_e, leagueFolder: string, seasons: string[]) => {
-    const root = currentRoot()
-    if (!root) throw new Error('No leagues folder selected')
-    const zips = await zipArchivedSeasons(root, leagueFolder, seasons)
+    const zips = await zipArchivedSeasons(requireRoot(), leagueFolder, seasons)
     capture('archive_zipped', { count: seasons.length })
     return zips
+  })
+
+  handle('folder:trash', async (_e, path: string) => {
+    const plan = await planTrash(requireRoot(), path)
+    for (const target of plan.paths) {
+      await shell.trashItem(target)
+    }
+    capture(plan.kind === 'league' ? 'league_deleted' : 'season_deleted')
   })
 
   handle('files:pick', async () => {

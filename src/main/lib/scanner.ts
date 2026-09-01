@@ -4,6 +4,7 @@ import { healMeta, parseLeagueMetaInput, type LeagueMetaInput } from '../../shar
 import { compareSeasonNames, parseSeasonName, type SeasonName } from '../../shared/season'
 import type { DirEntry, FileEntry, LeagueNode, LeaguesTree, SeasonNode } from '../../shared/tree'
 import { isWeekday, WEEKDAYS, type Weekday } from '../../shared/weekday'
+import { isMissing } from './fs-errors'
 
 export type { DirEntry, FileEntry, LeagueNode, LeaguesTree, SeasonNode }
 
@@ -11,10 +12,6 @@ const META_FILE = 'meta.json'
 
 function visible(name: string): boolean {
   return !name.startsWith('.')
-}
-
-function isMissing(err: unknown): boolean {
-  return (err as NodeJS.ErrnoException | null)?.code === 'ENOENT'
 }
 
 /**
@@ -131,7 +128,13 @@ async function scanLeague(
   if (heal) {
     const serialised = JSON.stringify(meta, null, 2) + '\n'
     if (serialised !== existing.raw) {
-      await writeFile(metaPath, serialised, 'utf8')
+      try {
+        await writeFile(metaPath, serialised, 'utf8')
+      } catch (err) {
+        // The league was removed mid-scan (e.g. just trashed); the watcher
+        // will trigger a fresh scan without it.
+        if (!isMissing(err)) throw err
+      }
     }
   }
 

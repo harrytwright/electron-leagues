@@ -2,7 +2,8 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { assertInsideRoot, classifyTrashTarget, isInsideRoot } from '../paths'
+import { UserFacingError } from '../fs-errors'
+import { assertInsideRoot, classifyTrashTarget, isInsideRoot, planTrash } from '../paths'
 
 let root: string
 let outside: string
@@ -102,5 +103,58 @@ describe('classifyTrashTarget', () => {
       classifyTrashTarget(root, join(root, 'monday', 'Mens Triples', '2025-26', 'Rules.docx'))
     ).toBeNull()
     expect(classifyTrashTarget(root, join(outside, 'monday', 'Mens Triples'))).toBeNull()
+  })
+})
+
+describe('planTrash', () => {
+  const league = (): string => join(root, 'monday', 'Mens Triples')
+
+  test('a league with archives trashes the archive first, then the league', async () => {
+    await mkdir(join(league(), '2025-26'), { recursive: true })
+    await mkdir(join(root, '_archives', 'Mens Triples', '2023-24'), { recursive: true })
+    await expect(planTrash(root, league())).resolves.toEqual({
+      kind: 'league',
+      paths: [join(root, '_archives', 'Mens Triples'), league()]
+    })
+  })
+
+  test('a league without archives trashes only itself', async () => {
+    await mkdir(league(), { recursive: true })
+    await expect(planTrash(root, league())).resolves.toEqual({
+      kind: 'league',
+      paths: [league()]
+    })
+  })
+
+  test('a season never touches the archives', async () => {
+    await mkdir(join(league(), '2025-26'), { recursive: true })
+    await mkdir(join(root, '_archives', 'Mens Triples', '2023-24'), { recursive: true })
+    await expect(planTrash(root, join(league(), '2025-26'))).resolves.toEqual({
+      kind: 'season',
+      paths: [join(league(), '2025-26')]
+    })
+  })
+
+  test('rejects files, wrong depths and anything outside the root as user-facing errors', async () => {
+    await mkdir(league(), { recursive: true })
+    await writeFile(join(root, 'monday', 'stray.docx'), 'x')
+    await writeFile(join(league(), '2024'), 'a file named like a season')
+    const cases = [
+      join(root, 'monday', 'stray.docx'),
+      join(league(), '2024'),
+      join(root, 'monday'),
+      root,
+      outside
+    ]
+    for (const target of cases) {
+      const err = await planTrash(root, target).catch((e: Error) => e)
+      expect(err, target).toBeInstanceOf(UserFacingError)
+    }
+  })
+
+  test('a target that already vanished gets a friendly message', async () => {
+    await expect(planTrash(root, join(root, 'monday', 'Ghost'))).rejects.toThrow(
+      'That folder no longer exists'
+    )
   })
 })
