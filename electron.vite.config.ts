@@ -1,4 +1,5 @@
 import { sentryVitePlugin } from '@sentry/vite-plugin'
+import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'electron-vite'
 import { resolve } from 'path'
@@ -42,7 +43,7 @@ export default defineConfig(({ command }) => {
           '@shared': resolve('src/shared')
         }
       },
-      plugins: upload ? [react(), sentryUpload('renderer')] : [react()]
+      plugins: [react(), tailwindcss(), ...(upload ? [sentryUpload('renderer')] : [])]
     }
   }
 })

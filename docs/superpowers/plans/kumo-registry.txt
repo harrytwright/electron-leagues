@@ -1,0 +1,67 @@
+Kumo Components (48 total)
+
+Action:
+  Button - Primary action trigger. Supports multiple variants, sizes, shapes, icons, and loading state.
+  ClipboardText - Read-only text field with a one-click copy-to-clipboard button.
+
+Data Visualization:
+  BubbleMap - BubbleMap component
+  Chart - Chart — a low-level wrapper around [Apache ECharts](https://echarts.apache.org).
+  ChoroplethMap - ChoroplethMap component
+  SankeyChart - SankeyChart component
+  TimeseriesChart - TimeseriesChart — a time-series line or bar chart.
+
+Display:
+  Badge - Small status label for categorizing or highlighting content.
+  Breadcrumbs - Breadcrumbs component
+  Code - Code component
+  Collapsible - Collapsible — a composable disclosure component for showing/hiding content.
+  Empty - Placeholder shown when a list, table, or page has no content to display.
+  LayerCard - LayerCard component
+  Meter - Progress bar showing a measured value within a known range (e.g. quota usage).
+  Text - Text component
+
+Feedback:
+  Banner - Full-width message bar with an optional trailing CTA slot.
+  Loader - Animated circular spinner for indicating loading states.
+  Toasty - Toasty — toast notification provider and viewport.
+
+Input:
+  Checkbox - Checkbox component
+  Combobox - Combobox — autocomplete input with filterable dropdown list.
+  DateRangePicker - DateRangePicker — dual-calendar date range selector.
+  Field - Form field wrapper that provides a label, optional description, and error display around any form control. Built on Base UI Field primitives.
+  Input - Input component
+  InputArea - Multi-line textarea input with Input variants and InputArea-specific dimensions
+  InputGroup - InputGroup component
+  Radio - Radio — radio button group for single-select choices.
+  Select - Select component
+  Switch - Switch component
+
+Layout:
+  Grid - Responsive CSS grid layout container with preset column configurations.
+  Surface - Surface component
+
+Navigation:
+  CommandPalette - CommandPalette — accessible command palette / spotlight search overlay.
+  MenuBar - MenuBar — horizontal icon-button toolbar with keyboard arrow-key navigation.
+  Pagination - Pagination component
+  Tabs - Tab navigation component with segmented or underline style. Built on Base UI Tabs with animated active indicator.
+
+Other:
+  Autocomplete - Autocomplete — free-form text input with an optional filtered suggestion list.
+  CloudflareLogo - Cloudflare logo component.
+  DatePicker - DatePicker — a date selection calendar.
+  Label - Label component for form fields.
+  Link - Link component
+  SensitiveInput - Password/secret input that masks its value by default and reveals on click. Includes a built-in copy-to-clipboard button on hover.
+  Sidebar - Sidebar — responsive navigation panel with expand/collapse support.
+  Table - Table — semantic HTML table with styled rows, cells, and selection support.
+  TableOfContents - TableOfContents — presentational compound component for section navigation.
+  Toolbar - Toolbar component
+
+Overlay:
+  Dialog - Dialog component
+  DropdownMenu - DropdownMenu — accessible dropdown menu anchored to a trigger.
+  Popover - Popover component for displaying accessible popup content anchored to a trigger.
+  Tooltip - Accessible popup that shows additional information on hover/focus. Wrap your app or section with `<TooltipProvider>` to enable delay grouping.
