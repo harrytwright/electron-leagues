@@ -1,12 +1,7 @@
 import { vi } from 'vitest'
 import type { LeaguesApi } from '../../../preload/index'
 
-// pickFiles ships in the preload for real in the FileList task; this local
-// extension exists so earlier tasks can already mock against the final shape.
-// Once preload exports it, collapse RendererApi back to LeaguesApi.
-export type RendererApi = LeaguesApi & {
-  pickFiles(): Promise<string[]>
-}
+export type RendererApi = LeaguesApi
 
 let treeChangedListeners: Array<() => void> = []
 
@@ -19,7 +14,8 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
   treeChangedListeners = []
   const api: RendererApi = {
     scan: vi.fn<RendererApi['scan']>().mockResolvedValue(null),
-    importFiles: vi.fn<RendererApi['importFiles']>().mockResolvedValue([]),
+    // Echo the sources back, like the real handler returns the copied paths.
+    importFiles: vi.fn<RendererApi['importFiles']>((_dest, sources) => Promise.resolve(sources)),
     zipArchive: vi.fn<RendererApi['zipArchive']>().mockResolvedValue([]),
     createLeague: vi.fn<RendererApi['createLeague']>().mockResolvedValue(''),
     createSeason: vi.fn<RendererApi['createSeason']>().mockResolvedValue({

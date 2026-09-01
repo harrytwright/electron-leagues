@@ -174,6 +174,14 @@ function registerIpc(): void {
     return zips
   })
 
+  handle('files:pick', async () => {
+    if (!mainWindow) return []
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile', 'multiSelections']
+    })
+    return result.canceled ? [] : result.filePaths
+  })
+
   handle('file:open', async (_e, path: string) => {
     capture('document_opened', { onedrive: (await oneDriveStatus(path)).availability })
     return shell.openPath(path)

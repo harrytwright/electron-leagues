@@ -60,9 +60,7 @@ function Sidebar({ tree, selection, onSelect, onChanged }: Props): React.JSX.Ele
                       tooltip={league.meta.name}
                       active={active}
                       aria-current={active ? 'true' : undefined}
-                      aria-label={
-                        league.running ? undefined : `${league.meta.name}, not running`
-                      }
+                      aria-label={league.running ? undefined : `${league.meta.name}, not running`}
                       onClick={() =>
                         onSelect({ kind: 'league', day, folderName: league.folderName })
                       }

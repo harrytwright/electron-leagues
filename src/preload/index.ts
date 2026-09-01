@@ -29,6 +29,7 @@ const api = {
     ipcRenderer.invoke('archive:zip', leagueFolder, seasons),
   openFile: (path: string): Promise<string> => ipcRenderer.invoke('file:open', path),
   revealFile: (path: string): Promise<void> => ipcRenderer.invoke('file:reveal', path),
+  pickFiles: (): Promise<string[]> => ipcRenderer.invoke('files:pick'),
   importFiles: (dest: string, sources: string[]): Promise<string[]> =>
     ipcRenderer.invoke('file:import', dest, sources),
   pathForFile: (file: File): string => webUtils.getPathForFile(file),
