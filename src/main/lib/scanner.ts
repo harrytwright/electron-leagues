@@ -112,8 +112,9 @@ async function scanLeague(
   seasonFolders.sort((a, b) => compareSeasonNames(a.season, b.season))
 
   const archivePath = join(root, '_archives', leagueDir.name)
+  const archiveEntries = await listEntries(archivePath)
   const archivedSeasons = sortSeasonNames(
-    (await listEntries(archivePath)).filter((e) => e.kind === 'folder').map((e) => e.name)
+    archiveEntries.filter((e) => e.kind === 'folder').map((e) => e.name)
   )
 
   const metaPath = join(leagueDir.path, META_FILE)
@@ -161,6 +162,7 @@ async function scanLeague(
     seasons,
     otherEntries,
     archivedSeasons,
+    archiveItemCount: archiveEntries.length,
     archivePath
   }
 }
@@ -190,21 +192,15 @@ export async function scanLeaguesRoot(
     }
   }
 
-  const templatesPath = join(root, '_templates')
-  const sharedPath = join(root, '_shared')
-  const templateFiles = await listEntries(templatesPath)
-  const sharedFiles = await listEntries(sharedPath)
   const specialDirs = new Set(rootEntries.filter((e) => e.kind === 'folder').map((e) => e.name))
 
   return {
     root,
     days,
-    templatesPath,
-    sharedPath,
+    templatesPath: join(root, '_templates'),
+    sharedPath: join(root, '_shared'),
     hasTemplates: specialDirs.has('_templates'),
     hasShared: specialDirs.has('_shared'),
-    templateFiles,
-    sharedFiles,
     unrecognisedRootEntries
   }
 }

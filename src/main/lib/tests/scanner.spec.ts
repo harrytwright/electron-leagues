@@ -47,7 +47,7 @@ describe('scanLeaguesRoot', () => {
     ])
   })
 
-  test('skips underscore folders as leagues but lists shared and template files', async () => {
+  test('never treats underscore folders as league nights', async () => {
     await makeTree({
       '_shared/Opening Times.docx': 'x',
       '_templates/Rules.docx': 'x',
@@ -55,8 +55,7 @@ describe('scanLeaguesRoot', () => {
     })
     const tree = await scanLeaguesRoot(root)
     expect(Object.values(tree.days).flat()).toEqual([])
-    expect(tree.sharedFiles.map((f) => f.name)).toEqual(['Opening Times.docx'])
-    expect(tree.templateFiles.map((f) => f.name)).toEqual(['Rules.docx'])
+    expect(tree.unrecognisedRootEntries).toEqual([])
   })
 
   test('lists non-weekday, non-underscore root entries as unrecognised', async () => {
@@ -94,15 +93,23 @@ describe('scanLeaguesRoot', () => {
     expect(league.otherEntries).toEqual([])
   })
 
-  test('archived seasons are read from _archives/{league}', async () => {
+  test('archived seasons are read from _archives/{league}, counting zips as archive items', async () => {
     await makeTree({
       'monday/Mens Triples/2025-26/Rules.docx': 'x',
       '_archives/Mens Triples/2023-24/Rules.docx': 'x',
-      '_archives/Mens Triples/2022-23/Rules.docx': 'x'
+      '_archives/Mens Triples/2022-23/Rules.docx': 'x',
+      '_archives/Mens Triples/2021-22.zip': 'x'
     })
     const league = (await scanLeaguesRoot(root)).days.monday[0]
     expect(league.archivedSeasons).toEqual(['2022-23', '2023-24'])
     expect(league.meta.archivedSeasons).toEqual(['2022-23', '2023-24'])
+    expect(league.archiveItemCount).toBe(3)
+  })
+
+  test('a league with nothing archived reports no archive items', async () => {
+    await makeTree({ 'monday/Mens Triples/2025-26/Rules.docx': 'x' })
+    const league = (await scanLeaguesRoot(root)).days.monday[0]
+    expect(league.archiveItemCount).toBe(0)
   })
 
   test('heal writes a fresh meta.json when missing', async () => {

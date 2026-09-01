@@ -9,6 +9,7 @@ import { PANEL_CLASS } from './panel'
 export interface RowMenuItem {
   label: string
   variant?: 'default' | 'danger'
+  disabled?: boolean
   onSelect: () => void
 }
 
@@ -63,6 +64,7 @@ function RowMenu({ row }: { row: DirectoryRow }): React.JSX.Element {
           <DropdownMenu.Item
             key={`${index}-${item.label}`}
             variant={item.variant}
+            disabled={item.disabled}
             onClick={item.onSelect}
           >
             {item.label}
@@ -89,6 +91,8 @@ function DirectoryTable({
   // dragenter/dragleave fire for every child crossed; only depth 0 truly leaves.
   const dragDepth = useRef(0)
   const droppable = onDropFiles !== undefined
+  // Synthetic listings (a league's seasons) carry no dates; don't show a column of dashes.
+  const showModified = rows.some((row) => row.mtime !== undefined)
 
   const activate = (row: DirectoryRow): void => {
     if (row.kind === 'file') {
@@ -145,7 +149,7 @@ function DirectoryTable({
           <Table.Header>
             <Table.Row>
               <Table.Head>Name</Table.Head>
-              <Table.Head className="w-36">Modified</Table.Head>
+              {showModified ? <Table.Head className="w-36">Modified</Table.Head> : null}
               <Table.Head className="w-12">
                 <span className="sr-only">Actions</span>
               </Table.Head>
@@ -169,9 +173,11 @@ function DirectoryTable({
                     {row.badge}
                   </div>
                 </Table.Cell>
-                <Table.Cell className="whitespace-nowrap text-kumo-subtle">
-                  {row.mtime === undefined ? '—' : formatModified(row.mtime)}
-                </Table.Cell>
+                {showModified ? (
+                  <Table.Cell className="whitespace-nowrap text-kumo-subtle">
+                    {row.mtime === undefined ? '—' : formatModified(row.mtime)}
+                  </Table.Cell>
+                ) : null}
                 <Table.Cell className="text-right">
                   <RowMenu row={row} />
                 </Table.Cell>

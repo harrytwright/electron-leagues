@@ -45,7 +45,9 @@ export function makeLeague(overrides: Partial<LeagueNode> = {}): LeagueNode {
     seasons,
     otherEntries: overrides.otherEntries ?? [],
     archivedSeasons,
-    archivePath: overrides.archivePath ?? `${path}/_archives`
+    archiveItemCount: overrides.archiveItemCount ?? archivedSeasons.length,
+    // Archives live beside the league nights, never inside the league folder.
+    archivePath: overrides.archivePath ?? `/root/_archives/${folderName}`
   }
 }
 
@@ -65,8 +67,6 @@ export function makeTree(overrides: Partial<LeaguesTree> = {}): LeaguesTree {
     sharedPath: '/root/_shared',
     hasTemplates: true,
     hasShared: true,
-    templateFiles: [],
-    sharedFiles: [],
     unrecognisedRootEntries: [],
     ...overrides
   }

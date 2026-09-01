@@ -1,13 +1,20 @@
-import { useId, useState } from 'react'
-import { Badge, Button, Checkbox, LayerCard, Text, useKumoToastManager } from '@cloudflare/kumo'
+import { useState } from 'react'
+import { Badge, Button, DropdownMenu, Text, useKumoToastManager } from '@cloudflare/kumo'
+import { DotsThreeIcon, PlusIcon } from '@phosphor-icons/react'
 import type { LeagueNode, SeasonNode } from '@shared/tree'
 import { ipcErrorMessage } from '../lib/ipc-error'
-import FileList from './FileList'
+import { revealLabel } from '../lib/reveal-label'
+import { sentenceCase } from '../lib/sentence-case'
+import { trashLabel } from '../lib/trash-label'
+import { useCrumbs } from '../lib/use-crumbs'
+import { useDirListing } from '../lib/use-dir-listing'
+import { useImportFiles } from '../lib/use-import-files'
+import CrumbTrail from './CrumbTrail'
+import DeleteResourceDialog, { type DeleteTarget } from './DeleteResourceDialog'
+import DirectoryTable, { type DirectoryRow } from './DirectoryTable'
+import IconButton from './IconButton'
+import ListingPanel from './ListingPanel'
 import NewSeasonDialog from './NewSeasonDialog'
-
-function sentenceCase(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1)
-}
 
 function seasonBadgeVariant(status: SeasonNode['status']): 'success' | 'info' {
   switch (status) {
@@ -19,179 +26,210 @@ function seasonBadgeVariant(status: SeasonNode['status']): 'success' | 'info' {
   }
 }
 
-interface ArchiveRowProps {
-  name: string
-  checked: boolean
-  onToggle: () => void
-  onReveal: () => void
-}
-
-function ArchiveRow({ name, checked, onToggle, onReveal }: ArchiveRowProps): React.JSX.Element {
-  // Archive names come from disk and may contain spaces — never use them as ids.
-  const labelId = useId()
-  return (
-    <li className="flex items-center gap-2 px-4 py-2">
-      <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2">
-        <Checkbox aria-labelledby={labelId} checked={checked} onCheckedChange={onToggle} />
-        <span id={labelId} className="truncate">
-          {name}
-        </span>
-      </label>
-      <Button
-        type="button"
-        size="sm"
-        variant="ghost"
-        aria-label={`Show in folder — ${name}`}
-        onClick={onReveal}
-      >
-        Show in folder
-      </Button>
-    </li>
-  )
-}
-
 interface Props {
   league: LeagueNode
+  /** Something on disk changed (import, zip, delete, new season); the caller rescans. */
   onChanged: () => void | Promise<void>
 }
 
 function LeagueView({ league, onChanged }: Props): React.JSX.Element {
+  const trail = useCrumbs(league.path)
   const [newSeason, setNewSeason] = useState(false)
-  const [selectedArchives, setSelectedArchives] = useState<string[]>([])
-  const [zipping, setZipping] = useState(false)
+  const [deleting, setDeleting] = useState<DeleteTarget | null>(null)
+  const [zipping, setZipping] = useState<string | null>(null)
   const { add } = useKumoToastManager()
 
-  // The tree can change under us (watcher rescans); only names that still
-  // exist are actionable, for both the button label and the IPC call.
-  const actionable = selectedArchives.filter((name) => league.archivedSeasons.includes(name))
+  // The league's own folder is presented from the scan (seasons carry status
+  // badges, the archive lives elsewhere on disk); everything below it is listed
+  // on demand. Archives are read-only from here.
+  const inArchive = trail.crumbs[0]?.path === league.archivePath
+  const atArchiveRoot = trail.currentDir === league.archivePath
+  const listing = useDirListing(trail.atBase ? null : trail.currentDir)
+  const importer = useImportFiles(inArchive ? undefined : trail.currentDir, async () => {
+    listing.reload()
+    await onChanged()
+  })
 
-  const toggleArchive = (name: string): void => {
-    setSelectedArchives((current) =>
-      current.includes(name) ? current.filter((item) => item !== name) : [...current, name]
-    )
-  }
+  const enter = (row: DirectoryRow): void => trail.enter({ name: row.name, path: row.path })
 
-  const zipSelected = async (): Promise<void> => {
-    if (zipping || actionable.length === 0) return
-    const selected = actionable
-    setZipping(true)
+  const zip = async (name: string): Promise<void> => {
+    if (zipping) return
+    setZipping(name)
     try {
-      await window.api.zipArchive(league.folderName, selected)
-      setSelectedArchives((current) => current.filter((name) => !selected.includes(name)))
-      add({
-        title: `Zipped ${selected.length} season${selected.length === 1 ? '' : 's'}`,
-        variant: 'success'
-      })
+      await window.api.zipArchive(league.folderName, [name])
+      add({ title: `Zipped ${name}`, variant: 'success' })
+      listing.reload()
       await onChanged()
     } catch (caught) {
       add({ title: ipcErrorMessage(caught), variant: 'error' })
     } finally {
-      setZipping(false)
+      setZipping(null)
     }
   }
 
-  return (
-    <div className="mx-auto grid w-full max-w-5xl gap-6 p-6">
-      <header className="flex items-start justify-between gap-4">
-        <div className="grid min-w-0 gap-1.5">
-          <Text as="h1" variant="heading" size="lg" truncate>
-            {league.meta.name}
-          </Text>
-          <Text variant="secondary">
-            {sentenceCase(league.day)}
-            {league.running ? '' : ' · Not running — create a season to start it'}
-          </Text>
-        </div>
-        <Button type="button" variant="primary" onClick={() => setNewSeason(true)}>
-          New season…
-        </Button>
-      </header>
-
-      {[...league.seasons].reverse().map((season) => (
-        <section className="grid gap-2" key={season.path}>
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex min-w-0 items-center gap-2">
-              <Text as="h2" variant="heading" truncate>
-                {season.name}
-              </Text>
-              <Badge variant={seasonBadgeVariant(season.status)}>
-                {sentenceCase(season.status)}
+  const topRows: DirectoryRow[] = [
+    ...[...league.seasons].reverse().map((season) => ({
+      key: season.path,
+      name: season.name,
+      kind: 'folder' as const,
+      path: season.path,
+      badge: (
+        <Badge variant={seasonBadgeVariant(season.status)}>{sentenceCase(season.status)}</Badge>
+      ),
+      menuItems: [
+        {
+          label: 'Delete season…',
+          variant: 'danger' as const,
+          onSelect: () => setDeleting({ kind: 'season', name: season.name, path: season.path })
+        }
+      ]
+    })),
+    ...league.otherEntries.map((entry) => ({
+      key: entry.path,
+      name: entry.name,
+      kind: entry.kind,
+      path: entry.path
+    })),
+    ...(league.archiveItemCount > 0
+      ? [
+          {
+            key: league.archivePath,
+            name: 'Archive',
+            kind: 'folder' as const,
+            path: league.archivePath,
+            badge: (
+              <Badge variant="secondary">
+                {`${league.archiveItemCount} item${league.archiveItemCount === 1 ? '' : 's'}`}
               </Badge>
+            )
+          }
+        ]
+      : [])
+  ]
+
+  const listed = listing.entries ?? []
+  const listedRows: DirectoryRow[] = listed.map((entry) => {
+    const zipped = listed.some((e) => e.name === `${entry.name}.zip`)
+    const archivedSeason =
+      atArchiveRoot && entry.kind === 'folder' && league.archivedSeasons.includes(entry.name)
+    return {
+      key: entry.path,
+      name: entry.name,
+      kind: entry.kind,
+      path: entry.path,
+      mtime: entry.mtime,
+      badge: zipping === entry.name ? <Badge variant="secondary">Zipping…</Badge> : undefined,
+      menuItems: archivedSeason
+        ? [
+            {
+              label: zipped ? 'Zip season again' : 'Zip season',
+              disabled: zipping !== null,
+              onSelect: () => void zip(entry.name)
+            }
+          ]
+        : undefined
+    }
+  })
+
+  return (
+    <div className="grid content-start">
+      <div className="sticky top-0 z-10 border-b border-kumo-line bg-kumo-base">
+        <div className="mx-auto grid w-full max-w-5xl gap-3 px-6 pt-5 pb-3">
+          <div className="flex items-start justify-between gap-4">
+            <div className="grid min-w-0 gap-1">
+              <div className="flex min-w-0 items-center gap-2">
+                <Text as="h1" variant="heading" size="lg" truncate>
+                  {league.meta.name}
+                </Text>
+                <Badge variant={league.running ? 'success' : 'neutral'} appearance="dot">
+                  {league.running ? 'Running' : 'Not running'}
+                </Badge>
+              </div>
+              <Text variant="secondary">
+                {sentenceCase(league.day)}
+                {league.running ? '' : ' · Create a season to start it'}
+              </Text>
             </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => void window.api.revealFile(season.path)}
-              aria-label={`Show in folder — ${season.name}`}
-            >
-              Show in folder
+            <Button type="button" variant="primary" onClick={() => setNewSeason(true)}>
+              New season…
             </Button>
           </div>
-          <FileList files={season.files} dropInto={season.path} onImported={onChanged} />
-        </section>
-      ))}
 
-      {league.otherEntries.length > 0 ? (
-        <section className="grid gap-2">
-          <div className="flex items-center gap-2">
-            <Text as="h2" variant="heading">
-              Other files
-            </Text>
-            <Badge variant="secondary">Not a season</Badge>
-          </div>
-          <FileList files={league.otherEntries} />
-        </section>
-      ) : null}
-
-      <section className="grid gap-2">
-        <div className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-2">
-            <Text as="h2" variant="heading">
-              Archive
-            </Text>
-            <Badge variant="secondary">
-              {`${league.archivedSeasons.length} season${league.archivedSeasons.length === 1 ? '' : 's'}`}
-            </Badge>
-          </div>
-          <div className="flex items-center gap-2">
-            {actionable.length > 0 ? (
-              <Button type="button" size="sm" disabled={zipping} onClick={() => void zipSelected()}>
-                {zipping ? 'Zipping…' : `Zip ${actionable.length} selected`}
+          <div className="flex items-center justify-between gap-4">
+            <CrumbTrail
+              names={[league.meta.name, ...trail.crumbs.map((c) => c.name)]}
+              onNavigate={trail.jumpTo}
+            />
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={inArchive || importer.importing}
+                title={inArchive ? 'Archived seasons are read-only' : undefined}
+                icon={<PlusIcon aria-hidden size={14} />}
+                onClick={() => void importer.pickFiles()}
+              >
+                {importer.importing ? 'Importing…' : 'Add files…'}
               </Button>
-            ) : null}
-            <Button
-              type="button"
-              size="sm"
-              variant="ghost"
-              onClick={() => void window.api.revealFile(league.archivePath)}
-              aria-label="Show in folder — archive"
-            >
-              Show in folder
-            </Button>
+              <DropdownMenu>
+                <DropdownMenu.Trigger
+                  render={
+                    <IconButton
+                      variant="ghost"
+                      size="sm"
+                      icon={<DotsThreeIcon aria-hidden weight="bold" />}
+                      aria-label="League actions"
+                    />
+                  }
+                />
+                <DropdownMenu.Content>
+                  <DropdownMenu.Item onClick={() => void window.api.revealFile(trail.currentDir)}>
+                    {revealLabel()}
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Separator />
+                  <DropdownMenu.Item
+                    variant="danger"
+                    onClick={() =>
+                      setDeleting({
+                        kind: 'league',
+                        name: league.meta.name,
+                        path: league.path,
+                        hasArchives: league.archiveItemCount > 0
+                      })
+                    }
+                  >
+                    Delete league…
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu>
+            </div>
           </div>
         </div>
-        <LayerCard>
-          <ul>
-            {league.archivedSeasons.length === 0 ? (
-              <li className="px-4 py-3">
-                <Text as="span" variant="secondary">
-                  Nothing archived yet
-                </Text>
-              </li>
-            ) : null}
-            {league.archivedSeasons.map((name) => (
-              <ArchiveRow
-                key={name}
-                name={name}
-                checked={selectedArchives.includes(name)}
-                onToggle={() => toggleArchive(name)}
-                onReveal={() => void window.api.revealFile(`${league.archivePath}/${name}`)}
-              />
-            ))}
-          </ul>
-        </LayerCard>
-      </section>
+      </div>
+
+      <div className="mx-auto w-full max-w-5xl p-6">
+        {trail.atBase ? (
+          <DirectoryTable
+            aria-label={league.meta.name}
+            rows={topRows}
+            onNavigate={enter}
+            onDropFiles={importer.importPaths}
+            emptyTitle="No seasons yet"
+            emptyDescription="Create a season to start this league."
+          />
+        ) : (
+          <ListingPanel
+            aria-label={trail.crumbs[trail.crumbs.length - 1].name}
+            listing={listing}
+            rows={listedRows}
+            onNavigate={enter}
+            onDropFiles={inArchive ? undefined : importer.importPaths}
+            onBack={{ label: `Back to ${league.meta.name}`, action: () => trail.jumpTo(0) }}
+            emptyTitle="This folder is empty"
+          />
+        )}
+      </div>
 
       <NewSeasonDialog
         league={league}
@@ -200,6 +238,19 @@ function LeagueView({ league, onChanged }: Props): React.JSX.Element {
         onCreated={() => {
           setNewSeason(false)
           void onChanged()
+        }}
+      />
+
+      <DeleteResourceDialog
+        target={deleting}
+        open={deleting !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(null)
+        }}
+        onDeleted={async (target) => {
+          setDeleting(null)
+          add({ title: `Moved “${target.name}” to the ${trashLabel()}`, variant: 'success' })
+          await onChanged()
         }}
       />
     </div>

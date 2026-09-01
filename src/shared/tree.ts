@@ -27,7 +27,10 @@ export interface LeagueNode {
   running: boolean
   seasons: SeasonNode[]
   otherEntries: FileEntry[]
+  /** Season folders under `_archives/{league}`. */
   archivedSeasons: string[]
+  /** Everything visible under `_archives/{league}`, zips included. */
+  archiveItemCount: number
   archivePath: string
 }
 
@@ -39,7 +42,5 @@ export interface LeaguesTree {
   sharedPath: string
   hasTemplates: boolean
   hasShared: boolean
-  templateFiles: FileEntry[]
-  sharedFiles: FileEntry[]
   unrecognisedRootEntries: FileEntry[]
 }

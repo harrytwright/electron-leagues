@@ -3,15 +3,13 @@ import { Button, Dialog, Input, Select, Text } from '@cloudflare/kumo'
 import { sanitiseFolderName } from '@shared/sanitise'
 import { isWeekday, WEEKDAYS, type Weekday } from '@shared/weekday'
 import { ipcErrorMessage } from '../lib/ipc-error'
+import { pathBasename } from '../lib/path-basename'
+import { sentenceCase } from '../lib/sentence-case'
 
 export interface NewLeagueDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onCreated: (day: Weekday, folderName: string) => void
-}
-
-function sentenceCase(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
 const DAY_ITEMS = WEEKDAYS.map((weekday) => ({
@@ -64,7 +62,7 @@ function NewLeagueDialog({
       setBusy(false)
       // Main owns the real folder name (normalisation, collisions) — read it
       // back from the created path rather than trusting our local guess.
-      onCreated(day, createdPath.split(/[\\/]/).pop() || folderName)
+      onCreated(day, pathBasename(createdPath) || folderName)
     } catch (caught) {
       if (submission.current !== ticket) return
       setError(ipcErrorMessage(caught))
