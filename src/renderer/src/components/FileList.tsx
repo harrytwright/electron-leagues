@@ -124,7 +124,7 @@ function FileList({ files, emptyLabel, dropInto, onImported }: Props): React.JSX
               type="button"
               size="sm"
               variant="ghost"
-              aria-label={`Show ${file.name} in folder`}
+              aria-label={`Show in folder — ${file.name}`}
               onClick={() => void window.api.revealFile(file.path)}
             >
               Show in folder
