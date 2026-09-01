@@ -1,8 +1,8 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { scanLeaguesRoot } from '../scanner'
+import { listDirEntries, scanLeaguesRoot } from '../scanner'
 
 let root: string
 
@@ -148,5 +148,51 @@ describe('scanLeaguesRoot', () => {
     const tree = await scanLeaguesRoot(root)
     expect(tree.hasTemplates).toBe(true)
     expect(tree.hasShared).toBe(false)
+  })
+
+  test('exposes absolute paths for the templates and shared folders', async () => {
+    const tree = await scanLeaguesRoot(root)
+    expect(tree.templatesPath).toBe(join(root, '_templates'))
+    expect(tree.sharedPath).toBe(join(root, '_shared'))
+  })
+})
+
+describe('listDirEntries', () => {
+  test('lists folders first, then files, in natural name order with mtimes', async () => {
+    await makeTree({
+      'season/Week 10/.keep': '',
+      'season/Week 2/.keep': '',
+      'season/Rules.docx': 'x',
+      'season/agenda.txt': 'x',
+      'season/.hidden': 'x'
+    })
+    const entries = await listDirEntries(join(root, 'season'))
+    expect(entries.map((e) => [e.name, e.kind])).toEqual([
+      ['Week 2', 'folder'],
+      ['Week 10', 'folder'],
+      ['agenda.txt', 'file'],
+      ['Rules.docx', 'file']
+    ])
+    for (const entry of entries) {
+      expect(entry.path).toBe(join(root, 'season', entry.name))
+      expect(entry.mtime).toBeGreaterThan(0)
+    }
+  })
+
+  test('breaks case-only ties deterministically', async () => {
+    await makeTree({ 'dir/a.txt': 'x', 'dir/A.txt': 'x', 'dir/b.txt': 'x' })
+    const names = (await listDirEntries(join(root, 'dir'))).map((e) => e.name)
+    expect(names).toEqual(['a.txt', 'A.txt', 'b.txt'])
+  })
+
+  test('skips dangling symlinks', async () => {
+    await makeTree({ 'dir/real.txt': 'x' })
+    await symlink(join(root, 'gone.txt'), join(root, 'dir', 'dangling.txt'))
+    const names = (await listDirEntries(join(root, 'dir'))).map((e) => e.name)
+    expect(names).toEqual(['real.txt'])
+  })
+
+  test('surfaces a missing directory as ENOENT', async () => {
+    await expect(listDirEntries(join(root, 'nope'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })

@@ -7,6 +7,11 @@ export interface FileEntry {
   kind: 'file' | 'folder'
 }
 
+/** One row of an on-demand directory listing; `mtime` is epoch milliseconds. */
+export interface DirEntry extends FileEntry {
+  mtime: number
+}
+
 export interface SeasonNode {
   name: string
   status: 'active' | 'previous' | 'live'
@@ -29,6 +34,9 @@ export interface LeagueNode {
 export interface LeaguesTree {
   root: string
   days: Record<Weekday, LeagueNode[]>
+  // Joined on `root` in main so the renderer never has to join path segments itself.
+  templatesPath: string
+  sharedPath: string
   hasTemplates: boolean
   hasShared: boolean
   templateFiles: FileEntry[]

@@ -51,6 +51,8 @@ export function makeTree(overrides: Partial<LeaguesTree> = {}): LeaguesTree {
       saturday: [],
       sunday: []
     },
+    templatesPath: '/root/_templates',
+    sharedPath: '/root/_shared',
     hasTemplates: true,
     hasShared: true,
     templateFiles: [],

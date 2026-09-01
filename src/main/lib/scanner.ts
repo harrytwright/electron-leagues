@@ -1,16 +1,58 @@
-import { readdir, readFile, writeFile } from 'node:fs/promises'
+import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { healMeta, parseLeagueMetaInput, type LeagueMetaInput } from '../../shared/meta'
 import { compareSeasonNames, parseSeasonName, type SeasonName } from '../../shared/season'
-import type { FileEntry, LeagueNode, LeaguesTree, SeasonNode } from '../../shared/tree'
+import type { DirEntry, FileEntry, LeagueNode, LeaguesTree, SeasonNode } from '../../shared/tree'
 import { isWeekday, WEEKDAYS, type Weekday } from '../../shared/weekday'
 
-export type { FileEntry, LeagueNode, LeaguesTree, SeasonNode }
+export type { DirEntry, FileEntry, LeagueNode, LeaguesTree, SeasonNode }
 
 const META_FILE = 'meta.json'
 
 function visible(name: string): boolean {
   return !name.startsWith('.')
+}
+
+function isMissing(err: unknown): boolean {
+  return (err as NodeJS.ErrnoException | null)?.code === 'ENOENT'
+}
+
+/**
+ * Single-level listing for the on-demand file browser. Unlike `listEntries`
+ * this throws when the directory is gone, so the renderer can tell "empty"
+ * from "no longer exists". Entries that vanish mid-listing (or dangling
+ * symlinks) are skipped; any other stat failure propagates.
+ */
+export async function listDirEntries(dir: string): Promise<DirEntry[]> {
+  const entries = await readdir(dir, { withFileTypes: true })
+  const listed = await Promise.all(
+    entries
+      .filter((e) => visible(e.name))
+      .map(async (e): Promise<DirEntry | null> => {
+        const path = join(dir, e.name)
+        try {
+          const info = await stat(path)
+          return {
+            name: e.name,
+            path,
+            kind: info.isDirectory() ? 'folder' : 'file',
+            mtime: info.mtimeMs
+          }
+        } catch (err) {
+          if (isMissing(err)) return null
+          throw err
+        }
+      })
+  )
+  return listed
+    .filter((e): e is DirEntry => e !== null)
+    .sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === 'folder' ? -1 : 1
+      return (
+        a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }) ||
+        a.name.localeCompare(b.name)
+      )
+    })
 }
 
 async function listEntries(dir: string): Promise<FileEntry[]> {
@@ -145,13 +187,17 @@ export async function scanLeaguesRoot(
     }
   }
 
-  const templateFiles = await listEntries(join(root, '_templates'))
-  const sharedFiles = await listEntries(join(root, '_shared'))
+  const templatesPath = join(root, '_templates')
+  const sharedPath = join(root, '_shared')
+  const templateFiles = await listEntries(templatesPath)
+  const sharedFiles = await listEntries(sharedPath)
   const specialDirs = new Set(rootEntries.filter((e) => e.kind === 'folder').map((e) => e.name))
 
   return {
     root,
     days,
+    templatesPath,
+    sharedPath,
     hasTemplates: specialDirs.has('_templates'),
     hasShared: specialDirs.has('_shared'),
     templateFiles,
