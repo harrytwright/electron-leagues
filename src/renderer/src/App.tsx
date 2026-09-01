@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { LeaguesTree } from '@shared/tree'
-import { Loader, Text, ToastProvider } from '@cloudflare/kumo'
+import { Loader, Sidebar as KumoSidebar, Text, ToastProvider } from '@cloudflare/kumo'
 import FirstRun from './components/FirstRun'
 import LeagueView from './components/LeagueView'
 import SharedView from './components/SharedView'
@@ -50,21 +50,21 @@ function AppContent(): React.JSX.Element {
       : null
 
   return (
-    <div className="layout">
-      <Sidebar
-        tree={tree}
-        selection={selection}
-        onSelect={setSelection}
-        onChanged={() => void refresh()}
-      />
-      <main className="main">
+    <KumoSidebar.Provider
+      defaultOpen
+      collapsible="icon"
+      resizable={false}
+      className="flex h-full min-h-0"
+    >
+      <Sidebar tree={tree} selection={selection} onSelect={setSelection} onChanged={refresh} />
+      <main className="h-full min-w-0 flex-1 overflow-auto">
         {selection.kind === 'shared' || !selectedLeague ? (
           <SharedView tree={tree} />
         ) : (
           <LeagueView league={selectedLeague} onChanged={() => void refresh()} />
         )}
       </main>
-    </div>
+    </KumoSidebar.Provider>
   )
 }
 
