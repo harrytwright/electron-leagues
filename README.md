@@ -25,7 +25,20 @@ doesn't match is shown as a plain browsable folder, never guessed at.
 Season lifecycle: two live seasons per league (active + previous). Creating a new season copies
 starting documents from `_templates` or the previous season, and (pre-ticked in the wizard)
 moves the oldest live season into `_archives`. Archived seasons can be zipped on demand from
-the league's Archive section.
+the league's Archive folder.
+
+## Using the app
+
+The window title bar contains **Home** and the location switcher, which changes between leagues
+folders ("locations"), creates a new one, or reveals the current one. Home shows the templates
+and shared documents, while the sidebar holds the Leagues list grouped under collapsible days.
+A league opens as a file browser: seasons at the top (newest first, with their status), then any
+other files and the Archive folder. Clicking a file opens it in its default program; clicking a folder
+drills in, and the breadcrumbs lead back. Each row's `…` menu reveals it in the file manager,
+zips archived seasons, or deletes a league or season — deletion asks you to type the name and
+moves the folder (including files the app doesn't manage) to the OS trash. Drop files onto any
+folder view to copy them in. Your last-opened league and collapsed days are remembered per
+location.
 
 ## Development
 

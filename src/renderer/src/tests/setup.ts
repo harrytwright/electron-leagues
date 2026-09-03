@@ -71,6 +71,7 @@ export function setSystemDark(dark: boolean): void {
 
 afterEach(() => {
   cleanup()
+  localStorage.clear()
   systemDark = false
   darkQueryList.reset()
   document.documentElement.removeAttribute('data-mode')
