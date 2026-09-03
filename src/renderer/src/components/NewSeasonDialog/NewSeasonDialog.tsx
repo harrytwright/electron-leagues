@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button, Checkbox, Dialog, Input, Select, Text } from '@cloudflare/kumo'
 import { parseSeasonName, suggestSeasonName, type SeasonType } from '@shared/season'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
-import type { Props, SeasonTypeOption, Source } from './interface'
+import { SOURCES, type Props, type SeasonTypeOption, type Source } from './interface'
 
 const TYPES: ReadonlyArray<SeasonTypeOption> = [
   { value: 'cross-year', label: 'Cross-year', example: '2025-26' },
@@ -14,8 +14,6 @@ const TYPE_ITEMS = TYPES.map((item) => ({
   value: item.value,
   label: `${item.label} (e.g. ${item.example})`
 }))
-
-const SOURCES = ['templates', 'previous', 'empty'] as const
 
 const RUNNING_SOURCE_ITEMS = {
   templates: 'Copy from templates',

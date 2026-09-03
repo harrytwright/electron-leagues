@@ -7,7 +7,9 @@ export interface SeasonTypeOption {
   example: string
 }
 
-export type Source = 'templates' | 'previous' | 'empty'
+export const SOURCES = ['templates', 'previous', 'empty'] as const
+
+export type Source = (typeof SOURCES)[number]
 
 export interface NewSeasonDialogProps {
   league: LeagueNode
