@@ -69,24 +69,19 @@ export function LocationSwitcher({ root, onChanged }: Props): React.JSX.Element 
     >
       {/* Kumo's Button treats `title` as an accessible name, so the native
           tooltip with the full path goes on a wrapper. */}
-      <span title={root} className="block min-w-0 flex-1">
+      <span title={root} className="block min-w-0">
         <DropdownMenu.Trigger
           render={
             <Button
               variant="ghost"
-              className="w-full justify-between overflow-hidden group-data-[state=collapsed]/sidebar:justify-center group-data-[state=collapsed]/sidebar:px-0"
+              className="w-full justify-between overflow-hidden"
               aria-label={`Location: ${pathBasename(root)}`}
             >
               <span className="flex min-w-0 items-center gap-2">
                 <FolderIcon aria-hidden className="shrink-0" />
-                <span className="truncate group-data-[state=collapsed]/sidebar:hidden">
-                  {pathBasename(root)}
-                </span>
+                <span className="truncate">{pathBasename(root)}</span>
               </span>
-              <CaretUpDownIcon
-                aria-hidden
-                className="shrink-0 text-kumo-subtle group-data-[state=collapsed]/sidebar:hidden"
-              />
+              <CaretUpDownIcon aria-hidden className="shrink-0 text-kumo-subtle" />
             </Button>
           }
         />
