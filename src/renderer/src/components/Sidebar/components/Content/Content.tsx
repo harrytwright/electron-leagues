@@ -68,7 +68,7 @@ export function Content({ tree, selection, onSelect }: Props): React.JSX.Element
                         icon={
                           <span
                             aria-hidden="true"
-                            className="inline-flex w-4 shrink-0 items-center justify-center text-[9px]/none font-medium text-kumo-subtle"
+                            className="inline-flex w-6 shrink-0 items-center justify-center text-[11px]/none font-medium text-kumo-subtle"
                           >
                             {WEEKDAY_ABBREVIATIONS[day]}
                           </span>

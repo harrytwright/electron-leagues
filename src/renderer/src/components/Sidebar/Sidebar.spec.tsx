@@ -116,7 +116,7 @@ it('uses compact weekday badges while keeping full accessible names', () => {
     expect(trigger).toHaveAccessibleName(name)
     const badge = within(trigger).getByText(abbreviation)
     expect(badge).toHaveAttribute('aria-hidden', 'true')
-    expect(badge).toHaveClass('w-4')
+    expect(badge).toHaveClass('w-6')
   }
 })
 
