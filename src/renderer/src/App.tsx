@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LeaguesTree } from '@shared/tree'
 import { Button, Loader, Sidebar as KumoSidebar, Text, ToastProvider } from '@cloudflare/kumo'
-import FirstRun from './components/FirstRun'
-import HomeView from './components/HomeView'
-import LeagueView from './components/LeagueView'
-import Sidebar from './components/Sidebar'
+import { FirstRun } from './components/FirstRun'
+import { HomeView } from './components/HomeView'
+import { LeagueView } from './components/LeagueView'
+import { Sidebar } from './components/Sidebar'
+import { Toolbar } from './components/Toolbar'
 import { ipcErrorMessage } from './lib/ipc-error'
 import { loadSelection, saveSelection } from './lib/local-store'
 import { findLeague, HOME, restoreSelection, type Selection } from './lib/selection'
@@ -160,22 +161,25 @@ function AppContent(): React.JSX.Element {
       defaultOpen
       collapsible="icon"
       resizable={false}
-      className="flex h-full min-h-0"
+      contained
+      className="flex h-full flex-col"
     >
-      <Sidebar
-        key={tree.root}
-        tree={tree}
-        selection={selection}
-        onSelect={select}
-        onChanged={refresh}
+      <Toolbar
+        root={tree.root}
+        isHome={selection.kind === 'home'}
+        onHome={() => select(HOME)}
+        onLocationChanged={refresh}
       />
-      <main className="h-full min-w-0 flex-1 overflow-auto">
-        {selectedLeague ? (
-          <LeagueView key={selectedLeague.path} league={selectedLeague} onChanged={refresh} />
-        ) : (
-          <HomeView tree={tree} onSelect={select} onChanged={refresh} />
-        )}
-      </main>
+      <div className="flex h-full min-h-0 w-full">
+        <Sidebar key={tree.root} tree={tree} selection={selection} onSelect={select} />
+        <main className="h-full min-w-0 flex-1 overflow-auto">
+          {selectedLeague ? (
+            <LeagueView key={selectedLeague.path} league={selectedLeague} onChanged={refresh} />
+          ) : (
+            <HomeView tree={tree} onSelect={select} onChanged={refresh} />
+          )}
+        </main>
+      </div>
     </KumoSidebar.Provider>
   )
 }

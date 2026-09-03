@@ -129,11 +129,11 @@ it('falls back to home when the remembered league is not where it was, keeping t
   render(<App />)
 
   expect(await screen.findByRole('heading', { name: 'Shared documents' })).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Home' })).toHaveAttribute('aria-current', 'true')
+  expect(screen.getByRole('button', { name: 'Go home' })).toHaveAttribute('aria-current', 'page')
   expect(localStorage.getItem('leagues:/root:selection')).toBe(stored)
 })
 
-it('remembers what the user selects, per location', async () => {
+it('remembers selections and returns to Home from the title bar', async () => {
   installMockApi({ scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs')) })
   const user = userEvent.setup()
 
@@ -143,6 +143,14 @@ it('remembers what the user selects, per location', async () => {
   expect(localStorage.getItem('leagues:/root:selection')).toBe(
     JSON.stringify({ kind: 'league', day: 'monday', folderName: 'Pairs' })
   )
+
+  const home = screen.getByRole('button', { name: 'Go home' })
+  expect(home).not.toHaveAttribute('aria-current')
+  await user.click(home)
+
+  expect(await screen.findByRole('heading', { name: 'Shared documents' })).toBeInTheDocument()
+  expect(home).toHaveAttribute('aria-current', 'page')
+  expect(localStorage.getItem('leagues:/root:selection')).toBe(JSON.stringify({ kind: 'home' }))
 })
 
 it('drops the selection to home when the selected league disappears from a rescan', async () => {
@@ -160,7 +168,7 @@ it('drops the selection to home when the selected league disappears from a resca
   act(() => emitTreeChanged())
 
   expect(await screen.findByRole('heading', { name: 'Shared documents' })).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Home' })).toHaveAttribute('aria-current', 'true')
+  expect(screen.getByRole('button', { name: 'Go home' })).toHaveAttribute('aria-current', 'page')
 })
 
 it('switching location restores that location’s memory without touching the other’s', async () => {
