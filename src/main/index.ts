@@ -304,6 +304,10 @@ function createWindow(): void {
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
+    // macOS needs the flag to expose titlebar-area CSS environment variables,
+    // but only Windows and Linux accept configurable overlay options.
+    titleBarOverlay:
+      process.platform === 'darwin' ? true : titleBarOverlay(nativeTheme.shouldUseDarkColors),
     // Match Kumo's --color-kumo-base (light #fff, dark oklch(17% 0 0)) so the
     // window doesn't flash the wrong colour before the renderer paints.
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#0f0f0f' : '#ffffff',
@@ -312,11 +316,8 @@ function createWindow(): void {
       sandbox: false
     }
   }
-  // Match the renderer toolbar so Electron vertically centres the native
-  // window controls and exposes an accurate titlebar-area safe region.
-  if (process.platform !== 'darwin') {
-    options.titleBarOverlay = titleBarOverlay(nativeTheme.shouldUseDarkColors)
-  }
+  // Centre macOS's 12px traffic lights in the 48px toolbar.
+  if (process.platform === 'darwin') options.trafficLightPosition = { x: 14, y: 18 }
   if (process.platform === 'linux') options.icon = icon
   mainWindow = new BrowserWindow(options)
 
