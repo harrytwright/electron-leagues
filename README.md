@@ -29,11 +29,11 @@ the league's Archive folder.
 
 ## Using the app
 
-The sidebar's header switches between leagues folders ("locations") you have opened before,
-creates a new one, or reveals the current one. **Home** shows the templates and shared
-documents; leagues are listed under their night and can be collapsed per day. A league opens
-as a file browser: seasons at the top (newest first, with their status), then any other files
-and the Archive folder. Clicking a file opens it in its default program; clicking a folder
+The window title bar contains **Home** and the location switcher, which changes between leagues
+folders ("locations"), creates a new one, or reveals the current one. Home shows the templates
+and shared documents, while the sidebar holds the Leagues list grouped under collapsible days.
+A league opens as a file browser: seasons at the top (newest first, with their status), then any
+other files and the Archive folder. Clicking a file opens it in its default program; clicking a folder
 drills in, and the breadcrumbs lead back. Each row's `…` menu reveals it in the file manager,
 zips archived seasons, or deletes a league or season — deletion asks you to type the name and
 moves the folder (including files the app doesn't manage) to the OS trash. Drop files onto any
