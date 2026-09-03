@@ -287,6 +287,14 @@ function registerIpc(): void {
   })
 }
 
+function titleBarOverlay(dark: boolean): Electron.TitleBarOverlayOptions {
+  return {
+    color: dark ? '#0f0f0f' : '#ffffff',
+    symbolColor: dark ? '#ffffff' : '#0f0f0f',
+    height: 48
+  }
+}
+
 function createWindow(): void {
   const options: Electron.BrowserWindowConstructorOptions = {
     width: 1100,
@@ -296,9 +304,6 @@ function createWindow(): void {
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hidden',
-    // Match the renderer title bar so Electron vertically centres the native
-    // window controls and exposes an accurate titlebar-area safe region.
-    titleBarOverlay: { height: 48 },
     // Match Kumo's --color-kumo-base (light #fff, dark oklch(17% 0 0)) so the
     // window doesn't flash the wrong colour before the renderer paints.
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#0f0f0f' : '#ffffff',
@@ -307,13 +312,20 @@ function createWindow(): void {
       sandbox: false
     }
   }
+  // Match the renderer toolbar so Electron vertically centres the native
+  // window controls and exposes an accurate titlebar-area safe region.
+  if (process.platform !== 'darwin') {
+    options.titleBarOverlay = titleBarOverlay(nativeTheme.shouldUseDarkColors)
+  }
   if (process.platform === 'linux') options.icon = icon
   mainWindow = new BrowserWindow(options)
 
-  // Keep the backing surface in step when the OS theme changes at runtime,
-  // otherwise resize/reload regions paint the stale colour.
-  const onThemeUpdated = (): void =>
-    mainWindow?.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#0f0f0f' : '#ffffff')
+  // Keep native surfaces in step when the OS theme changes at runtime.
+  const onThemeUpdated = (): void => {
+    const dark = nativeTheme.shouldUseDarkColors
+    mainWindow?.setBackgroundColor(dark ? '#0f0f0f' : '#ffffff')
+    if (process.platform !== 'darwin') mainWindow?.setTitleBarOverlay(titleBarOverlay(dark))
+  }
 
   nativeTheme.on('updated', onThemeUpdated)
   mainWindow.on('closed', () => nativeTheme.removeListener('updated', onThemeUpdated))
