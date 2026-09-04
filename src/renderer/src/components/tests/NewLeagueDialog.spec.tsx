@@ -39,7 +39,7 @@ it('submits the selected league night', async () => {
   const user = userEvent.setup()
 
   await user.click(screen.getByLabelText(/league night/i))
-  await user.click(screen.getByRole('option', { name: 'Tuesday' }))
+  await user.click(await screen.findByRole('option', { name: 'Tuesday' }))
   await user.type(screen.getByLabelText(/league name/i), 'Tuesday triples{Enter}')
 
   expect(api.createLeague).toHaveBeenCalledWith('tuesday', 'Tuesday triples')
@@ -106,7 +106,7 @@ it('resets its fields and errors each time it opens', async () => {
   const user = userEvent.setup()
 
   await user.click(screen.getByLabelText(/league night/i))
-  await user.click(screen.getByRole('option', { name: 'Friday' }))
+  await user.click(await screen.findByRole('option', { name: 'Friday' }))
   await user.type(screen.getByLabelText(/league name/i), 'Stale text{Enter}')
   expect(await screen.findByRole('alert')).toHaveTextContent('stale error')
 
