@@ -2,6 +2,9 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { DirEntry, LeaguesTree } from '../shared/tree'
 import type { Weekday } from '../shared/weekday'
+import { getRendererMetrics } from './renderer-metrics'
+
+export type { RendererMetrics } from './renderer-metrics'
 
 export interface SeasonCreateRequest {
   day: Weekday
@@ -12,6 +15,7 @@ export interface SeasonCreateRequest {
 }
 
 const api = {
+  getRendererMetrics,
   getAnalyticsConfig: (): Promise<{ apiKey: string | null; distinctId: string }> =>
     ipcRenderer.invoke('analytics:config'),
   getRoot: (): Promise<string | null> => ipcRenderer.invoke('root:get'),

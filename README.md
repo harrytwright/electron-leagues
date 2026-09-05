@@ -33,8 +33,12 @@ The window title bar contains **Home** and the location switcher, which changes 
 folders ("locations"), creates a new one, or reveals the current one. Home shows the templates
 and shared documents, while the sidebar holds the Leagues list grouped under collapsible days.
 A league opens as a file browser: seasons at the top (newest first, with their status), then any
-other files and the Archive folder. Clicking a file opens it in its default program; clicking a folder
-drills in, and the breadcrumbs lead back. Each row's `…` menu reveals it in the file manager,
+other files and the Archive folder. The league, archive and season panes share a desktop-style
+file browser: click to select, double-click or press Enter to open, and use the arrow keys to move
+between rows. Breadcrumbs lead back. The league overview includes season status badges and item
+counts, with a filter for the current folder. Within a season, disclosure arrows expand folders
+in place and column headings sort each folder's contents. The season filter searches loaded
+folders and keeps matching files' parents visible. Each row's `…` menu reveals it in the file manager,
 zips archived seasons, or deletes a league or season — deletion asks you to type the name and
 moves the folder (including files the app doesn't manage) to the OS trash. Drop files onto any
 folder view to copy them in. Your last-opened league and collapsed days are remembered per

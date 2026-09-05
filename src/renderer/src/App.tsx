@@ -5,6 +5,7 @@ import { FirstRun } from './components/FirstRun'
 import { HomeView } from './components/HomeView'
 import { LeagueView } from './components/LeagueView'
 import { Sidebar } from './components/Sidebar'
+import { StatusBar } from './components/StatusBar'
 import { Toolbar } from './components/Toolbar'
 import { ipcErrorMessage } from './lib/ipc-error'
 import { loadSelection, saveSelection } from './lib/local-store'
@@ -16,6 +17,11 @@ interface ScanErrorProps {
   message: string | null
   onRetry: () => Promise<void>
   onChooseAnother: () => Promise<void>
+}
+
+interface LeagueNavigation {
+  ownerPath: string
+  currentDir: string
 }
 
 function ScanError({ message, onRetry, onChooseAnother }: ScanErrorProps): React.JSX.Element {
@@ -61,6 +67,7 @@ function AppContent(): React.JSX.Element {
   const [tree, setTree] = useState<LeaguesTree | null>(null)
   const [scanError, setScanError] = useState<string | null>(null)
   const [selection, setSelection] = useState<Selection>(HOME)
+  const [leagueNavigation, setLeagueNavigation] = useState<LeagueNavigation | null>(null)
 
   // Concurrent refreshes (watcher + retry click) settle in any order; only the
   // most recently started one may write state.
@@ -107,6 +114,7 @@ function AppContent(): React.JSX.Element {
   // Remembered per location, but only what the user chose: a league that is
   // merely missing from one scan (sync lag, mid-rename) must not erase it.
   const select = useCallback((next: Selection) => {
+    setLeagueNavigation(null)
     setSelection(next)
     if (restoredRoot.current) saveSelection(restoredRoot.current, next)
   }, [])
@@ -153,6 +161,11 @@ function AppContent(): React.JSX.Element {
   }
 
   const selectedLeague = findLeague(tree, selection)
+  const statusPath = selectedLeague
+    ? leagueNavigation?.ownerPath === selectedLeague.path
+      ? leagueNavigation.currentDir
+      : selectedLeague.path
+    : tree.root
 
   // Keyed on the location / league so each view's local state starts fresh
   // when they change.
@@ -170,16 +183,24 @@ function AppContent(): React.JSX.Element {
         onHome={() => select(HOME)}
         onLocationChanged={refresh}
       />
-      <div className="flex h-full min-h-0 w-full">
+      <div className="flex min-h-0 w-full flex-1">
         <Sidebar key={tree.root} tree={tree} selection={selection} onSelect={select} />
         <main className="h-full min-w-0 flex-1 overflow-auto">
           {selectedLeague ? (
-            <LeagueView key={selectedLeague.path} league={selectedLeague} onChanged={refresh} />
+            <LeagueView
+              key={selectedLeague.path}
+              league={selectedLeague}
+              onChanged={refresh}
+              onCurrentDirChange={(currentDir) =>
+                setLeagueNavigation({ ownerPath: selectedLeague.path, currentDir })
+              }
+            />
           ) : (
             <HomeView tree={tree} onSelect={select} onChanged={refresh} />
           )}
         </main>
       </div>
+      <StatusBar path={statusPath} />
     </KumoSidebar.Provider>
   )
 }

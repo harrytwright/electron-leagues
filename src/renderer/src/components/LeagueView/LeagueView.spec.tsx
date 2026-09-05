@@ -46,9 +46,14 @@ const ARCHIVE_LISTING = {
   ]
 }
 
-function renderLeague(league: LeagueNode = fullLeague()): ReturnType<typeof vi.fn> {
+function renderLeague(
+  league: LeagueNode = fullLeague(),
+  onCurrentDirChange = vi.fn()
+): ReturnType<typeof vi.fn> {
   const onChanged = vi.fn()
-  renderWithProviders(<LeagueView league={league} onChanged={onChanged} />)
+  renderWithProviders(
+    <LeagueView league={league} onChanged={onChanged} onCurrentDirChange={onCurrentDirChange} />
+  )
   return onChanged
 }
 
@@ -61,7 +66,8 @@ async function openRowMenu(
 }
 
 function dropZone(): HTMLElement {
-  const zone = screen.getByRole('table').closest<HTMLElement>('.ring')
+  const table = screen.queryByRole('treegrid') ?? screen.getByRole('grid')
+  const zone = table.closest<HTMLElement>('[data-file-drop-target]')
   if (!zone) throw new Error('No drop zone around the table')
   return zone
 }
@@ -82,7 +88,7 @@ it('lists seasons newest-first with badges, then other files, then the archive',
   const names = screen
     .getAllByRole('row')
     .slice(1)
-    .map((row) => within(row).getAllByRole('button')[0].textContent)
+    .map((row) => row.getAttribute('aria-label'))
   expect(names).toEqual(['2025-26', '2024-25', 'League notes.pdf', 'Archive'])
   expect(screen.getByRole('row', { name: /2025-26/ })).toHaveTextContent('Active')
   expect(screen.getByRole('row', { name: /2024-25/ })).toHaveTextContent('Previous')
@@ -97,12 +103,53 @@ it('shows the archive row for zipped-only archives and hides it when empty', () 
     <LeagueView
       league={makeLeague({ archivedSeasons: [], archiveItemCount: 1 })}
       onChanged={vi.fn()}
+      onCurrentDirChange={vi.fn()}
     />
   )
   expect(screen.getByRole('row', { name: /Archive/ })).toHaveTextContent('1 item')
 
-  view.rerender(<LeagueView league={makeLeague()} onChanged={vi.fn()} />)
-  expect(screen.queryByRole('button', { name: 'Archive' })).not.toBeInTheDocument()
+  view.rerender(
+    <LeagueView league={makeLeague()} onChanged={vi.fn()} onCurrentDirChange={vi.fn()} />
+  )
+  expect(screen.queryByRole('row', { name: 'Archive' })).not.toBeInTheDocument()
+})
+
+it('selects league rows with one click and opens the keyboard-selected season with Enter', async () => {
+  const api = installMockApi()
+  const user = userEvent.setup()
+  const onCurrentDirChange = vi.fn()
+  renderLeague(fullLeague(), onCurrentDirChange)
+
+  await user.click(screen.getByRole('row', { name: '2025-26' }))
+  expect(screen.getByRole('row', { name: '2025-26' })).toHaveAttribute('aria-selected', 'true')
+  expect(api.listDir).not.toHaveBeenCalled()
+  expect(onCurrentDirChange).not.toHaveBeenCalled()
+
+  await user.keyboard('{ArrowDown}')
+  expect(screen.getByRole('row', { name: '2024-25' })).toHaveFocus()
+  await user.keyboard('{Enter}')
+  expect(onCurrentDirChange).toHaveBeenCalledExactlyOnceWith(`${LEAGUE_PATH}/2024-25`)
+  expect(await screen.findByRole('treegrid', { name: '2024-25' })).toBeInTheDocument()
+})
+
+it('filters the league overview without reading folders and restores the season order', async () => {
+  const api = installMockApi()
+  const user = userEvent.setup()
+  renderLeague()
+
+  await user.type(screen.getByRole('textbox', { name: 'Filter this folder' }), 'archive')
+  expect(screen.getByRole('row', { name: 'Archive' })).toHaveTextContent('Read-only')
+  expect(screen.queryByRole('row', { name: '2025-26' })).not.toBeInTheDocument()
+  expect(screen.getByText('1 of 4 items')).toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: 'Clear filter' }))
+  expect(
+    screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => row.getAttribute('aria-label'))
+  ).toEqual(['2025-26', '2024-25', 'League notes.pdf', 'Archive'])
+  expect(api.listDir).not.toHaveBeenCalled()
 })
 
 it('drills into a season and back out through the breadcrumbs', async () => {
@@ -120,17 +167,63 @@ it('drills into a season and back out through the breadcrumbs', async () => {
     )
   })
   const user = userEvent.setup()
-  renderLeague()
+  const onCurrentDirChange = vi.fn()
+  renderLeague(fullLeague(), onCurrentDirChange)
 
-  await user.click(screen.getByRole('button', { name: '2025-26' }))
-  await user.click(await screen.findByRole('button', { name: 'Week 1' }))
-  expect(await screen.findByRole('button', { name: 'Scores.xlsx' })).toBeInTheDocument()
+  await user.dblClick(screen.getByRole('row', { name: '2025-26' }))
+  expect(onCurrentDirChange).toHaveBeenLastCalledWith(`${LEAGUE_PATH}/2025-26`)
+  await user.dblClick(await screen.findByRole('row', { name: 'Week 1' }))
+  expect(onCurrentDirChange).toHaveBeenLastCalledWith(`${LEAGUE_PATH}/2025-26/Week 1`)
+  expect(await screen.findByRole('row', { name: 'Scores.xlsx' })).toBeInTheDocument()
   expect(document.querySelector('[aria-current="page"]')).toHaveTextContent('Week 1')
 
   // Kumo renders a CSS-hidden mobile copy of the trail; the first link is the desktop one.
   await user.click(screen.getAllByRole('link', { name: 'Mixed triples' })[0])
 
-  expect(await screen.findByRole('button', { name: '2024-25' })).toBeInTheDocument()
+  expect(await screen.findByRole('row', { name: '2024-25' })).toBeInTheDocument()
+  expect(onCurrentDirChange).toHaveBeenLastCalledWith(LEAGUE_PATH)
+})
+
+it('reports the league root when backing out of an unreadable folder', async () => {
+  installMockApi({ listDir: vi.fn(listingFor({})) })
+  const user = userEvent.setup()
+  const onCurrentDirChange = vi.fn()
+  renderLeague(fullLeague(), onCurrentDirChange)
+
+  await user.dblClick(screen.getByRole('row', { name: '2025-26' }))
+  await user.click(await screen.findByRole('button', { name: 'Back to Mixed triples' }))
+
+  expect(onCurrentDirChange).toHaveBeenNthCalledWith(1, `${LEAGUE_PATH}/2025-26`)
+  expect(onCurrentDirChange).toHaveBeenNthCalledWith(2, LEAGUE_PATH)
+})
+
+it('keeps every ancestor when opening a folder expanded inside the season tree', async () => {
+  const seasonPath = `${LEAGUE_PATH}/2025-26`
+  const weeksPath = `${seasonPath}/Weekly results`
+  const weekPath = `${weeksPath}/Week 1`
+  installMockApi({
+    listDir: vi.fn(
+      listingFor({
+        [seasonPath]: [makeDirEntry({ name: 'Weekly results', kind: 'folder', path: weeksPath })],
+        [weeksPath]: [makeDirEntry({ name: 'Week 1', kind: 'folder', path: weekPath })],
+        [weekPath]: []
+      })
+    )
+  })
+  const user = userEvent.setup()
+  const onCurrentDirChange = vi.fn()
+  renderLeague(fullLeague(), onCurrentDirChange)
+  await user.dblClick(screen.getByRole('row', { name: '2025-26' }))
+  await user.click(await screen.findByRole('button', { name: 'Expand Weekly results' }))
+  expect(onCurrentDirChange).toHaveBeenCalledExactlyOnceWith(seasonPath)
+
+  await user.dblClick(await screen.findByRole('row', { name: 'Week 1' }))
+  await screen.findByText('This folder is empty')
+  expect(onCurrentDirChange).toHaveBeenLastCalledWith(weekPath)
+  expect(screen.getAllByRole('link', { name: '2025-26' })[0]).toBeInTheDocument()
+  await user.click(screen.getAllByRole('link', { name: 'Weekly results' })[0])
+  expect(await screen.findByRole('row', { name: 'Week 1' })).toBeInTheDocument()
+  expect(onCurrentDirChange).toHaveBeenLastCalledWith(weeksPath)
 })
 
 it('opens the new-season dialog from the header', async () => {
@@ -154,7 +247,7 @@ it('imports picked files into the folder being viewed', async () => {
   await user.click(screen.getByRole('button', { name: 'Add files…' }))
   await waitFor(() => expect(api.importFiles).toHaveBeenCalledWith(LEAGUE_PATH, ['/tmp/a.pdf']))
 
-  await user.click(screen.getByRole('button', { name: '2025-26' }))
+  await user.dblClick(screen.getByRole('row', { name: '2025-26' }))
   await screen.findByText('This folder is empty')
   await user.click(screen.getByRole('button', { name: 'Add files…' }))
 
@@ -183,16 +276,16 @@ it('drops files into the folder being viewed, but never into the archive', async
   fireEvent.drop(dropZone(), { dataTransfer: { files } })
   await waitFor(() => expect(api.importFiles).toHaveBeenCalledWith(LEAGUE_PATH, ['/drop/x.pdf']))
 
-  await user.click(screen.getByRole('button', { name: '2025-26' }))
-  await screen.findByRole('button', { name: 'Rules.docx' })
+  await user.dblClick(screen.getByRole('row', { name: '2025-26' }))
+  await screen.findByRole('row', { name: 'Rules.docx' })
   fireEvent.drop(dropZone(), { dataTransfer: { files } })
   await waitFor(() =>
     expect(api.importFiles).toHaveBeenCalledWith(`${LEAGUE_PATH}/2025-26`, ['/drop/x.pdf'])
   )
 
   await user.click(screen.getAllByRole('link', { name: 'Mixed triples' })[0])
-  await user.click(await screen.findByRole('button', { name: 'Archive' }))
-  await screen.findByRole('button', { name: '2023-24' })
+  await user.dblClick(await screen.findByRole('row', { name: 'Archive' }))
+  await screen.findByRole('row', { name: '2023-24' })
   fireEvent.drop(dropZone(), { dataTransfer: { files } })
 
   expect(api.importFiles).toHaveBeenCalledTimes(2)
@@ -203,9 +296,9 @@ it('keeps the archive read-only at every depth', async () => {
   const user = userEvent.setup()
   renderLeague()
 
-  await user.click(screen.getByRole('button', { name: 'Archive' }))
-  await user.click(await screen.findByRole('button', { name: '2023-24' }))
-  await screen.findByRole('button', { name: 'Rules.docx' })
+  await user.dblClick(screen.getByRole('row', { name: 'Archive' }))
+  await user.dblClick(await screen.findByRole('row', { name: '2023-24' }))
+  await screen.findByRole('row', { name: 'Rules.docx' })
 
   expect(screen.getByRole('button', { name: 'Add files…' })).toBeDisabled()
   const menu = await openRowMenu(user, 'Rules.docx')
@@ -221,8 +314,8 @@ it('offers to zip archived seasons, once at a time, and reports the outcome', as
   const user = userEvent.setup()
   const onChanged = renderLeague()
 
-  await user.click(screen.getByRole('button', { name: 'Archive' }))
-  await screen.findByRole('button', { name: '2023-24' })
+  await user.dblClick(screen.getByRole('row', { name: 'Archive' }))
+  await screen.findByRole('row', { name: '2023-24' })
   expect(screen.getByRole('button', { name: 'Add files…' })).toBeDisabled()
 
   let menu = await openRowMenu(user, '2023-24')
@@ -259,8 +352,8 @@ it('shows an error toast when zipping fails', async () => {
   const user = userEvent.setup()
   const onChanged = renderLeague()
 
-  await user.click(screen.getByRole('button', { name: 'Archive' }))
-  await screen.findByRole('button', { name: '2023-24' })
+  await user.dblClick(screen.getByRole('row', { name: 'Archive' }))
+  await screen.findByRole('row', { name: '2023-24' })
   const menu = await openRowMenu(user, '2023-24')
   await user.click(within(menu).getByRole('menuitem', { name: 'Zip season' }))
 

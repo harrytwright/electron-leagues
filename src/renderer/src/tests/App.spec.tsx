@@ -1,9 +1,9 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import type { LeaguesTree } from '@shared/tree'
 import App from '../App'
-import { makeLeague, makeTree } from './fixtures'
+import { makeDirEntry, makeLeague, makeTree } from './fixtures'
 import { emitTreeChanged, installMockApi } from './mock-api'
 
 function treeWithMondayLeagues(root = '/root', ...folderNames: string[]): LeaguesTree {
@@ -41,6 +41,44 @@ it('shows the shared view when scan returns a tree', async () => {
   render(<App />)
 
   expect(await screen.findByRole('heading', { name: 'Shared documents' })).toBeInTheDocument()
+  const status = screen.getByRole('contentinfo', { name: 'Application status' })
+  const contentRow = screen.getByRole('main').parentElement
+  expect(contentRow).toContainElement(screen.getByRole('navigation', { name: 'Leagues' }))
+  expect(contentRow?.nextElementSibling).toBe(status)
+  expect(within(status).getByTitle('/root')).toHaveTextContent('/root')
+})
+
+it('updates the status path from the location root through league navigation', async () => {
+  const leaguePath = '/root/monday/Pairs'
+  const seasonPath = `${leaguePath}/2025-26`
+  const weekPath = `${seasonPath}/Week 1`
+  installMockApi({
+    scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs', 'Trios')),
+    listDir: vi.fn((path: string) =>
+      Promise.resolve(
+        path === seasonPath
+          ? [makeDirEntry({ name: 'Week 1', kind: 'folder', path: weekPath })]
+          : []
+      )
+    )
+  })
+  const user = userEvent.setup()
+
+  render(<App />)
+
+  const status = await screen.findByRole('contentinfo', { name: 'Application status' })
+  expect(within(status).getByTitle('/root')).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Pairs' }))
+  expect(within(status).getByTitle(leaguePath)).toBeInTheDocument()
+
+  await user.dblClick(screen.getByRole('row', { name: '2025-26' }))
+  expect(within(status).getByTitle(seasonPath)).toBeInTheDocument()
+
+  await user.dblClick(await screen.findByRole('row', { name: 'Week 1' }))
+  expect(within(status).getByTitle(weekPath)).toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: 'Trios' }))
+  expect(within(status).getByTitle('/root/monday/Trios')).toBeInTheDocument()
 })
 
 it('rescans when the tree changes on disk', async () => {

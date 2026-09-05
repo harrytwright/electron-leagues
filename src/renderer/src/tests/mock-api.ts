@@ -13,6 +13,10 @@ export function emitTreeChanged(): void {
 export function installMockApi(overrides: Partial<RendererApi> = {}): RendererApi {
   treeChangedListeners = []
   const api: RendererApi = {
+    getRendererMetrics: vi.fn<RendererApi['getRendererMetrics']>(() => ({
+      usedHeapKilobytes: 42 * 1024,
+      cpuPercent: 1.2
+    })),
     scan: vi.fn<RendererApi['scan']>().mockResolvedValue(null),
     // Echo the sources back, like the real handler returns the copied paths.
     importFiles: vi.fn<RendererApi['importFiles']>((_dest, sources) => Promise.resolve(sources)),

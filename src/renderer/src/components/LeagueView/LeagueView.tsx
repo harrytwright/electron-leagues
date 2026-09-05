@@ -11,10 +11,12 @@ import { useDirListing } from '@renderer/lib/use-dir-listing'
 import { useImportFiles } from '@renderer/lib/use-import-files'
 import { CrumbTrail } from '../CrumbTrail'
 import { DeleteResourceDialog, type DeleteTarget } from '../DeleteResourceDialog'
-import { DirectoryTable, type DirectoryRow } from '../DirectoryTable'
+import type { DirectoryRow } from '../DirectoryTable'
+import { DirectoryBrowser } from '../DirectoryBrowser/DirectoryBrowser'
+import type { BrowserRow } from '../DirectoryBrowser/interface'
 import { IconButton } from '../IconButton'
-import { ListingPanel } from '../ListingPanel'
 import { NewSeasonDialog } from '../NewSeasonDialog'
+import { SeasonFiles } from '../SeasonFiles'
 import type { Props } from './interface'
 
 function seasonBadgeVariant(status: SeasonNode['status']): 'success' | 'info' {
@@ -27,7 +29,7 @@ function seasonBadgeVariant(status: SeasonNode['status']): 'success' | 'info' {
   }
 }
 
-export function LeagueView({ league, onChanged }: Props): React.JSX.Element {
+export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): React.JSX.Element {
   const trail = useCrumbs(league.path)
   const [newSeason, setNewSeason] = useState(false)
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null)
@@ -39,13 +41,24 @@ export function LeagueView({ league, onChanged }: Props): React.JSX.Element {
   // on demand. Archives are read-only from here.
   const inArchive = trail.crumbs[0]?.path === league.archivePath
   const atArchiveRoot = trail.currentDir === league.archivePath
+  const inSeason =
+    league.seasons.some((season) => season.path === trail.crumbs[0]?.path) ||
+    (inArchive && league.archivedSeasons.includes(trail.crumbs[1]?.name))
   const listing = useDirListing(trail.atBase ? null : trail.currentDir)
   const importer = useImportFiles(inArchive ? undefined : trail.currentDir, async () => {
     listing.reload()
     await onChanged()
   })
 
-  const enter = (row: DirectoryRow): void => trail.enter({ name: row.name, path: row.path })
+  const enter = (row: DirectoryRow): void => {
+    trail.enter({ name: row.name, path: row.path })
+    onCurrentDirChange(row.path)
+  }
+
+  const jumpTo = (depth: number): void => {
+    trail.jumpTo(depth)
+    onCurrentDirChange(depth === 0 ? league.path : trail.crumbs[depth - 1].path)
+  }
 
   const zip = async (name: string): Promise<void> => {
     if (zipping) return
@@ -62,12 +75,14 @@ export function LeagueView({ league, onChanged }: Props): React.JSX.Element {
     }
   }
 
-  const topRows: DirectoryRow[] = [
+  const topRows: BrowserRow[] = [
     ...[...league.seasons].reverse().map((season) => ({
       key: season.path,
       name: season.name,
       kind: 'folder' as const,
       path: season.path,
+      typeLabel: 'Season',
+      contents: `${season.files.length} item${season.files.length === 1 ? '' : 's'}`,
       badge: (
         <Badge variant={seasonBadgeVariant(season.status)}>{sentenceCase(season.status)}</Badge>
       ),
@@ -92,18 +107,16 @@ export function LeagueView({ league, onChanged }: Props): React.JSX.Element {
             name: 'Archive',
             kind: 'folder' as const,
             path: league.archivePath,
-            badge: (
-              <Badge variant="secondary">
-                {`${league.archiveItemCount} item${league.archiveItemCount === 1 ? '' : 's'}`}
-              </Badge>
-            )
+            typeLabel: 'Archive folder',
+            contents: `${league.archiveItemCount} item${league.archiveItemCount === 1 ? '' : 's'}`,
+            badge: <Badge variant="secondary">Read-only</Badge>
           }
         ]
       : [])
   ]
 
   const listed = listing.entries ?? []
-  const listedRows: DirectoryRow[] = listed.map((entry) => {
+  const listedRows: BrowserRow[] = listed.map((entry) => {
     const zipped = listed.some((e) => e.name === `${entry.name}.zip`)
     const archivedSeason =
       atArchiveRoot && entry.kind === 'folder' && league.archivedSeasons.includes(entry.name)
@@ -113,6 +126,7 @@ export function LeagueView({ league, onChanged }: Props): React.JSX.Element {
       kind: entry.kind,
       path: entry.path,
       mtime: entry.mtime,
+      typeLabel: archivedSeason ? 'Season' : undefined,
       badge: zipping === entry.name ? <Badge variant="secondary">Zipping…</Badge> : undefined,
       menuItems: archivedSeason
         ? [
@@ -127,9 +141,9 @@ export function LeagueView({ league, onChanged }: Props): React.JSX.Element {
   })
 
   return (
-    <div className="grid content-start">
-      <div className="sticky top-0 z-10 border-b border-kumo-line bg-kumo-base">
-        <div className="mx-auto grid w-full max-w-5xl gap-3 px-6 pt-5 pb-3">
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="sticky top-0 z-10 shrink-0 border-b border-kumo-line bg-kumo-base">
+        <div className="grid w-full gap-1 px-4 pt-3 pb-1">
           <div className="flex items-start justify-between gap-4">
             <div className="grid min-w-0 gap-1">
               <div className="flex min-w-0 items-center gap-2">
@@ -140,12 +154,14 @@ export function LeagueView({ league, onChanged }: Props): React.JSX.Element {
                   {league.running ? 'Running' : 'Not running'}
                 </Badge>
               </div>
-              <Text variant="secondary">
-                {sentenceCase(league.day)}
-                {league.running ? '' : ' · Create a season to start it'}
-              </Text>
             </div>
-            <Button type="button" variant="primary" onClick={() => setNewSeason(true)}>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="text-base"
+              onClick={() => setNewSeason(true)}
+            >
               New season…
             </Button>
           </div>
@@ -153,13 +169,14 @@ export function LeagueView({ league, onChanged }: Props): React.JSX.Element {
           <div className="flex items-center justify-between gap-4">
             <CrumbTrail
               names={[league.meta.name, ...trail.crumbs.map((c) => c.name)]}
-              onNavigate={trail.jumpTo}
+              onNavigate={jumpTo}
             />
             <div className="flex shrink-0 items-center gap-2">
               <Button
                 type="button"
                 size="sm"
                 variant="ghost"
+                className="text-base"
                 disabled={inArchive || importer.importing}
                 title={inArchive ? 'Archived seasons are read-only' : undefined}
                 icon={<PlusIcon aria-hidden size={14} />}
@@ -203,25 +220,41 @@ export function LeagueView({ league, onChanged }: Props): React.JSX.Element {
         </div>
       </div>
 
-      <div className="mx-auto w-full max-w-5xl p-6">
-        {trail.atBase ? (
-          <DirectoryTable
-            aria-label={league.meta.name}
-            rows={topRows}
-            onNavigate={enter}
-            onDropFiles={importer.importPaths}
-            emptyTitle="No seasons yet"
-            emptyDescription="Create a season to start this league."
+      <div className="flex min-h-0 w-full flex-1 flex-col">
+        {inSeason ? (
+          <SeasonFiles
+            key={trail.currentDir}
+            name={trail.crumbs[trail.crumbs.length - 1].name}
+            listing={listing}
+            readOnly={inArchive}
+            onNavigate={(folders) => {
+              for (const folder of folders) trail.enter(folder)
+              const destination = folders.at(-1)
+              if (destination) onCurrentDirChange(destination.path)
+            }}
+            onDropFiles={inArchive ? undefined : importer.importPaths}
+            onBack={{ label: `Back to ${league.meta.name}`, action: () => jumpTo(0) }}
           />
         ) : (
-          <ListingPanel
-            aria-label={trail.crumbs[trail.crumbs.length - 1].name}
-            listing={listing}
-            rows={listedRows}
+          <DirectoryBrowser
+            key={trail.currentDir}
+            name={trail.atBase ? league.meta.name : trail.crumbs[trail.crumbs.length - 1].name}
+            heading={
+              trail.atBase ? 'Seasons and files' : atArchiveRoot ? 'Archived seasons' : 'Files'
+            }
+            listing={trail.atBase ? undefined : listing}
+            rows={trail.atBase ? topRows : listedRows}
+            metadataColumn={trail.atBase ? 'contents' : 'modified'}
+            readOnly={inArchive}
+            onRefresh={() => {
+              if (trail.atBase) void onChanged()
+              else listing.reload()
+            }}
             onNavigate={enter}
             onDropFiles={inArchive ? undefined : importer.importPaths}
-            onBack={{ label: `Back to ${league.meta.name}`, action: () => trail.jumpTo(0) }}
-            emptyTitle="This folder is empty"
+            onBack={{ label: `Back to ${league.meta.name}`, action: () => jumpTo(0) }}
+            emptyTitle={trail.atBase ? 'No seasons yet' : 'This folder is empty'}
+            emptyDescription={trail.atBase ? 'Create a season to start this league.' : undefined}
           />
         )}
       </div>
