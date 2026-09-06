@@ -14,6 +14,18 @@ function visible(name: string): boolean {
   return !name.startsWith('.')
 }
 
+/** Folder-first natural ordering with a case-sensitive tie-break independent of input order. */
+export function compareDirectoryEntries(
+  a: Pick<FileEntry, 'name' | 'kind'>,
+  b: Pick<FileEntry, 'name' | 'kind'>
+): number {
+  if (a.kind !== b.kind) return a.kind === 'folder' ? -1 : 1
+  return (
+    a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }) ||
+    a.name.localeCompare(b.name)
+  )
+}
+
 /**
  * Single-level listing for the on-demand file browser. Unlike `listEntries`
  * this throws when the directory is gone, so the renderer can tell "empty"
@@ -41,15 +53,7 @@ export async function listDirEntries(dir: string): Promise<DirEntry[]> {
         }
       })
   )
-  return listed
-    .filter((e): e is DirEntry => e !== null)
-    .sort((a, b) => {
-      if (a.kind !== b.kind) return a.kind === 'folder' ? -1 : 1
-      return (
-        a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }) ||
-        a.name.localeCompare(b.name)
-      )
-    })
+  return listed.filter((e): e is DirEntry => e !== null).sort(compareDirectoryEntries)
 }
 
 async function listEntries(dir: string): Promise<FileEntry[]> {

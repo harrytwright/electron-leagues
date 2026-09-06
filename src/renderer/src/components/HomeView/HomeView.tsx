@@ -1,113 +1,213 @@
-import { useState } from 'react'
-import { Button, Text } from '@cloudflare/kumo'
-import { FolderPlusIcon } from '@phosphor-icons/react'
-import { DirectoryTable } from '../DirectoryTable'
-import { FolderBrowser } from '../FolderBrowser'
+import { useEffect, useState } from 'react'
+import { Button, Tabs, Text } from '@cloudflare/kumo'
+import { FolderPlusIcon } from '@phosphor-icons/react/dist/csr/FolderPlus'
+import { PlusIcon } from '@phosphor-icons/react/dist/csr/Plus'
+import type { FileEntry } from '@shared/tree'
+import { useCrumbs } from '@renderer/lib/use-crumbs'
+import { useDirListing } from '@renderer/lib/use-dir-listing'
+import { useImportFiles } from '@renderer/lib/use-import-files'
+import { CrumbTrail } from '../CrumbTrail'
+import { DirectoryBrowser } from '../DirectoryBrowser/DirectoryBrowser'
 import { NewLeagueDialog } from '../NewLeagueDialog'
-import type { Props, SectionProps } from './interface'
+import { TreeFileBrowser } from '../TreeFileBrowser'
+import type { Props } from './interface'
 
-function Section({ title, description, children }: SectionProps): React.JSX.Element {
+type HomeTab = 'shared' | 'templates' | 'other'
+
+function isHomeTab(value: string): value is HomeTab {
+  return value === 'shared' || value === 'templates' || value === 'other'
+}
+
+interface FolderPaneProps {
+  baseDir: string
+  label: string
+  present: boolean
+  onChanged: () => void | Promise<void>
+  onCurrentDirChange: (path: string) => void
+}
+
+function FolderPane({
+  baseDir,
+  label,
+  present,
+  onChanged,
+  onCurrentDirChange
+}: FolderPaneProps): React.JSX.Element {
+  const trail = useCrumbs(baseDir)
+  const listing = useDirListing(present ? trail.currentDir : null)
+  const importer = useImportFiles(present ? trail.currentDir : undefined, async () => {
+    listing.reload()
+    await onChanged()
+  })
+
+  const jumpTo = (depth: number): void => {
+    trail.jumpTo(depth)
+    onCurrentDirChange(depth === 0 ? baseDir : trail.crumbs[depth - 1].path)
+  }
+
   return (
-    <section className="grid gap-3">
-      <div className="grid gap-1">
-        <Text as="h2" variant="heading">
-          {title}
-        </Text>
-        <Text variant="secondary">{description}</Text>
+    <div role="tabpanel" aria-label={label} className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-10 shrink-0 items-center justify-between gap-4 border-b border-kumo-line px-4 py-1">
+        <CrumbTrail
+          names={[label, ...trail.crumbs.map((crumb) => crumb.name)]}
+          onNavigate={jumpTo}
+        />
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="text-base"
+          disabled={!present || importer.importing}
+          icon={<PlusIcon aria-hidden size={14} />}
+          onClick={() => void importer.pickFiles()}
+        >
+          {importer.importing ? 'Importing…' : 'Add files…'}
+        </Button>
       </div>
-      {children}
-    </section>
+      {present ? (
+        <TreeFileBrowser
+          key={trail.currentDir}
+          name={trail.crumbs.at(-1)?.name ?? label}
+          listing={listing}
+          readOnly={false}
+          onNavigate={(folders) => {
+            for (const folder of folders) trail.enter(folder)
+            const destination = folders.at(-1)
+            if (destination) onCurrentDirChange(destination.path)
+          }}
+          onDropFiles={importer.importPaths}
+          onBack={{ label: `Back to ${label}`, action: () => jumpTo(0) }}
+        />
+      ) : (
+        <DirectoryBrowser
+          name={label}
+          heading="Files"
+          rows={[]}
+          metadataColumn="modified"
+          readOnly={false}
+          onRefresh={() => void onChanged()}
+          onNavigate={() => {}}
+          emptyTitle={`No ${label.toLocaleLowerCase()} folder`}
+          emptyDescription="The app couldn’t repair this reserved folder. Refresh to try again."
+        />
+      )}
+    </div>
   )
 }
 
-export function HomeView({ tree, onSelect, onChanged }: Props): React.JSX.Element {
+interface OtherPaneProps {
+  entries: FileEntry[]
+  root: string
+  onChanged: () => void | Promise<void>
+}
+
+function OtherPane({ entries, root, onChanged }: OtherPaneProps): React.JSX.Element {
+  return (
+    <div role="tabpanel" aria-label="Other items" className="flex min-h-0 flex-1 flex-col">
+      <div className="flex min-h-10 shrink-0 items-center border-b border-kumo-line px-4 py-1">
+        <CrumbTrail names={['Other items']} onNavigate={() => {}} />
+      </div>
+      <DirectoryBrowser
+        name="Other items"
+        heading="Other items"
+        rows={entries.map((entry) => ({ ...entry, key: entry.path }))}
+        metadataColumn="contents"
+        readOnly={false}
+        onRefresh={() => void onChanged()}
+        onNavigate={(row) => void window.api.revealFile(row.path)}
+        emptyTitle="No other items"
+        emptyDescription={`Only items directly inside ${root} appear here.`}
+      />
+    </div>
+  )
+}
+
+export function HomeView({
+  tree,
+  onSelect,
+  onChanged,
+  onCurrentDirChange
+}: Props): React.JSX.Element {
   const [creating, setCreating] = useState(false)
+  const [active, setActive] = useState<HomeTab>('shared')
+  const tabs = [
+    { value: 'shared', label: 'Shared documents' },
+    { value: 'templates', label: 'Templates' },
+    ...(tree.unrecognisedRootEntries.length > 0 ? [{ value: 'other', label: 'Other items' }] : [])
+  ]
+  const activeTab =
+    active === 'other' && tree.unrecognisedRootEntries.length === 0 ? 'shared' : active
+  const activePath =
+    activeTab === 'shared'
+      ? tree.sharedPath
+      : activeTab === 'templates'
+        ? tree.templatesPath
+        : tree.root
+
+  useEffect(() => {
+    onCurrentDirChange(activePath)
+  }, [activePath, onCurrentDirChange])
+
+  const changeTab = (value: string): void => {
+    if (isHomeTab(value)) setActive(value)
+  }
 
   return (
-    <div className="mx-auto grid w-full max-w-5xl gap-8 p-6">
-      <header className="flex items-start justify-between gap-4">
-        <div className="grid min-w-0 gap-1.5">
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="sticky top-0 z-10 shrink-0 border-b border-kumo-line bg-kumo-base">
+        <div className="flex items-start justify-between gap-4 px-4 pt-3 pb-2">
           <Text as="h1" variant="heading" size="lg">
             Home
           </Text>
-          <Text variant="secondary" truncate title={tree.root}>
-            <span className="font-mono text-[0.9em]">{tree.root}</span>
-          </Text>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="text-base"
+            icon={<FolderPlusIcon aria-hidden size={14} />}
+            onClick={() => setCreating(true)}
+          >
+            New league…
+          </Button>
         </div>
-        <Button
-          type="button"
-          variant="primary"
-          icon={<FolderPlusIcon aria-hidden />}
-          onClick={() => setCreating(true)}
-        >
-          New league…
-        </Button>
-      </header>
+        <Tabs
+          tabs={tabs}
+          value={activeTab}
+          onValueChange={changeTab}
+          activateOnFocus
+          variant="underline"
+          size="base"
+          className="px-4"
+        />
+      </div>
 
-      <Section title="Templates" description="Starting documents for new seasons.">
-        {tree.hasTemplates ? (
-          <FolderBrowser
-            baseDir={tree.templatesPath}
-            baseLabel="Templates"
-            canImport
-            onImported={onChanged}
-            emptyTitle="No templates yet"
-            emptyDescription="Add the documents a new season can start from."
-          />
-        ) : (
-          <DirectoryTable
-            aria-label="Templates"
-            rows={[]}
-            emptyTitle="No templates folder"
-            emptyDescription="Create a _templates folder in this location to seed new seasons."
-          />
-        )}
-      </Section>
-
-      <Section title="Shared documents" description="General documents used by every league.">
-        {tree.hasShared ? (
-          <FolderBrowser
-            baseDir={tree.sharedPath}
-            baseLabel="Shared documents"
-            canImport
-            onImported={onChanged}
-            emptyTitle="Nothing shared yet"
-            emptyDescription="Drop general documents here — opening times, lane prices…"
-          />
-        ) : (
-          <DirectoryTable
-            aria-label="Shared documents"
-            rows={[]}
-            emptyTitle="No shared folder"
-            emptyDescription="Create a _shared folder in this location for documents every league uses."
-          />
-        )}
-      </Section>
-
-      {tree.unrecognisedRootEntries.length > 0 ? (
-        <Section
-          title="Other items"
-          description="Not managed by this app — leagues live inside the weekday folders."
-        >
-          <DirectoryTable
-            aria-label="Other items"
-            rows={tree.unrecognisedRootEntries.map((entry) => ({
-              key: entry.path,
-              name: entry.name,
-              kind: entry.kind,
-              path: entry.path
-            }))}
-          />
-        </Section>
-      ) : null}
+      {activeTab === 'shared' ? (
+        <FolderPane
+          key="shared"
+          baseDir={tree.sharedPath}
+          label="Shared documents"
+          present={tree.hasShared}
+          onChanged={onChanged}
+          onCurrentDirChange={onCurrentDirChange}
+        />
+      ) : activeTab === 'templates' ? (
+        <FolderPane
+          key="templates"
+          baseDir={tree.templatesPath}
+          label="Templates"
+          present={tree.hasTemplates}
+          onChanged={onChanged}
+          onCurrentDirChange={onCurrentDirChange}
+        />
+      ) : (
+        <OtherPane entries={tree.unrecognisedRootEntries} root={tree.root} onChanged={onChanged} />
+      )}
 
       <NewLeagueDialog
         open={creating}
         onOpenChange={setCreating}
         onCreated={(day, folderName) => {
           setCreating(false)
-          // Wait for the rescan so the new league exists in the tree before it
-          // becomes the selection — selecting early flashes home again.
           void (async () => {
             await onChanged()
             onSelect({ kind: 'league', day, folderName })

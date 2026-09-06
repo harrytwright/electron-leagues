@@ -24,6 +24,11 @@ interface LeagueNavigation {
   currentDir: string
 }
 
+interface HomeNavigation {
+  ownerRoot: string
+  currentDir: string
+}
+
 function ScanError({ message, onRetry, onChooseAnother }: ScanErrorProps): React.JSX.Element {
   const [busy, setBusy] = useState(false)
 
@@ -68,6 +73,7 @@ function AppContent(): React.JSX.Element {
   const [scanError, setScanError] = useState<string | null>(null)
   const [selection, setSelection] = useState<Selection>(HOME)
   const [leagueNavigation, setLeagueNavigation] = useState<LeagueNavigation | null>(null)
+  const [homeNavigation, setHomeNavigation] = useState<HomeNavigation | null>(null)
 
   // Concurrent refreshes (watcher + retry click) settle in any order; only the
   // most recently started one may write state.
@@ -115,9 +121,19 @@ function AppContent(): React.JSX.Element {
   // merely missing from one scan (sync lag, mid-rename) must not erase it.
   const select = useCallback((next: Selection) => {
     setLeagueNavigation(null)
+    // A redundant Home click keeps the mounted pane and its reported directory together.
+    if (next.kind !== 'home') setHomeNavigation(null)
     setSelection(next)
     if (restoredRoot.current) saveSelection(restoredRoot.current, next)
   }, [])
+
+  const homeRoot = tree?.root
+  const updateHomeCurrentDir = useCallback(
+    (currentDir: string) => {
+      if (homeRoot) setHomeNavigation({ ownerRoot: homeRoot, currentDir })
+    },
+    [homeRoot]
+  )
 
   useEffect(() => {
     // refresh() only touches state after awaiting the IPC scan, never synchronously
@@ -165,7 +181,9 @@ function AppContent(): React.JSX.Element {
     ? leagueNavigation?.ownerPath === selectedLeague.path
       ? leagueNavigation.currentDir
       : selectedLeague.path
-    : tree.root
+    : homeNavigation?.ownerRoot === tree.root
+      ? homeNavigation.currentDir
+      : tree.sharedPath
 
   // Keyed on the location / league so each view's local state starts fresh
   // when they change.
@@ -196,7 +214,13 @@ function AppContent(): React.JSX.Element {
               }
             />
           ) : (
-            <HomeView tree={tree} onSelect={select} onChanged={refresh} />
+            <HomeView
+              key={tree.root}
+              tree={tree}
+              onSelect={select}
+              onChanged={refresh}
+              onCurrentDirChange={updateHomeCurrentDir}
+            />
           )}
         </main>
       </div>

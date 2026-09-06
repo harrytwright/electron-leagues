@@ -1,8 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button, Checkbox, Dialog, Input, Select, Text } from '@cloudflare/kumo'
 import { parseSeasonName, suggestSeasonName, type SeasonType } from '@shared/season'
+import {
+  isWorkflowId,
+  NEW_SEASON_WORKFLOWS,
+  STOPPED_SEASON_WORKFLOWS,
+  WORKFLOWS
+} from '@shared/workflows'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
-import { SOURCES, type Props, type SeasonTypeOption, type Source } from './interface'
+import type { Props, SeasonTypeOption, Source } from './interface'
 
 const TYPES: ReadonlyArray<SeasonTypeOption> = [
   { value: 'cross-year', label: 'Cross-year', example: '2025-26' },
@@ -15,27 +21,25 @@ const TYPE_ITEMS = TYPES.map((item) => ({
   label: `${item.label} (e.g. ${item.example})`
 }))
 
-const RUNNING_SOURCE_ITEMS = {
-  templates: 'Copy from templates',
-  previous: 'Copy from previous season',
-  empty: 'Start empty'
-}
+const RUNNING_SOURCE_ITEMS = Object.fromEntries(
+  NEW_SEASON_WORKFLOWS.map((id) => [id, WORKFLOWS[id].label])
+)
 
-const STOPPED_SOURCE_ITEMS = {
-  templates: 'Copy from templates',
-  previous: {
-    label: 'Copy from previous season',
-    disabled: true
-  },
-  empty: 'Start empty'
-}
+const STOPPED_SOURCE_ITEMS = Object.fromEntries(
+  NEW_SEASON_WORKFLOWS.map((id) => [
+    id,
+    STOPPED_SEASON_WORKFLOWS.includes(id)
+      ? WORKFLOWS[id].label
+      : { label: WORKFLOWS[id].label, disabled: true }
+  ])
+)
 
 function isSeasonType(value: string): value is SeasonType {
   return TYPES.some((type) => type.value === value)
 }
 
 function isSource(value: string): value is Source {
-  return SOURCES.some((source) => source === value)
+  return isWorkflowId(value)
 }
 
 export function NewSeasonDialog({

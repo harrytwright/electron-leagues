@@ -2,8 +2,9 @@
 
 Desktop organiser for bowling league documents stored in a OneDrive folder. The folder tree is
 the source of truth — the app scans it (adopting folders you create by hand), opens documents in
-their default program, generates new season folders, and archives old seasons. It never modifies
-your documents; it only writes its own files (`meta.json`, zips).
+their default program, generates new season folders, and archives old seasons. Existing documents
+are never overwritten: template and import workflows only add new copies (`meta.json` and requested
+archive zips are app-owned output).
 
 ## Folder layout
 
@@ -22,16 +23,24 @@ your documents; it only writes its own files (`meta.json`, zips).
 Season naming: cross-year `2025-26`, full-year `2025`, quarter `2026-Q1`. Any folder that
 doesn't match is shown as a plain browsable folder, never guessed at.
 
-Season lifecycle: two live seasons per league (active + previous). Creating a new season copies
-starting documents from `_templates` or the previous season, and (pre-ticked in the wizard)
-moves the oldest live season into `_archives`. Archived seasons can be zipped on demand from
-the league's Archive folder.
+Season lifecycle: two live seasons per league (active + previous). A template-based season copies
+every visible, direct file in `_templates`. A previous-season copy takes the previous season's
+direct files first, then fills missing names from templates; previous filenames always win. Start
+empty copies nothing. These are snapshots, not live links. The pre-ticked wizard option moves the
+oldest live season into `_archives`, where seasons can be zipped on demand.
+
+Every scan checks the selected location for `_templates`, `_shared`, and `_archives`. Missing
+reserved folders are repaired, and only missing bundled `Rules.docx` and `Sign-In Sheet.docx` are
+restored. Edited defaults and custom templates are left alone. The selected root itself is never
+recreated if it has moved or become unavailable.
 
 ## Using the app
 
 The window title bar contains **Home** and the location switcher, which changes between leagues
-folders ("locations"), creates a new one, or reveals the current one. Home shows the templates
-and shared documents, while the sidebar holds the Leagues list grouped under collapsible days.
+folders ("locations"), creates a new one, or reveals the current one. Home is a single-pane browser
+with Shared documents, Templates, and (when needed) Other items tabs; changing tabs starts again at
+that tab's root. The current folder appears in the status bar. The sidebar holds the Leagues list
+grouped under collapsible days.
 A league opens as a file browser: seasons at the top (newest first, with their status), then any
 other files and the Archive folder. The league, archive and season panes share a desktop-style
 file browser: click to select, double-click or press Enter to open, and use the arrow keys to move
@@ -43,6 +52,9 @@ zips archived seasons, or deletes a league or season — deletion asks you to ty
 moves the folder (including files the app doesn't manage) to the OS trash. Drop files onto any
 folder view to copy them in. Your last-opened league and collapsed days are remembered per
 location.
+
+At the root of any live season, **Sync with templates** adds only template filenames that are
+missing. It never creates numbered duplicates and is unavailable in archives or subfolders.
 
 ## Development
 

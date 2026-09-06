@@ -31,6 +31,47 @@ export async function assertInsideRoot(root: string, target: string): Promise<st
   return resolved
 }
 
+/** Resolve an exact `weekday/league/season` target and reject symlink aliases. */
+export async function resolveLiveSeasonRoot(
+  root: string,
+  day: string,
+  leagueFolder: string,
+  seasonName: string
+): Promise<string> {
+  if (!isWeekday(day)) throw new UserFacingError('Invalid league day')
+  if (
+    !leagueFolder ||
+    leagueFolder === '.' ||
+    leagueFolder === '..' ||
+    basename(leagueFolder) !== leagueFolder
+  ) {
+    throw new UserFacingError('Invalid league folder')
+  }
+  const season = parseSeasonName(seasonName)
+  if (!season || season.name !== seasonName) throw new UserFacingError('Invalid season name')
+
+  const target = resolve(root, day, leagueFolder, season.name)
+  let resolved: [string, string, Awaited<ReturnType<typeof stat>>]
+  try {
+    resolved = await Promise.all([realpath(root), realpath(target), stat(target)])
+  } catch (err) {
+    throw toUserFacing(err)
+  }
+  const [realRoot, realTarget, info] = resolved
+  const rel = relative(realRoot, realTarget)
+  const parts = rel.split(sep)
+  if (
+    parts.length !== 3 ||
+    parts[0] !== day ||
+    parts[1] !== leagueFolder ||
+    parts[2] !== season.name ||
+    !info.isDirectory()
+  ) {
+    throw new UserFacingError('Only a live season folder can be synced with templates')
+  }
+  return target
+}
+
 export type TrashTarget = 'league' | 'season'
 
 /**

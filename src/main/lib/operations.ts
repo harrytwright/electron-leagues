@@ -3,9 +3,11 @@ import { createWriteStream } from 'node:fs'
 import {
   copyFile,
   cp,
+  lstat,
   mkdir,
   readdir,
   readFile,
+  realpath,
   rename,
   rm,
   stat,
@@ -16,8 +18,43 @@ import { healMeta, parseLeagueMetaInput } from '../../shared/meta'
 import { compareSeasonNames, parseSeasonName, type SeasonName } from '../../shared/season'
 import { sanitiseFolderName } from '../../shared/sanitise'
 import type { Weekday } from '../../shared/weekday'
+import type { WorkflowId } from '../../shared/workflows'
+import { toUserFacing, UserFacingError } from './fs-errors'
+import { resolveLiveSeasonRoot } from './paths'
+import {
+  executeCopyPlan,
+  FILE_RULES,
+  readDirectMetadata,
+  runWorkflow,
+  syncMissingTemplates,
+  type CopyExecutionResult
+} from './template-workflows'
 
-const SPECIAL_FOLDERS = ['_templates', '_shared', '_archives']
+const SPECIAL_FOLDERS = ['_templates', '_shared', '_archives'] as const
+const REQUIRED_TEMPLATES = ['Rules.docx', 'Sign-In Sheet.docx'] as const
+const REQUIRED_TEMPLATE_NAMES: ReadonlySet<string> = new Set(REQUIRED_TEMPLATES)
+
+const templateTasks = new Map<string, Promise<void>>()
+
+/** Keep repair and its dependent readers together, including aliases of the same root. */
+export async function withTemplateLock<T>(root: string, run: () => Promise<T>): Promise<T> {
+  const key = await realpath(root).catch((err) => {
+    throw toUserFacing(err)
+  })
+  const previous = templateTasks.get(key) ?? Promise.resolve()
+  const task = previous.then(run)
+  // A failed operation releases the queue too; each caller still receives its own error.
+  const settled = task.then(
+    () => {},
+    () => {}
+  )
+  templateTasks.set(key, settled)
+  try {
+    return await task
+  } finally {
+    if (templateTasks.get(key) === settled) templateTasks.delete(key)
+  }
+}
 
 async function exists(path: string): Promise<boolean> {
   return stat(path).then(
@@ -26,27 +63,69 @@ async function exists(path: string): Promise<boolean> {
   )
 }
 
-async function listFiles(dir: string): Promise<string[]> {
-  try {
-    const entries = await readdir(dir, { withFileTypes: true })
-    return entries.filter((e) => e.isFile() && !e.name.startsWith('.')).map((e) => e.name)
-  } catch {
-    return []
-  }
+/** Repair app-owned locations without ever creating the selected root itself. */
+export async function repairReservedLocations(
+  root: string,
+  templatesSource?: string
+): Promise<void> {
+  return withTemplateLock(root, () => repairReservedLocationsUnlocked(root, templatesSource))
 }
 
-/** Create the app-special folders and seed _templates from a source directory. */
-export async function initialiseRoot(root: string, templatesSource?: string): Promise<void> {
+async function repairReservedLocationsUnlocked(
+  root: string,
+  templatesSource?: string
+): Promise<void> {
+  const rootInfo = await stat(root).catch((err) => {
+    throw toUserFacing(err)
+  })
+  if (!rootInfo.isDirectory()) throw new UserFacingError('The leagues location is not a folder')
+
   for (const folder of SPECIAL_FOLDERS) {
-    await mkdir(join(root, folder), { recursive: true })
-  }
-  if (!templatesSource) return
-  for (const name of await listFiles(templatesSource)) {
-    const target = join(root, '_templates', name)
-    if (!(await exists(target))) {
-      await copyFile(join(templatesSource, name), target)
+    const target = join(root, folder)
+    let existing = await lstat(target).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') return null
+      throw err
+    })
+    if (!existing) {
+      await mkdir(target).catch((err: NodeJS.ErrnoException) => {
+        // Concurrent scans may both observe the missing folder. The winner is
+        // valid only after the checks below inspect what now occupies it.
+        if (err.code !== 'EEXIST') throw err
+      })
+      existing = await lstat(target)
+    }
+    if (existing?.isSymbolicLink()) {
+      throw new UserFacingError(`Reserved folder “${folder}” can’t be a symbolic link`)
+    }
+    if (existing && !existing.isDirectory()) {
+      throw new UserFacingError(`Reserved location “${folder}” is not a folder`)
     }
   }
+
+  if (!templatesSource) return
+  const available = (await readDirectMetadata(templatesSource)).filter((file) =>
+    REQUIRED_TEMPLATE_NAMES.has(file.relativePath)
+  )
+  const found = new Set(
+    available.filter((file) => file.kind === 'file').map((file) => file.relativePath)
+  )
+  for (const required of REQUIRED_TEMPLATES) {
+    if (!found.has(required)) throw new Error(`Bundled template “${required}” is missing`)
+  }
+  const destination = join(root, '_templates')
+  const existing = await readDirectMetadata(destination)
+  for (const item of existing) {
+    if (REQUIRED_TEMPLATE_NAMES.has(item.relativePath) && item.kind !== 'file') {
+      throw new UserFacingError(`Template “${item.relativePath}” is not a regular file`)
+    }
+  }
+  const plan = await FILE_RULES['fill-missing'](existing, available)
+  await executeCopyPlan(plan, { templates: templatesSource, destination })
+}
+
+/** Create/repair app-owned locations and seed only the two bundled defaults. */
+export async function initialiseRoot(root: string, templatesSource?: string): Promise<void> {
+  await repairReservedLocations(root, templatesSource)
 }
 
 /** Create a new league folder under its weekday, with a fresh meta.json. */
@@ -93,10 +172,12 @@ async function moveDir(from: string, to: string): Promise<void> {
 
 export interface CreateSeasonOptions {
   root: string
+  /** Main supplies the app bundle; optional for focused library callers. */
+  templatesSource?: string
   day: Weekday
   leagueFolder: string
   seasonName: string
-  source: 'templates' | 'previous' | 'empty'
+  source: WorkflowId
   archiveOldest: boolean
 }
 
@@ -106,8 +187,13 @@ export interface CreateSeasonResult {
 }
 
 export async function createSeason(opts: CreateSeasonOptions): Promise<CreateSeasonResult> {
+  return withTemplateLock(opts.root, () => createSeasonUnlocked(opts))
+}
+
+async function createSeasonUnlocked(opts: CreateSeasonOptions): Promise<CreateSeasonResult> {
   const season = parseSeasonName(opts.seasonName)
   if (!season) throw new Error(`"${opts.seasonName}" is not a valid season name`)
+  await repairReservedLocationsUnlocked(opts.root, opts.templatesSource)
 
   const leaguePath = join(opts.root, opts.day, opts.leagueFolder)
   const seasonPath = join(leaguePath, season.name)
@@ -116,19 +202,15 @@ export async function createSeason(opts: CreateSeasonOptions): Promise<CreateSea
   const before = await liveSeasonsOf(leaguePath)
 
   await mkdir(seasonPath, { recursive: true })
-  const sourceDir =
-    opts.source === 'templates'
-      ? join(opts.root, '_templates')
-      : opts.source === 'previous'
-        ? before.length > 0
-          ? join(leaguePath, before[before.length - 1].name)
-          : null
-        : null
-  if (sourceDir) {
-    for (const name of await listFiles(sourceDir)) {
-      await copyFile(join(sourceDir, name), join(seasonPath, name))
-    }
-  }
+  const previousDir =
+    opts.source === 'previous' && before.length > 0
+      ? join(leaguePath, before[before.length - 1].name)
+      : undefined
+  await runWorkflow(opts.source, {
+    current: previousDir,
+    templates: join(opts.root, '_templates'),
+    destination: seasonPath
+  })
 
   let archived: string | null = null
   const after = await liveSeasonsOf(leaguePath)
@@ -161,6 +243,30 @@ export async function createSeason(opts: CreateSeasonOptions): Promise<CreateSea
   await writeFile(metaPath, JSON.stringify(meta, null, 2) + '\n', 'utf8')
 
   return { seasonPath, archived }
+}
+
+export interface SyncSeasonOptions {
+  root: string
+  templatesSource?: string
+  day: Weekday
+  leagueFolder: string
+  seasonName: string
+}
+
+/** Fill one existing live season root with missing templates. */
+export async function syncSeasonWithTemplates(
+  opts: SyncSeasonOptions
+): Promise<CopyExecutionResult> {
+  return withTemplateLock(opts.root, async () => {
+    const seasonPath = await resolveLiveSeasonRoot(
+      opts.root,
+      opts.day,
+      opts.leagueFolder,
+      opts.seasonName
+    )
+    await repairReservedLocationsUnlocked(opts.root, opts.templatesSource)
+    return syncMissingTemplates(seasonPath, join(opts.root, '_templates'))
+  })
 }
 
 /** Zip each selected archived season folder into `{season}.zip` beside it. */

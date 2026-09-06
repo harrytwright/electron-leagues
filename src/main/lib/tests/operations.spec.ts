@@ -1,5 +1,5 @@
 import AdmZip from 'adm-zip'
-import { mkdtemp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
@@ -8,6 +8,8 @@ import {
   createSeason,
   importFiles,
   initialiseRoot,
+  repairReservedLocations,
+  syncSeasonWithTemplates,
   zipArchivedSeasons
 } from '../operations'
 
@@ -54,9 +56,57 @@ describe('initialiseRoot', () => {
 
   test('does not overwrite existing templates', async () => {
     await makeTree(root, { '_templates/Rules.docx': 'mine' })
-    await makeTree(outside, { 'Rules.docx': 'seed' })
+    await makeTree(outside, { 'Rules.docx': 'seed', 'Sign-In Sheet.docx': 'sign-in' })
     await initialiseRoot(root, outside)
     expect(await readFile(join(root, '_templates/Rules.docx'), 'utf8')).toBe('mine')
+  })
+
+  test('repairs both defaults without leagues, preserving edits and ignoring custom bundle files', async () => {
+    await makeTree(root, { '_templates/Rules.docx': 'my edited rules' })
+    await makeTree(outside, {
+      'Rules.docx': 'bundled rules',
+      'Sign-In Sheet.docx': 'bundled sign-in',
+      'Custom.docx': 'not reserved'
+    })
+
+    await repairReservedLocations(root, outside)
+
+    expect(await readFile(join(root, '_templates/Rules.docx'), 'utf8')).toBe('my edited rules')
+    expect(await readFile(join(root, '_templates/Sign-In Sheet.docx'), 'utf8')).toBe(
+      'bundled sign-in'
+    )
+    expect(await exists(join(root, '_templates/Custom.docx'))).toBe(false)
+  })
+
+  test('is idempotent and tolerates concurrent repair attempts', async () => {
+    await makeTree(outside, { 'Rules.docx': 'rules', 'Sign-In Sheet.docx': 'sign-in' })
+    await Promise.all([
+      repairReservedLocations(root, outside),
+      repairReservedLocations(root, outside),
+      repairReservedLocations(root, outside)
+    ])
+    const before = await stat(join(root, '_templates/Rules.docx'))
+    await repairReservedLocations(root, outside)
+    const after = await stat(join(root, '_templates/Rules.docx'))
+    expect(after.mtimeMs).toBe(before.mtimeMs)
+  })
+
+  test('never recreates a missing selected root', async () => {
+    await rm(root, { recursive: true })
+    await expect(repairReservedLocations(root, outside)).rejects.toThrow(
+      'That folder no longer exists'
+    )
+    expect(await exists(root)).toBe(false)
+  })
+
+  test('rejects reserved symlinks and conflicting required-template entries', async () => {
+    await symlink(outside, join(root, '_shared'))
+    await expect(repairReservedLocations(root)).rejects.toThrow(/symbolic link/)
+    await rm(join(root, '_shared'))
+    await makeTree(root, { '_templates/Rules.docx/nested.txt': 'conflict' })
+    await makeTree(outside, { 'Rules.docx': 'rules', 'Sign-In Sheet.docx': 'sign-in' })
+    await expect(repairReservedLocations(root, outside)).rejects.toThrow(/not a regular file/)
+    expect(await readFile(join(root, '_templates/Rules.docx/nested.txt'), 'utf8')).toBe('conflict')
   })
 })
 
@@ -112,6 +162,42 @@ describe('createSeason', () => {
       archiveOldest: true
     })
     expect(await readFile(join(result.seasonPath, 'Rules.docx'), 'utf8')).toBe('last-years-rules')
+  })
+
+  test('previous files win while newly added custom templates fill missing names', async () => {
+    await makeTree(root, {
+      '_templates/players.xlsx': 'new player template',
+      '_templates/Rules.docx': 'new rules',
+      'monday/Mens Triples/2024-25/players.xlsx': 'last season players'
+    })
+    const result = await createSeason({
+      root,
+      day: 'monday',
+      leagueFolder: 'Mens Triples',
+      seasonName: '2025-26',
+      source: 'previous',
+      archiveOldest: false
+    })
+    expect(await readFile(join(result.seasonPath, 'players.xlsx'), 'utf8')).toBe(
+      'last season players'
+    )
+    expect(await readFile(join(result.seasonPath, 'Rules.docx'), 'utf8')).toBe('new rules')
+  })
+
+  test('empty creates a truly empty season', async () => {
+    await makeTree(root, {
+      '_templates/players.xlsx': 'template',
+      'monday/Mens Triples/2024-25/Rules.docx': 'previous'
+    })
+    const result = await createSeason({
+      root,
+      day: 'monday',
+      leagueFolder: 'Mens Triples',
+      seasonName: '2025-26',
+      source: 'empty',
+      archiveOldest: false
+    })
+    expect(await readdir(result.seasonPath)).toEqual([])
   })
 
   test('moves the oldest season to the archive when more than two live', async () => {
@@ -192,6 +278,61 @@ describe('createSeason', () => {
         archiveOldest: true
       })
     ).rejects.toThrow(/exists/i)
+  })
+})
+
+describe('syncSeasonWithTemplates', () => {
+  test('adds missing templates once and is then a no-op', async () => {
+    await makeTree(root, {
+      '_templates/Rules.docx': 'rules',
+      '_templates/players.xlsx': 'players template',
+      'monday/Mens Triples/2025-26/players.xlsx': 'existing players'
+    })
+    const opts = {
+      root,
+      day: 'monday' as const,
+      leagueFolder: 'Mens Triples',
+      seasonName: '2025-26'
+    }
+    await expect(syncSeasonWithTemplates(opts)).resolves.toEqual({
+      added: ['Rules.docx'],
+      skipped: ['players.xlsx']
+    })
+    await expect(syncSeasonWithTemplates(opts)).resolves.toEqual({
+      added: [],
+      skipped: expect.arrayContaining(['Rules.docx', 'players.xlsx'])
+    })
+    expect(await readFile(join(root, 'monday/Mens Triples/2025-26/players.xlsx'), 'utf8')).toBe(
+      'existing players'
+    )
+  })
+
+  test('rejects invalid targets and symlink aliases to archived seasons', async () => {
+    await makeTree(root, {
+      '_templates/Rules.docx': 'rules',
+      '_archives/Mens Triples/2023-24/Rules.docx': 'archived',
+      'monday/Mens Triples': null
+    })
+    await symlink(
+      join(root, '_archives/Mens Triples/2023-24'),
+      join(root, 'monday/Mens Triples/2023-24')
+    )
+    await expect(
+      syncSeasonWithTemplates({
+        root,
+        day: 'monday',
+        leagueFolder: 'Mens Triples',
+        seasonName: '2023-24'
+      })
+    ).rejects.toThrow(/live season/)
+    await expect(
+      syncSeasonWithTemplates({
+        root,
+        day: 'monday',
+        leagueFolder: '../_archives',
+        seasonName: '2023-24'
+      })
+    ).rejects.toThrow(/league folder/)
   })
 })
 

@@ -4,6 +4,33 @@ import { afterEach } from 'vitest'
 
 let systemDark = false
 
+class MockResizeObserver implements ResizeObserver {
+  observe(): void {
+    return undefined
+  }
+  unobserve(): void {
+    return undefined
+  }
+  disconnect(): void {
+    return undefined
+  }
+}
+
+Object.defineProperty(globalThis, 'ResizeObserver', {
+  configurable: true,
+  value: MockResizeObserver
+})
+
+Object.defineProperty(Element.prototype, 'scrollIntoView', {
+  configurable: true,
+  value: () => {}
+})
+
+Object.defineProperty(Element.prototype, 'getAnimations', {
+  configurable: true,
+  value: () => []
+})
+
 class MockMediaQueryListEvent extends Event implements MediaQueryListEvent {
   readonly matches: boolean
   readonly media: string

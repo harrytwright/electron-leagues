@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import type { LeaguesTree } from '@shared/tree'
@@ -35,17 +35,17 @@ it('shows loading, then FirstRun when scan returns null', async () => {
   expect(screen.queryByText(/loading…/i)).not.toBeInTheDocument()
 })
 
-it('shows the shared view when scan returns a tree', async () => {
+it('shows Home on Shared documents and reports that directory in the status bar', async () => {
   installMockApi({ scan: vi.fn().mockResolvedValue(makeTree()) })
 
   render(<App />)
 
-  expect(await screen.findByRole('heading', { name: 'Shared documents' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
   const status = screen.getByRole('contentinfo', { name: 'Application status' })
   const contentRow = screen.getByRole('main').parentElement
   expect(contentRow).toContainElement(screen.getByRole('navigation', { name: 'Leagues' }))
   expect(contentRow?.nextElementSibling).toBe(status)
-  expect(within(status).getByTitle('/root')).toHaveTextContent('/root')
+  expect(within(status).getByTitle('/root/_shared')).toHaveTextContent('/root/_shared')
 })
 
 it('updates the status path from the location root through league navigation', async () => {
@@ -67,7 +67,7 @@ it('updates the status path from the location root through league navigation', a
   render(<App />)
 
   const status = await screen.findByRole('contentinfo', { name: 'Application status' })
-  expect(within(status).getByTitle('/root')).toBeInTheDocument()
+  expect(within(status).getByTitle('/root/_shared')).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Pairs' }))
   expect(within(status).getByTitle(leaguePath)).toBeInTheDocument()
 
@@ -81,6 +81,78 @@ it('updates the status path from the location root through league navigation', a
   expect(within(status).getByTitle('/root/monday/Trios')).toBeInTheDocument()
 })
 
+it('tracks Home tabs and resets Home to Shared documents after league navigation', async () => {
+  installMockApi({ scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs')) })
+  const user = userEvent.setup()
+
+  render(<App />)
+
+  const status = await screen.findByRole('contentinfo', { name: 'Application status' })
+  await user.click(screen.getByRole('tab', { name: 'Templates' }))
+  expect(within(status).getByTitle('/root/_templates')).toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: 'Pairs' }))
+  expect(within(status).getByTitle('/root/monday/Pairs')).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Go home' }))
+
+  expect(await screen.findByRole('tab', { name: 'Shared documents' })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  )
+  expect(within(status).getByTitle('/root/_shared')).toBeInTheDocument()
+})
+
+it('keeps the current Home pane and status in sync on a redundant Home click', async () => {
+  const folder = makeDirEntry({ name: 'Admin', kind: 'folder', path: '/root/_templates/Admin' })
+  installMockApi({
+    scan: vi.fn().mockResolvedValue(makeTree()),
+    listDir: vi.fn((dir: string) => Promise.resolve(dir === '/root/_templates' ? [folder] : []))
+  })
+  const user = userEvent.setup()
+  render(<App />)
+  await user.click(await screen.findByRole('tab', { name: 'Templates' }))
+  await user.dblClick(await screen.findByRole('row', { name: 'Admin' }))
+  await user.click(screen.getByRole('button', { name: 'Go home' }))
+
+  expect(screen.getByRole('tab', { name: 'Templates' })).toHaveAttribute('aria-selected', 'true')
+  const status = screen.getByRole('contentinfo', { name: 'Application status' })
+  expect(within(status).getByTitle(folder.path)).toBeInTheDocument()
+  expect(await screen.findByRole('treegrid', { name: 'Admin' })).toBeInTheDocument()
+})
+
+it('resets Home and its status directory when the location changes', async () => {
+  const scan = vi
+    .fn()
+    .mockResolvedValueOnce(
+      makeTree({ root: '/a', templatesPath: '/a/_templates', sharedPath: '/a/_shared' })
+    )
+    .mockResolvedValue(
+      makeTree({
+        root: '/b',
+        templatesPath: '/b/_templates',
+        sharedPath: '/b/_shared'
+      })
+    )
+  installMockApi({ scan })
+  const user = userEvent.setup()
+
+  render(<App />)
+
+  const status = await screen.findByRole('contentinfo', { name: 'Application status' })
+  await user.click(screen.getByRole('tab', { name: 'Templates' }))
+  expect(within(status).getByTitle('/a/_templates')).toBeInTheDocument()
+
+  act(() => emitTreeChanged())
+
+  await waitFor(() => {
+    expect(screen.getByRole('tab', { name: 'Shared documents' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    expect(within(status).getByTitle('/b/_shared')).toBeInTheDocument()
+  })
+})
+
 it('rescans when the tree changes on disk', async () => {
   const scan = vi.fn().mockResolvedValueOnce(null).mockResolvedValue(makeTree())
   installMockApi({ scan })
@@ -90,7 +162,7 @@ it('rescans when the tree changes on disk', async () => {
 
   act(() => emitTreeChanged())
 
-  expect(await screen.findByRole('heading', { name: 'Shared documents' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
 })
 
 it('shows a recoverable error when the scan fails, and retries', async () => {
@@ -110,7 +182,7 @@ it('shows a recoverable error when the scan fails, and retries', async () => {
   expect(screen.queryByText(/loading…/i)).not.toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Try again' }))
 
-  expect(await screen.findByRole('heading', { name: 'Shared documents' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
   expect(scan).toHaveBeenCalledTimes(2)
 })
 
@@ -166,7 +238,7 @@ it('falls back to home when the remembered league is not where it was, keeping t
 
   render(<App />)
 
-  expect(await screen.findByRole('heading', { name: 'Shared documents' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Go home' })).toHaveAttribute('aria-current', 'page')
   expect(localStorage.getItem('leagues:/root:selection')).toBe(stored)
 })
@@ -186,7 +258,7 @@ it('remembers selections and returns to Home from the title bar', async () => {
   expect(home).not.toHaveAttribute('aria-current')
   await user.click(home)
 
-  expect(await screen.findByRole('heading', { name: 'Shared documents' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
   expect(home).toHaveAttribute('aria-current', 'page')
   expect(localStorage.getItem('leagues:/root:selection')).toBe(JSON.stringify({ kind: 'home' }))
 })
@@ -205,7 +277,7 @@ it('drops the selection to home when the selected league disappears from a resca
 
   act(() => emitTreeChanged())
 
-  expect(await screen.findByRole('heading', { name: 'Shared documents' })).toBeInTheDocument()
+  expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Go home' })).toHaveAttribute('aria-current', 'page')
 })
 

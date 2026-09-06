@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { listDirEntries, scanLeaguesRoot } from '../scanner'
+import { compareDirectoryEntries, listDirEntries, scanLeaguesRoot } from '../scanner'
 
 let root: string
 
@@ -186,10 +186,27 @@ describe('listDirEntries', () => {
     }
   })
 
-  test('breaks case-only ties deterministically', async () => {
-    await makeTree({ 'dir/a.txt': 'x', 'dir/A.txt': 'x', 'dir/b.txt': 'x' })
-    const names = (await listDirEntries(join(root, 'dir'))).map((e) => e.name)
-    expect(names).toEqual(['a.txt', 'A.txt', 'b.txt'])
+  test('breaks case-only ties deterministically regardless of input order', () => {
+    // Case-insensitive filesystems cannot store these two names side by side.
+    const lower = { name: 'a.txt', kind: 'file' as const }
+    const upper = { name: 'A.txt', kind: 'file' as const }
+    const last = { name: 'b.txt', kind: 'file' as const }
+    const ordering = compareDirectoryEntries(lower, upper)
+    expect(ordering).not.toBe(0)
+    expect(compareDirectoryEntries(upper, lower)).toBe(-ordering)
+
+    // Preserve the locale's case ordering without assuming lowercase comes first everywhere.
+    const expected = [lower, upper, last].sort((a, b) => a.name.localeCompare(b.name))
+    for (const input of [
+      [lower, upper, last],
+      [upper, lower, last],
+      [last, lower, upper],
+      [last, upper, lower],
+      [lower, last, upper],
+      [upper, last, lower]
+    ]) {
+      expect(input.sort(compareDirectoryEntries)).toEqual(expected)
+    }
   })
 
   test('skips dangling symlinks', async () => {

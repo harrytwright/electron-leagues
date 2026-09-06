@@ -26,6 +26,10 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
       seasonPath: '',
       archived: null
     }),
+    syncSeasonTemplates: vi.fn<RendererApi['syncSeasonTemplates']>().mockResolvedValue({
+      added: [],
+      skipped: []
+    }),
     chooseRoot: vi.fn<RendererApi['chooseRoot']>().mockResolvedValue(null),
     openFile: vi.fn<RendererApi['openFile']>().mockResolvedValue(''),
     revealFile: vi.fn<RendererApi['revealFile']>().mockResolvedValue(undefined),

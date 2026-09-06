@@ -2,6 +2,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { DirEntry, LeaguesTree } from '../shared/tree'
 import type { Weekday } from '../shared/weekday'
+import type { WorkflowId } from '../shared/workflows'
 import { getRendererMetrics } from './renderer-metrics'
 
 export type { RendererMetrics } from './renderer-metrics'
@@ -10,7 +11,7 @@ export interface SeasonCreateRequest {
   day: Weekday
   leagueFolder: string
   seasonName: string
-  source: 'templates' | 'previous' | 'empty'
+  source: WorkflowId
   archiveOldest: boolean
 }
 
@@ -35,6 +36,10 @@ const api = {
     opts: SeasonCreateRequest
   ): Promise<{ seasonPath: string; archived: string | null }> =>
     ipcRenderer.invoke('season:create', opts),
+  syncSeasonTemplates: (
+    opts: Pick<SeasonCreateRequest, 'day' | 'leagueFolder' | 'seasonName'>
+  ): Promise<{ added: string[]; skipped: string[] }> =>
+    ipcRenderer.invoke('season:sync-templates', opts),
   zipArchive: (leagueFolder: string, seasons: string[]): Promise<string[]> =>
     ipcRenderer.invoke('archive:zip', leagueFolder, seasons),
   openFile: (path: string): Promise<string> => ipcRenderer.invoke('file:open', path),

@@ -236,6 +236,100 @@ it('opens the new-season dialog from the header', async () => {
   expect(await screen.findByRole('dialog', { name: /new season/i })).toBeInTheDocument()
 })
 
+it('syncs missing templates only from a live season root and refreshes both views', async () => {
+  const api = installMockApi({
+    listDir: vi.fn(
+      listingFor({
+        [`${LEAGUE_PATH}/2025-26`]: [
+          makeDirEntry({ name: 'Rules.docx', path: `${LEAGUE_PATH}/2025-26/Rules.docx` })
+        ]
+      })
+    ),
+    syncSeasonTemplates: vi.fn().mockResolvedValue({
+      added: ['Sign-In Sheet.docx'],
+      skipped: ['Rules.docx']
+    })
+  })
+  const user = userEvent.setup()
+  const onChanged = renderLeague()
+
+  expect(screen.queryByRole('menuitem', { name: 'Sync with templates' })).not.toBeInTheDocument()
+  await user.dblClick(screen.getByRole('row', { name: '2025-26' }))
+  await screen.findByRole('row', { name: 'Rules.docx' })
+  await user.click(screen.getByRole('button', { name: 'League actions' }))
+  await user.click(await screen.findByRole('menuitem', { name: 'Sync with templates' }))
+
+  expect(api.syncSeasonTemplates).toHaveBeenCalledExactlyOnceWith({
+    day: 'monday',
+    leagueFolder: 'Mixed triples',
+    seasonName: '2025-26'
+  })
+  expect(await screen.findByText('Added 1 template')).toBeInTheDocument()
+  expect(screen.getByText('1 item skipped')).toBeInTheDocument()
+  await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
+  expect(api.listDir).toHaveBeenCalledTimes(2)
+})
+
+it('disables template sync while pending and reports errors', async () => {
+  let reject!: (reason: Error) => void
+  const api = installMockApi({
+    listDir: vi.fn(listingFor({ [`${LEAGUE_PATH}/2025-26`]: [] })),
+    syncSeasonTemplates: vi.fn(
+      () =>
+        new Promise<{ added: string[]; skipped: string[] }>((_resolve, rejectPromise) => {
+          reject = rejectPromise
+        })
+    )
+  })
+  const user = userEvent.setup()
+  const onChanged = renderLeague()
+
+  await user.dblClick(screen.getByRole('row', { name: '2025-26' }))
+  await screen.findByText('This folder is empty')
+  await user.click(screen.getByRole('button', { name: 'League actions' }))
+  await user.click(await screen.findByRole('menuitem', { name: 'Sync with templates' }))
+  await user.click(screen.getByRole('button', { name: 'League actions' }))
+  expect(await screen.findByRole('menuitem', { name: 'Syncing templates…' })).toHaveAttribute(
+    'aria-disabled',
+    'true'
+  )
+  reject(new Error("Error invoking remote method 'season:sync-templates': Error: Templates locked"))
+
+  expect(await screen.findByText('Templates locked')).toBeInTheDocument()
+  expect(api.syncSeasonTemplates).toHaveBeenCalledOnce()
+  expect(onChanged).not.toHaveBeenCalled()
+})
+
+it('never offers template sync inside the archive or below a live season root', async () => {
+  installMockApi({
+    listDir: vi.fn(
+      listingFor({
+        ...ARCHIVE_LISTING,
+        [`${LEAGUE_PATH}/2025-26`]: [
+          makeDirEntry({
+            name: 'Week 1',
+            kind: 'folder',
+            path: `${LEAGUE_PATH}/2025-26/Week 1`
+          })
+        ],
+        [`${LEAGUE_PATH}/2025-26/Week 1`]: []
+      })
+    )
+  })
+  const user = userEvent.setup()
+  renderLeague()
+
+  await user.dblClick(screen.getByRole('row', { name: '2025-26' }))
+  await user.dblClick(await screen.findByRole('row', { name: 'Week 1' }))
+  await user.click(screen.getByRole('button', { name: 'League actions' }))
+  expect(screen.queryByRole('menuitem', { name: 'Sync with templates' })).not.toBeInTheDocument()
+  await user.keyboard('{Escape}')
+  await user.click(screen.getAllByRole('link', { name: 'Mixed triples' })[0])
+  await user.dblClick(await screen.findByRole('row', { name: 'Archive' }))
+  await user.click(screen.getByRole('button', { name: 'League actions' }))
+  expect(screen.queryByRole('menuitem', { name: 'Sync with templates' })).not.toBeInTheDocument()
+})
+
 it('imports picked files into the folder being viewed', async () => {
   const api = installMockApi({
     listDir: vi.fn(listingFor({ [`${LEAGUE_PATH}/2025-26`]: [] })),

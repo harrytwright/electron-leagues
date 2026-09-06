@@ -1,5 +1,6 @@
 import type { SeasonType } from '@shared/season'
 import type { LeagueNode } from '@shared/tree'
+import type { WorkflowId } from '@shared/workflows'
 
 export interface SeasonTypeOption {
   value: SeasonType
@@ -7,9 +8,7 @@ export interface SeasonTypeOption {
   example: string
 }
 
-export const SOURCES = ['templates', 'previous', 'empty'] as const
-
-export type Source = (typeof SOURCES)[number]
+export type Source = WorkflowId
 
 export interface NewSeasonDialogProps {
   league: LeagueNode

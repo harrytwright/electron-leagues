@@ -14,6 +14,8 @@ import {
   createSeason,
   importFiles,
   initialiseRoot,
+  repairReservedLocations,
+  syncSeasonWithTemplates,
   zipArchivedSeasons,
   type CreateSeasonOptions
 } from './lib/operations'
@@ -224,6 +226,7 @@ function registerIpc(): void {
   handle('leagues:scan', async () => {
     const root = currentRoot()
     if (!root) return null
+    await repairReservedLocations(root, bundledTemplatesDir())
     if (!watcher) watchRoot(root)
     return scanLeaguesRoot(root, { heal: true })
   })
@@ -243,11 +246,31 @@ function registerIpc(): void {
     return path
   })
 
-  handle('season:create', async (_e, opts: Omit<CreateSeasonOptions, 'root'>) => {
-    const result = await createSeason({ ...opts, root: requireRoot() })
-    capture('season_created', { source: opts.source, archived: result.archived !== null })
-    return result
-  })
+  handle(
+    'season:create',
+    async (_e, opts: Omit<CreateSeasonOptions, 'root' | 'templatesSource'>) => {
+      const result = await createSeason({
+        ...opts,
+        root: requireRoot(),
+        templatesSource: bundledTemplatesDir()
+      })
+      capture('season_created', { source: opts.source, archived: result.archived !== null })
+      return result
+    }
+  )
+
+  handle(
+    'season:sync-templates',
+    async (_e, opts: Pick<CreateSeasonOptions, 'day' | 'leagueFolder' | 'seasonName'>) => {
+      const result = await syncSeasonWithTemplates({
+        ...opts,
+        root: requireRoot(),
+        templatesSource: bundledTemplatesDir()
+      })
+      capture('season_templates_synced', { added: result.added.length })
+      return result
+    }
+  )
 
   handle('archive:zip', async (_e, leagueFolder: string, seasons: string[]) => {
     const zips = await zipArchivedSeasons(requireRoot(), leagueFolder, seasons)
@@ -281,7 +304,7 @@ function registerIpc(): void {
   })
 
   handle('file:import', async (_e, dest: string, sources: string[]) => {
-    const copied = await importFiles(dest, sources)
+    const copied = await importFiles(await assertInsideRoot(requireRoot(), dest), sources)
     capture('files_imported', { count: copied.length })
     return copied
   })

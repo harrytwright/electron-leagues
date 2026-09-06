@@ -34,6 +34,7 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
   const [newSeason, setNewSeason] = useState(false)
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null)
   const [zipping, setZipping] = useState<string | null>(null)
+  const [syncingTemplates, setSyncingTemplates] = useState(false)
   const { add } = useKumoToastManager()
 
   // The league's own folder is presented from the scan (seasons carry status
@@ -44,6 +45,8 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
   const inSeason =
     league.seasons.some((season) => season.path === trail.crumbs[0]?.path) ||
     (inArchive && league.archivedSeasons.includes(trail.crumbs[1]?.name))
+  const liveSeason = league.seasons.find((season) => season.path === trail.currentDir)
+  const atLiveSeasonRoot = trail.crumbs.length === 1 && liveSeason !== undefined
   const listing = useDirListing(trail.atBase ? null : trail.currentDir)
   const importer = useImportFiles(inArchive ? undefined : trail.currentDir, async () => {
     listing.reload()
@@ -72,6 +75,32 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
       add({ title: ipcErrorMessage(caught), variant: 'error' })
     } finally {
       setZipping(null)
+    }
+  }
+
+  const syncTemplates = async (): Promise<void> => {
+    if (!atLiveSeasonRoot || syncingTemplates) return
+    setSyncingTemplates(true)
+    try {
+      const result = await window.api.syncSeasonTemplates({
+        day: league.day,
+        leagueFolder: league.folderName,
+        seasonName: liveSeason.name
+      })
+      add({
+        title:
+          result.added.length === 0
+            ? 'Templates already up to date'
+            : `Added ${result.added.length} template${result.added.length === 1 ? '' : 's'}`,
+        description: `${result.skipped.length} item${result.skipped.length === 1 ? '' : 's'} skipped`,
+        variant: 'success'
+      })
+      listing.reload()
+      await onChanged()
+    } catch (caught) {
+      add({ title: ipcErrorMessage(caught), variant: 'error' })
+    } finally {
+      setSyncingTemplates(false)
     }
   }
 
@@ -196,6 +225,17 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
                   }
                 />
                 <DropdownMenu.Content>
+                  {atLiveSeasonRoot ? (
+                    <>
+                      <DropdownMenu.Item
+                        disabled={syncingTemplates}
+                        onClick={() => void syncTemplates()}
+                      >
+                        {syncingTemplates ? 'Syncing templates…' : 'Sync with templates'}
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Separator />
+                    </>
+                  ) : null}
                   <DropdownMenu.Item onClick={() => void window.api.revealFile(trail.currentDir)}>
                     {revealLabel()}
                   </DropdownMenu.Item>
