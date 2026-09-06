@@ -1,7 +1,6 @@
 .toolbar {
   app-region: drag;
   height: max(3rem, env(titlebar-area-height, 0px));
-
 }
 
 .toolbar-content {
@@ -10,15 +9,3 @@
   width: env(titlebar-area-width, 100%);
   padding-right: 8px;
 }
-
-/*.title-bar {*/
-/*  app-region: drag;*/
-/*  height: max(3rem, env(titlebar-area-height, 0px));*/
-/*}*/
-
-/*.title-bar-content {*/
-/*  box-sizing: border-box;*/
-/*  margin-left: env(titlebar-area-x, 0px);*/
-/*  width: env(titlebar-area-width, 100%);*/
-/*  padding-right: 8px;*/
-/*}*/

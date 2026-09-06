@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button, Dialog, Input, Text } from '@cloudflare/kumo'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { trashLabel } from '@renderer/lib/trash-label'
+import { TaskDialog } from '../TaskDialog'
 import type { Props } from './interface'
 
 /** Names on disk may be NFD (macOS) and display names may carry stray spaces. */
@@ -68,65 +69,58 @@ export function DeleteResourceDialog({
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
-      <Dialog className="p-6">
-        <div className="mb-6 grid gap-1.5">
-          <Dialog.Title>
-            Delete {kind} “{name}”
-          </Dialog.Title>
-          <Dialog.Description className="text-kumo-subtle">
+    <TaskDialog open={open} onOpenChange={handleOpenChange}>
+      <TaskDialog.Header
+        title={`Delete ${kind} “${name}”`}
+        description={
+          <>
             Everything inside the {kind} folder moves to the {trash}, including files this app
             doesn’t manage.
             {target?.hasArchives ? ` Its archived seasons in _archives move too.` : ''} You can
             restore it from there.
-          </Dialog.Description>
-        </div>
+          </>
+        }
+      />
 
-        <form className="grid gap-4" onSubmit={(event) => void submit(event)}>
-          <Input
-            ref={inputRef}
-            label={`Type ${name} to confirm`}
-            name="confirm-name"
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            autoFocus
-            placeholder={name}
-            value={typed}
-            aria-invalid={error ? true : undefined}
-            aria-describedby={error ? 'delete-resource-error' : undefined}
-            onChange={(event) => {
-              setTyped(event.target.value)
-              if (error) setError(null)
-            }}
+      <TaskDialog.Body onSubmit={(event) => void submit(event)}>
+        <Input
+          ref={inputRef}
+          label={`Type ${name} to confirm`}
+          name="confirm-name"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          autoFocus
+          placeholder={name}
+          value={typed}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? 'delete-resource-error' : undefined}
+          onChange={(event) => {
+            setTyped(event.target.value)
+            if (error) setError(null)
+          }}
+        />
+
+        {error ? (
+          <Text id="delete-resource-error" variant="error" role="alert">
+            {error}
+          </Text>
+        ) : null}
+
+        <TaskDialog.Actions>
+          <Dialog.Close
+            render={(props) => (
+              <Button {...props} type="button" variant="secondary" disabled={busy}>
+                Cancel
+              </Button>
+            )}
           />
-
-          {error ? (
-            <Text id="delete-resource-error" variant="error" role="alert">
-              {error}
-            </Text>
-          ) : null}
-
-          <div className="flex justify-end gap-2">
-            <Dialog.Close
-              render={(props) => (
-                <Button {...props} type="button" variant="secondary" disabled={busy}>
-                  Cancel
-                </Button>
-              )}
-            />
-            <Button
-              type="submit"
-              variant="destructive"
-              loading={busy}
-              disabled={busy || !confirmed}
-            >
-              {busy ? 'Deleting…' : `Delete ${kind}`}
-            </Button>
-          </div>
-        </form>
-      </Dialog>
-    </Dialog.Root>
+          <Button type="submit" variant="destructive" loading={busy} disabled={busy || !confirmed}>
+            {busy ? 'Deleting…' : `Delete ${kind}`}
+          </Button>
+        </TaskDialog.Actions>
+      </TaskDialog.Body>
+    </TaskDialog>
   )
 }

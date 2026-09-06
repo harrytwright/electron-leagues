@@ -5,6 +5,7 @@ import { isWeekday, WEEKDAYS, type Weekday } from '@shared/weekday'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { pathBasename } from '@renderer/lib/path-basename'
 import { sentenceCase } from '@renderer/lib/sentence-case'
+import { TaskDialog } from '../TaskDialog'
 import type { Props } from './interface'
 
 const DAY_ITEMS = WEEKDAYS.map((weekday) => ({
@@ -68,65 +69,58 @@ export function NewLeagueDialog({ open, onOpenChange, onCreated }: Props): React
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
-      <Dialog className="p-6">
-        <div className="mb-6 grid gap-1.5">
-          <Dialog.Title>New league</Dialog.Title>
-          <Dialog.Description className="text-kumo-subtle">
-            Add a league night and its folder.
-          </Dialog.Description>
-        </div>
+    <TaskDialog open={open} onOpenChange={handleOpenChange}>
+      <TaskDialog.Header title="New league" description="Add a league night and its folder." />
 
-        <form className="grid gap-4" onSubmit={(event) => void submit(event)}>
-          <Select
-            label="League night"
-            value={day}
-            items={DAY_ITEMS}
-            onValueChange={(value) => {
-              if (value && isWeekday(value)) setDay(value)
-            }}
+      <TaskDialog.Body onSubmit={(event) => void submit(event)}>
+        <Select
+          label="League night"
+          value={day}
+          items={DAY_ITEMS}
+          onValueChange={(value) => {
+            if (value && isWeekday(value)) setDay(value)
+          }}
+        />
+
+        <Input
+          ref={nameRef}
+          label="League name"
+          name="league-name"
+          autoComplete="off"
+          autoFocus
+          placeholder="e.g. Monday Trios"
+          value={name}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? 'new-league-error' : undefined}
+          onChange={(event) => {
+            setName(event.target.value)
+            if (error) setError(null)
+          }}
+        />
+
+        {name && folderName && folderName !== name.trim() ? (
+          <Text variant="secondary">Folder will be named “{folderName}”</Text>
+        ) : null}
+
+        {error ? (
+          <Text id="new-league-error" variant="error" role="alert">
+            {error}
+          </Text>
+        ) : null}
+
+        <TaskDialog.Actions>
+          <Dialog.Close
+            render={(props) => (
+              <Button {...props} type="button" variant="secondary" disabled={busy}>
+                Cancel
+              </Button>
+            )}
           />
-
-          <Input
-            ref={nameRef}
-            label="League name"
-            name="league-name"
-            autoComplete="off"
-            autoFocus
-            placeholder="e.g. Monday Trios"
-            value={name}
-            aria-invalid={error ? true : undefined}
-            aria-describedby={error ? 'new-league-error' : undefined}
-            onChange={(event) => {
-              setName(event.target.value)
-              if (error) setError(null)
-            }}
-          />
-
-          {name && folderName && folderName !== name.trim() ? (
-            <Text variant="secondary">Folder will be named “{folderName}”</Text>
-          ) : null}
-
-          {error ? (
-            <Text id="new-league-error" variant="error" role="alert">
-              {error}
-            </Text>
-          ) : null}
-
-          <div className="flex justify-end gap-2">
-            <Dialog.Close
-              render={(props) => (
-                <Button {...props} type="button" variant="secondary" disabled={busy}>
-                  Cancel
-                </Button>
-              )}
-            />
-            <Button type="submit" variant="primary" disabled={busy || !name.trim()}>
-              {busy ? 'Creating…' : 'Create league'}
-            </Button>
-          </div>
-        </form>
-      </Dialog>
-    </Dialog.Root>
+          <Button type="submit" variant="primary" disabled={busy || !name.trim()}>
+            {busy ? 'Creating…' : 'Create league'}
+          </Button>
+        </TaskDialog.Actions>
+      </TaskDialog.Body>
+    </TaskDialog>
   )
 }

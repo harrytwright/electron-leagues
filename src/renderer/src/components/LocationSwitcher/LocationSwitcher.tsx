@@ -4,12 +4,12 @@ import { CaretUpDownIcon, FolderIcon, FolderOpenIcon, FolderPlusIcon } from '@ph
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { pathBasename } from '@renderer/lib/path-basename'
 import { revealLabel } from '@renderer/lib/reveal-label'
+import { useLocationOperation } from '@renderer/hooks/use-location-operation'
 import type { Props } from './interface'
 
 /** Select-styled menu of the current and recent leagues folders. */
 export function LocationSwitcher({ root, onChanged }: Props): React.JSX.Element {
   const [recents, setRecents] = useState<string[]>([])
-  const [switching, setSwitching] = useState(false)
   // Fetches settle in any order; only the most recent may land.
   const fetches = useRef(0)
   const { add } = useKumoToastManager()
@@ -25,33 +25,7 @@ export function LocationSwitcher({ root, onChanged }: Props): React.JSX.Element 
 
   // A dev override (LEAGUES_ROOT) may not be in the stored list yet.
   const locations = recents.includes(root) ? recents : [root, ...recents]
-
-  const switchTo = async (path: string): Promise<void> => {
-    if (path === root || switching) return
-    setSwitching(true)
-    try {
-      const switched = await window.api.setRoot(path)
-      if (switched === null) {
-        add({ title: 'That folder is no longer available', variant: 'error' })
-        await loadRecents()
-        return
-      }
-      await onChanged()
-    } catch (caught) {
-      add({ title: ipcErrorMessage(caught), variant: 'error' })
-    } finally {
-      setSwitching(false)
-    }
-  }
-
-  const createNew = async (): Promise<void> => {
-    try {
-      const chosen = await window.api.chooseRoot('init')
-      if (chosen) await onChanged()
-    } catch (caught) {
-      add({ title: ipcErrorMessage(caught), variant: 'error' })
-    }
-  }
+  const locationOperation = useLocationOperation({ root, onChanged, onMissingRecent: loadRecents })
 
   const reveal = async (): Promise<void> => {
     try {
@@ -93,11 +67,11 @@ export function LocationSwitcher({ root, onChanged }: Props): React.JSX.Element 
             value={root}
             onValueChange={(value) => {
               const chosen = locations.find((path) => path === value)
-              if (chosen) void switchTo(chosen)
+              if (chosen) void locationOperation.switchTo(chosen)
             }}
           >
             {locations.map((path) => (
-              <DropdownMenu.RadioItem key={path} value={path} disabled={switching}>
+              <DropdownMenu.RadioItem key={path} value={path} disabled={locationOperation.busy}>
                 <span className="grid min-w-0 gap-0.5">
                   <span className="truncate">{pathBasename(path)}</span>
                   <span className="truncate text-sm text-kumo-subtle">{path}</span>
@@ -108,7 +82,18 @@ export function LocationSwitcher({ root, onChanged }: Props): React.JSX.Element 
           </DropdownMenu.RadioGroup>
         </DropdownMenu.Group>
         <DropdownMenu.Separator />
-        <DropdownMenu.Item icon={FolderPlusIcon} onClick={() => void createNew()}>
+        <DropdownMenu.Item
+          icon={FolderOpenIcon}
+          disabled={locationOperation.busy}
+          onClick={() => void locationOperation.choose('select')}
+        >
+          Open location…
+        </DropdownMenu.Item>
+        <DropdownMenu.Item
+          icon={FolderPlusIcon}
+          disabled={locationOperation.busy}
+          onClick={() => void locationOperation.choose('init')}
+        >
           New location…
         </DropdownMenu.Item>
         <DropdownMenu.Item icon={FolderOpenIcon} onClick={() => void reveal()}>

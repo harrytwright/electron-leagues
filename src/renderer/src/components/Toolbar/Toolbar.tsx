@@ -9,6 +9,7 @@ export function Toolbar({ root, isHome, onHome, onLocationChanged }: Props): Rea
   return (
     <header className="toolbar relative z-30 shrink-0 border-b border-kumo-line bg-kumo-base">
       <div className="toolbar-content flex h-full items-center gap-2">
+        <KumoSidebar.Trigger className="relative z-10 [app-region:no-drag]" />
         <IconButton
           aria-label="Go home"
           variant="ghost"
@@ -20,7 +21,6 @@ export function Toolbar({ root, isHome, onHome, onLocationChanged }: Props): Rea
         <div className="relative z-10 w-64 max-w-[40vw] min-w-0 [app-region:no-drag]">
           <LocationSwitcher root={root} onChanged={onLocationChanged} />
         </div>
-        <KumoSidebar.Trigger className="relative z-10 ml-auto [app-region:no-drag]" />
       </div>
     </header>
   )

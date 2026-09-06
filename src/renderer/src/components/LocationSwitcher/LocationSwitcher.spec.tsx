@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import { LocationSwitcher } from './index'
@@ -99,6 +99,55 @@ it('creates a new location through the native picker', async () => {
   await user.click(within(menu).getByRole('menuitem', { name: 'New location…' }))
 
   expect(api.chooseRoot).toHaveBeenCalledWith('init')
+  await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
+})
+
+it('opens an existing location through the native picker', async () => {
+  const api = installMockApi({ chooseRoot: vi.fn().mockResolvedValue('/opened/place') })
+  const onChanged = vi.fn()
+  const user = userEvent.setup()
+  renderWithProviders(<LocationSwitcher root={CURRENT} onChanged={onChanged} />)
+
+  const menu = await openMenu(user)
+  await user.click(within(menu).getByRole('menuitem', { name: 'Open location…' }))
+
+  expect(api.chooseRoot).toHaveBeenCalledWith('select')
+  await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
+})
+
+it('reports picker failures without rescanning', async () => {
+  installMockApi({ chooseRoot: vi.fn().mockRejectedValue(new Error('Picker failed')) })
+  const onChanged = vi.fn()
+  const user = userEvent.setup()
+  renderWithProviders(<LocationSwitcher root={CURRENT} onChanged={onChanged} />)
+
+  const menu = await openMenu(user)
+  await user.click(within(menu).getByRole('menuitem', { name: 'Open location…' }))
+
+  expect(await screen.findByText('Picker failed')).toBeInTheDocument()
+  expect(onChanged).not.toHaveBeenCalled()
+})
+
+it('ignores duplicate picker activation while the first operation is pending', async () => {
+  let resolvePicker: (path: string | null) => void = () => undefined
+  const chooseRoot = vi.fn(
+    () =>
+      new Promise<string | null>((resolve) => {
+        resolvePicker = resolve
+      })
+  )
+  const api = installMockApi({ chooseRoot })
+  const onChanged = vi.fn()
+  const user = userEvent.setup()
+  renderWithProviders(<LocationSwitcher root={CURRENT} onChanged={onChanged} />)
+
+  const menu = await openMenu(user)
+  const open = within(menu).getByRole('menuitem', { name: 'Open location…' })
+  fireEvent.click(open)
+  fireEvent.click(open)
+
+  expect(api.chooseRoot).toHaveBeenCalledOnce()
+  resolvePicker('/opened/place')
   await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
 })
 

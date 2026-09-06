@@ -8,6 +8,7 @@ import {
   WORKFLOWS
 } from '@shared/workflows'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
+import { TaskDialog } from '../TaskDialog'
 import type { Props, SeasonTypeOption, Source } from './interface'
 
 const TYPES: ReadonlyArray<SeasonTypeOption> = [
@@ -129,77 +130,73 @@ export function NewSeasonDialog({
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
-      <Dialog size="lg" className="p-6">
-        <div className="mb-6 grid gap-1.5">
-          <Dialog.Title>New season — {league.meta.name}</Dialog.Title>
-          <Dialog.Description className="text-kumo-subtle">
-            Choose the season name and starting documents.
-          </Dialog.Description>
-        </div>
+    <TaskDialog open={open} onOpenChange={handleOpenChange} size="lg">
+      <TaskDialog.Header
+        title={`New season — ${league.meta.name}`}
+        description="Choose the season name and starting documents."
+      />
 
-        <form className="grid gap-4" onSubmit={(event) => void submit(event)}>
-          <Select
-            label="Season type"
-            value={type}
-            items={TYPE_ITEMS}
-            onValueChange={(value) => {
-              if (value && isSeasonType(value)) changeType(value)
-            }}
+      <TaskDialog.Body onSubmit={(event) => void submit(event)}>
+        <Select
+          label="Season type"
+          value={type}
+          items={TYPE_ITEMS}
+          onValueChange={(value) => {
+            if (value && isSeasonType(value)) changeType(value)
+          }}
+        />
+
+        <Input
+          ref={nameRef}
+          label="Season name"
+          name="season-name"
+          autoComplete="off"
+          autoFocus
+          value={name}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? 'new-season-error' : undefined}
+          onChange={(event) => {
+            setName(event.target.value)
+            if (error) setError(null)
+          }}
+        />
+
+        <Select
+          label="Starting documents"
+          value={source}
+          items={league.running ? RUNNING_SOURCE_ITEMS : STOPPED_SOURCE_ITEMS}
+          onValueChange={(value) => {
+            if (value && isSource(value)) setSource(value)
+          }}
+        />
+
+        {willArchive ? (
+          <Checkbox
+            label={`Archive “${willArchive.name}” (moves it to _archives)`}
+            checked={archiveOldest}
+            onCheckedChange={setArchiveOldest}
           />
+        ) : null}
 
-          <Input
-            ref={nameRef}
-            label="Season name"
-            name="season-name"
-            autoComplete="off"
-            autoFocus
-            value={name}
-            aria-invalid={error ? true : undefined}
-            aria-describedby={error ? 'new-season-error' : undefined}
-            onChange={(event) => {
-              setName(event.target.value)
-              if (error) setError(null)
-            }}
+        {error ? (
+          <Text id="new-season-error" variant="error" role="alert">
+            {error}
+          </Text>
+        ) : null}
+
+        <TaskDialog.Actions>
+          <Dialog.Close
+            render={(props) => (
+              <Button {...props} type="button" variant="secondary" disabled={busy}>
+                Cancel
+              </Button>
+            )}
           />
-
-          <Select
-            label="Starting documents"
-            value={source}
-            items={league.running ? RUNNING_SOURCE_ITEMS : STOPPED_SOURCE_ITEMS}
-            onValueChange={(value) => {
-              if (value && isSource(value)) setSource(value)
-            }}
-          />
-
-          {willArchive ? (
-            <Checkbox
-              label={`Archive “${willArchive.name}” (moves it to _archives)`}
-              checked={archiveOldest}
-              onCheckedChange={setArchiveOldest}
-            />
-          ) : null}
-
-          {error ? (
-            <Text id="new-season-error" variant="error" role="alert">
-              {error}
-            </Text>
-          ) : null}
-
-          <div className="flex justify-end gap-2">
-            <Dialog.Close
-              render={(props) => (
-                <Button {...props} type="button" variant="secondary" disabled={busy}>
-                  Cancel
-                </Button>
-              )}
-            />
-            <Button type="submit" variant="primary" disabled={busy || !name.trim()}>
-              {busy ? 'Creating…' : 'Create season'}
-            </Button>
-          </div>
-        </form>
-      </Dialog>
-    </Dialog.Root>
+          <Button type="submit" variant="primary" disabled={busy || !name.trim()}>
+            {busy ? 'Creating…' : 'Create season'}
+          </Button>
+        </TaskDialog.Actions>
+      </TaskDialog.Body>
+    </TaskDialog>
   )
 }
