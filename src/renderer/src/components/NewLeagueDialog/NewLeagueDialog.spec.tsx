@@ -51,7 +51,7 @@ it('provides the required input attributes and placeholder', () => {
 
   expect(screen.getByLabelText(/league name/i)).toHaveAttribute('name', 'league-name')
   expect(screen.getByLabelText(/league name/i)).toHaveAttribute('autocomplete', 'off')
-  expect(screen.getByPlaceholderText("e.g. Men's Triples…")).toBeInTheDocument()
+  expect(screen.getByPlaceholderText('e.g. Monday Trios')).toBeInTheDocument()
 })
 
 it('shows the sanitised folder hint when it differs', async () => {

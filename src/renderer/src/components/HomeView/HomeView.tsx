@@ -1,125 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Button, Tabs, Text } from '@cloudflare/kumo'
 import { FolderPlusIcon } from '@phosphor-icons/react/dist/csr/FolderPlus'
-import { PlusIcon } from '@phosphor-icons/react/dist/csr/Plus'
-import type { FileEntry } from '@shared/tree'
-import { useCrumbs } from '@renderer/lib/use-crumbs'
-import { useDirListing } from '@renderer/lib/use-dir-listing'
-import { useImportFiles } from '@renderer/lib/use-import-files'
-import { CrumbTrail } from '../CrumbTrail'
-import { DirectoryBrowser } from '../DirectoryBrowser/DirectoryBrowser'
+import { FolderPane } from './components/FolderPane'
+import { OtherPane } from './components/OtherPane'
 import { NewLeagueDialog } from '../NewLeagueDialog'
-import { TreeFileBrowser } from '../TreeFileBrowser'
 import type { Props } from './interface'
 
 type HomeTab = 'shared' | 'templates' | 'other'
 
 function isHomeTab(value: string): value is HomeTab {
   return value === 'shared' || value === 'templates' || value === 'other'
-}
-
-interface FolderPaneProps {
-  baseDir: string
-  label: string
-  present: boolean
-  onChanged: () => void | Promise<void>
-  onCurrentDirChange: (path: string) => void
-}
-
-function FolderPane({
-  baseDir,
-  label,
-  present,
-  onChanged,
-  onCurrentDirChange
-}: FolderPaneProps): React.JSX.Element {
-  const trail = useCrumbs(baseDir)
-  const listing = useDirListing(present ? trail.currentDir : null)
-  const importer = useImportFiles(present ? trail.currentDir : undefined, async () => {
-    listing.reload()
-    await onChanged()
-  })
-
-  const jumpTo = (depth: number): void => {
-    trail.jumpTo(depth)
-    onCurrentDirChange(depth === 0 ? baseDir : trail.crumbs[depth - 1].path)
-  }
-
-  return (
-    <div role="tabpanel" aria-label={label} className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-10 shrink-0 items-center justify-between gap-4 border-b border-kumo-line px-4 py-1">
-        <CrumbTrail
-          names={[label, ...trail.crumbs.map((crumb) => crumb.name)]}
-          onNavigate={jumpTo}
-        />
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="text-base"
-          disabled={!present || importer.importing}
-          icon={<PlusIcon aria-hidden size={14} />}
-          onClick={() => void importer.pickFiles()}
-        >
-          {importer.importing ? 'Importing…' : 'Add files…'}
-        </Button>
-      </div>
-      {present ? (
-        <TreeFileBrowser
-          key={trail.currentDir}
-          name={trail.crumbs.at(-1)?.name ?? label}
-          listing={listing}
-          readOnly={false}
-          onNavigate={(folders) => {
-            for (const folder of folders) trail.enter(folder)
-            const destination = folders.at(-1)
-            if (destination) onCurrentDirChange(destination.path)
-          }}
-          onDropFiles={importer.importPaths}
-          onBack={{ label: `Back to ${label}`, action: () => jumpTo(0) }}
-        />
-      ) : (
-        <DirectoryBrowser
-          name={label}
-          heading="Files"
-          rows={[]}
-          metadataColumn="modified"
-          readOnly={false}
-          onRefresh={() => void onChanged()}
-          onNavigate={() => {}}
-          emptyTitle={`No ${label.toLocaleLowerCase()} folder`}
-          emptyDescription="The app couldn’t repair this reserved folder. Refresh to try again."
-        />
-      )}
-    </div>
-  )
-}
-
-interface OtherPaneProps {
-  entries: FileEntry[]
-  root: string
-  onChanged: () => void | Promise<void>
-}
-
-function OtherPane({ entries, root, onChanged }: OtherPaneProps): React.JSX.Element {
-  return (
-    <div role="tabpanel" aria-label="Other items" className="flex min-h-0 flex-1 flex-col">
-      <div className="flex min-h-10 shrink-0 items-center border-b border-kumo-line px-4 py-1">
-        <CrumbTrail names={['Other items']} onNavigate={() => {}} />
-      </div>
-      <DirectoryBrowser
-        name="Other items"
-        heading="Other items"
-        rows={entries.map((entry) => ({ ...entry, key: entry.path }))}
-        metadataColumn="contents"
-        readOnly={false}
-        onRefresh={() => void onChanged()}
-        onNavigate={(row) => void window.api.revealFile(row.path)}
-        emptyTitle="No other items"
-        emptyDescription={`Only items directly inside ${root} appear here.`}
-      />
-    </div>
-  )
 }
 
 export function HomeView({

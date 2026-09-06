@@ -1,11 +1,8 @@
-import type { DirListing } from '@renderer/lib/use-dir-listing'
-import type { DirectoryRow } from '../DirectoryTable'
-import type { BackAction } from '../ListingPanel/interface'
+import type { DirListing } from '@renderer/hooks/use-dir-listing'
+import type { BrowserRow } from '../FileBrowser/row'
+import type { BackAction } from '../FileBrowser/interface'
 
-export interface BrowserRow extends DirectoryRow {
-  typeLabel?: string
-  contents?: string
-}
+export type { BrowserRow } from '../FileBrowser/row'
 
 export interface Props {
   name: string

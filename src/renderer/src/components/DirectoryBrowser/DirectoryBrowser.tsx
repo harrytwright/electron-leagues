@@ -1,17 +1,18 @@
-import { useId, useRef, useState } from 'react'
-import { Button, DropdownMenu, Empty, Loader, Table, useKumoToastManager } from '@cloudflare/kumo'
-import { DotsThreeIcon } from '@phosphor-icons/react/dist/csr/DotsThree'
-import { FolderOpenIcon } from '@phosphor-icons/react/dist/csr/FolderOpen'
-import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/csr/MagnifyingGlass'
-import { WarningCircleIcon } from '@phosphor-icons/react/dist/csr/WarningCircle'
-import { formatModified } from '@renderer/lib/format-date'
-import { ipcErrorMessage } from '@renderer/lib/ipc-error'
-import { revealLabel } from '@renderer/lib/reveal-label'
-import { FileBrowserFrame } from '../FileBrowser/FileBrowserFrame'
-import { FileEntryIcon } from '../FileBrowser/FileEntryIcon'
+import { BrowserError } from '../FileBrowser/components/BrowserError'
+import { BrowserLoading } from '../FileBrowser/components/BrowserLoading'
+import { BrowserEmpty } from '../FileBrowser/components/BrowserEmpty'
+import { BrowserNoMatches } from '../FileBrowser/components/BrowserNoMatches'
+import { BrowserMessageRow } from '../FileBrowser/components/BrowserMessageRow'
+import { FileActionsMenu } from '../FileBrowser/components/FileActionsMenu'
+import { FileModified } from '../FileBrowser/components/FileModified'
+import { useFileActions } from '@renderer/hooks/use-file-actions'
+import { useFileSelection } from '@renderer/hooks/use-file-selection'
+import { useId, useState } from 'react'
+import { DropdownMenu, Table } from '@cloudflare/kumo'
+import { FileBrowserFrame } from '../FileBrowser/components/FileBrowserFrame'
+import { FileEntryIcon } from '../FileBrowser/components/FileEntryIcon'
 import { fileType } from '../FileBrowser/file-type'
 import { FILE_ROW_CLASS, FILE_TABLE_CLASS } from '../FileBrowser/styles'
-import { IconButton } from '../IconButton'
 import type { BrowserRow, Props } from './interface'
 
 /** Flat directory pane for the league overview and its archive, preserving scan order. */
@@ -30,68 +31,18 @@ export function DirectoryBrowser({
   emptyDescription
 }: Props): React.JSX.Element {
   const [query, setQuery] = useState('')
-  const [selected, setSelected] = useState<string | null>(null)
-  const elements = useRef(new Map<string, HTMLTableRowElement>())
   const instructions = useId()
-  const { add } = useKumoToastManager()
+  const { openFile, revealFile } = useFileActions()
   const filter = query.trim().toLocaleLowerCase()
   const visible = rows.filter((row) => row.name.toLocaleLowerCase().includes(filter))
-  const selectedRow = visible.find((row) => row.path === selected)
-  const focusPath = selectedRow?.path ?? visible[0]?.path
+  const selection = useFileSelection(visible.map((row) => row.path))
+  const selectedRow = visible.find((row) => row.path === selection.selected)
   const loading = listing?.entries === null
   const error = listing?.error
 
-  const focus = (row: BrowserRow | undefined): void => {
-    if (row) elements.current.get(row.path)?.focus()
-  }
-
   const open = async (row: BrowserRow): Promise<void> => {
-    if (row.kind === 'folder') {
-      onNavigate(row)
-      return
-    }
-    try {
-      const error = await window.api.openFile(row.path)
-      if (error) add({ title: error, variant: 'error' })
-    } catch (caught) {
-      add({ title: ipcErrorMessage(caught), variant: 'error' })
-    }
-  }
-
-  const reveal = async (row: BrowserRow): Promise<void> => {
-    try {
-      await window.api.revealFile(row.path)
-    } catch (caught) {
-      add({ title: ipcErrorMessage(caught), variant: 'error' })
-    }
-  }
-
-  const onKeyDown = (
-    event: React.KeyboardEvent<HTMLTableRowElement>,
-    row: BrowserRow,
-    index: number
-  ): void => {
-    if (event.target !== event.currentTarget) return
-    switch (event.key) {
-      case 'ArrowDown':
-        focus(visible[index + 1])
-        break
-      case 'ArrowUp':
-        focus(visible[index - 1])
-        break
-      case 'Home':
-        focus(visible[0])
-        break
-      case 'End':
-        focus(visible.at(-1))
-        break
-      case 'Enter':
-        void open(row)
-        break
-      default:
-        return
-    }
-    event.preventDefault()
+    if (row.kind === 'folder') onNavigate(row)
+    else await openFile(row.path)
   }
 
   return (
@@ -140,72 +91,30 @@ export function DirectoryBrowser({
         </Table.Header>
         <Table.Body>
           {error || loading || visible.length === 0 ? (
-            <Table.Row className="even:bg-transparent">
-              <Table.Cell colSpan={4}>
-                {error ? (
-                  <Empty
-                    size="sm"
-                    className="rounded-none border-0 bg-transparent"
-                    icon={<WarningCircleIcon size={24} />}
-                    title="Couldn’t read this folder"
-                    description={error}
-                    contents={
-                      <div className="flex gap-2">
-                        {onBack ? (
-                          <Button size="sm" onClick={onBack.action}>
-                            {onBack.label}
-                          </Button>
-                        ) : null}
-                        <Button size="sm" onClick={onRefresh}>
-                          Try again
-                        </Button>
-                      </div>
-                    }
-                  />
-                ) : loading ? (
-                  <div
-                    role="status"
-                    className="flex items-center justify-center gap-2 py-12 text-kumo-subtle"
-                  >
-                    <Loader />
-                    Loading files…
-                  </div>
-                ) : (
-                  <Empty
-                    size="sm"
-                    className="rounded-none border-0 bg-transparent"
-                    icon={filter ? <MagnifyingGlassIcon size={24} /> : <FolderOpenIcon size={24} />}
-                    title={filter ? 'No matching items' : emptyTitle}
-                    description={
-                      filter ? 'Try a different name or clear the filter.' : emptyDescription
-                    }
-                    contents={
-                      filter ? (
-                        <Button size="sm" onClick={() => setQuery('')}>
-                          Clear filter
-                        </Button>
-                      ) : undefined
-                    }
-                  />
-                )}
-              </Table.Cell>
-            </Table.Row>
+            <BrowserMessageRow>
+              {error ? (
+                <BrowserError message={error} onRetry={onRefresh} onBack={onBack} />
+              ) : loading ? (
+                <BrowserLoading />
+              ) : filter ? (
+                <BrowserNoMatches
+                  title="No matching items"
+                  description="Try a different name or clear the filter."
+                  onClear={() => setQuery('')}
+                />
+              ) : (
+                <BrowserEmpty title={emptyTitle} description={emptyDescription} />
+              )}
+            </BrowserMessageRow>
           ) : (
             visible.map((row, index) => (
               <Table.Row
                 key={row.key}
-                ref={(element) => {
-                  if (element) elements.current.set(row.path, element)
-                  else elements.current.delete(row.path)
-                }}
+                {...selection.rowProps(row.path)}
                 aria-label={row.name}
-                aria-selected={selected === row.path}
-                tabIndex={focusPath === row.path ? 0 : -1}
                 className={FILE_ROW_CLASS}
-                onFocus={() => setSelected(row.path)}
-                onClick={() => focus(row)}
                 onDoubleClick={() => void open(row)}
-                onKeyDown={(event) => onKeyDown(event, row, index)}
+                onKeyDown={(event) => selection.onKeyDown(event, index, () => void open(row))}
               >
                 <Table.Cell>
                   <div className="flex min-w-0 items-center gap-2 pl-8">
@@ -221,51 +130,30 @@ export function DirectoryBrowser({
                 <Table.Cell className="whitespace-nowrap text-kumo-subtle">
                   {metadataColumn === 'contents' ? (
                     (row.contents ?? '—')
-                  ) : row.mtime === undefined ? (
-                    '—'
                   ) : (
-                    <time dateTime={new Date(row.mtime).toISOString()}>
-                      {formatModified(row.mtime)}
-                    </time>
+                    <FileModified mtime={row.mtime} />
                   )}
                 </Table.Cell>
                 <Table.Cell className="truncate text-kumo-subtle">
                   {row.typeLabel ?? fileType(row)}
                 </Table.Cell>
-                <Table.Cell
-                  onClick={(event) => event.stopPropagation()}
-                  onDoubleClick={(event) => event.stopPropagation()}
+                <FileActionsMenu
+                  name={row.name}
+                  onOpen={() => void open(row)}
+                  onReveal={() => void revealFile(row.path)}
                 >
-                  <DropdownMenu>
-                    <DropdownMenu.Trigger
-                      render={
-                        <IconButton
-                          variant="ghost"
-                          size="sm"
-                          icon={<DotsThreeIcon aria-hidden size={16} weight="bold" />}
-                          aria-label={`Actions for ${row.name}`}
-                        />
-                      }
-                    />
-                    <DropdownMenu.Content>
-                      <DropdownMenu.Item onClick={() => void open(row)}>Open</DropdownMenu.Item>
-                      <DropdownMenu.Item onClick={() => void reveal(row)}>
-                        {revealLabel()}
-                      </DropdownMenu.Item>
-                      {row.menuItems?.length ? <DropdownMenu.Separator /> : null}
-                      {row.menuItems?.map((item) => (
-                        <DropdownMenu.Item
-                          key={item.label}
-                          variant={item.variant}
-                          disabled={item.disabled}
-                          onClick={item.onSelect}
-                        >
-                          {item.label}
-                        </DropdownMenu.Item>
-                      ))}
-                    </DropdownMenu.Content>
-                  </DropdownMenu>
-                </Table.Cell>
+                  {row.menuItems?.length ? <DropdownMenu.Separator /> : null}
+                  {row.menuItems?.map((item) => (
+                    <DropdownMenu.Item
+                      key={item.label}
+                      variant={item.variant}
+                      disabled={item.disabled}
+                      onClick={item.onSelect}
+                    >
+                      {item.label}
+                    </DropdownMenu.Item>
+                  ))}
+                </FileActionsMenu>
               </Table.Row>
             ))
           )}

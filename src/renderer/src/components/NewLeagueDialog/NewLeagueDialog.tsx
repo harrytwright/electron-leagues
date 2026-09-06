@@ -93,7 +93,7 @@ export function NewLeagueDialog({ open, onOpenChange, onCreated }: Props): React
             name="league-name"
             autoComplete="off"
             autoFocus
-            placeholder="e.g. Men's Triples…"
+            placeholder="e.g. Monday Trios"
             value={name}
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? 'new-league-error' : undefined}

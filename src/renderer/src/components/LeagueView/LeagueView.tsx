@@ -1,22 +1,21 @@
 import { useState } from 'react'
 import { Badge, Button, DropdownMenu, Text, useKumoToastManager } from '@cloudflare/kumo'
-import { DotsThreeIcon, PlusIcon } from '@phosphor-icons/react'
+import { DotsThreeIcon } from '@phosphor-icons/react'
 import type { SeasonNode } from '@shared/tree'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { revealLabel } from '@renderer/lib/reveal-label'
 import { sentenceCase } from '@renderer/lib/sentence-case'
 import { trashLabel } from '@renderer/lib/trash-label'
-import { useCrumbs } from '@renderer/lib/use-crumbs'
-import { useDirListing } from '@renderer/lib/use-dir-listing'
-import { useImportFiles } from '@renderer/lib/use-import-files'
+import { useCrumbs } from '@renderer/hooks/use-crumbs'
+import { useDirListing } from '@renderer/hooks/use-dir-listing'
+import { useImportFiles } from '@renderer/hooks/use-import-files'
+import { ImportFilesButton } from '../FileBrowser/components/ImportFilesButton'
 import { CrumbTrail } from '../CrumbTrail'
 import { DeleteResourceDialog, type DeleteTarget } from '../DeleteResourceDialog'
-import type { DirectoryRow } from '../DirectoryTable'
-import { DirectoryBrowser } from '../DirectoryBrowser/DirectoryBrowser'
-import type { BrowserRow } from '../DirectoryBrowser/interface'
+import { DirectoryBrowser, type BrowserRow } from '../DirectoryBrowser'
 import { IconButton } from '../IconButton'
 import { NewSeasonDialog } from '../NewSeasonDialog'
-import { SeasonFiles } from '../SeasonFiles'
+import { TreeFileBrowser } from '../TreeFileBrowser'
 import type { Props } from './interface'
 
 function seasonBadgeVariant(status: SeasonNode['status']): 'success' | 'info' {
@@ -30,7 +29,7 @@ function seasonBadgeVariant(status: SeasonNode['status']): 'success' | 'info' {
 }
 
 export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): React.JSX.Element {
-  const trail = useCrumbs(league.path)
+  const trail = useCrumbs(league.path, onCurrentDirChange)
   const [newSeason, setNewSeason] = useState(false)
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null)
   const [zipping, setZipping] = useState<string | null>(null)
@@ -53,15 +52,8 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
     await onChanged()
   })
 
-  const enter = (row: DirectoryRow): void => {
-    trail.enter({ name: row.name, path: row.path })
-    onCurrentDirChange(row.path)
-  }
-
-  const jumpTo = (depth: number): void => {
-    trail.jumpTo(depth)
-    onCurrentDirChange(depth === 0 ? league.path : trail.crumbs[depth - 1].path)
-  }
+  const enter = trail.enter
+  const jumpTo = trail.jumpTo
 
   const zip = async (name: string): Promise<void> => {
     if (zipping) return
@@ -201,18 +193,11 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
               onNavigate={jumpTo}
             />
             <div className="flex shrink-0 items-center gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                className="text-base"
-                disabled={inArchive || importer.importing}
+              <ImportFilesButton
+                importer={importer}
+                disabled={inArchive}
                 title={inArchive ? 'Archived seasons are read-only' : undefined}
-                icon={<PlusIcon aria-hidden size={14} />}
-                onClick={() => void importer.pickFiles()}
-              >
-                {importer.importing ? 'Importing…' : 'Add files…'}
-              </Button>
+              />
               <DropdownMenu>
                 <DropdownMenu.Trigger
                   render={
@@ -262,16 +247,12 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
 
       <div className="flex min-h-0 w-full flex-1 flex-col">
         {inSeason ? (
-          <SeasonFiles
+          <TreeFileBrowser
             key={trail.currentDir}
             name={trail.crumbs[trail.crumbs.length - 1].name}
             listing={listing}
             readOnly={inArchive}
-            onNavigate={(folders) => {
-              for (const folder of folders) trail.enter(folder)
-              const destination = folders.at(-1)
-              if (destination) onCurrentDirChange(destination.path)
-            }}
+            onNavigate={trail.enterMany}
             onDropFiles={inArchive ? undefined : importer.importPaths}
             onBack={{ label: `Back to ${league.meta.name}`, action: () => jumpTo(0) }}
           />
