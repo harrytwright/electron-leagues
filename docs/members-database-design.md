@@ -17,7 +17,35 @@ Three questions any design has to answer:
 2. **What is the unit of truth?** BLS has one database per league, so an export is naturally
    _per league per season_. But a person bowls in several leagues, so the _directory_ is global.
 3. **How do we recognise the same person across exports?** BLS bowler numbers are per league.
-   Nothing in an export is guaranteed to be a global key.
+   The Master Bowler Database (MBD) gives linked leagues a shared **MBD ID**; that is the key
+   to lean on where it exists, with fallbacks for leagues and rosters that don't carry one.
+
+## Where the data comes from: BLS and the MBD
+
+BLS keeps one database per league. CDE's Master Bowler Database (MBD) sits beside it as a
+centre-wide bowler directory: each league is linked to it (BLS → _File → Program Preferences →
+Master Bowler Database_, then per league _Database → Linked to the Master Bowler Database_),
+bowlers are added to a league from the MBD rather than retyped, and each bowler carries an
+**MBD ID** that is the same in every linked league. Keeping bowlers in step across leagues is
+manual work in the MBD, but once done the ID is the one reliable cross-league key BLS offers.
+
+Two exports are possible: **per league** (that league's bowlers, with their MBD IDs) and
+**all bowlers** (the whole MBD). This design uses the per-league export only. It is the
+unit that maps onto a season folder, it carries the team and position facts the sign-in
+sheet needs, and it keeps the app from ever holding a copy of the MBD it then has to keep in
+sync. The all-bowlers export is not needed; if it were ever wanted it would only be a way to
+refresh contact details in the ledger, never a roster.
+
+What this means for the design:
+
+- The MBD, not this app, is the master for a bowler's identity and contact details. The app
+  reads exports and never writes back.
+- The MBD ID is the primary match key. The ledger still mints its own ids, because a bowler
+  can appear in an unlinked league or a hand-made roster before their MBD ID is known, and
+  re-keying a directory later is worse than carrying two columns.
+- Column names in the export are unverified: CDE's site and knowledge base are not reachable
+  from where this was written. The import is designed as a column-mapping step for that
+  reason, and one real per-league export pins it down.
 
 ## Constraints inherited from the current app
 
@@ -85,15 +113,16 @@ Thursdays) have a home. That ledger is healed on scan exactly like `meta.json`.
 ### `players.csv` — canonical columns
 
 ```
-member_id,first_name,last_name,email,phone,association_no,team_no,team_name,position,role,average,handicap,bls_bowler_id
+member_id,mbd_id,first_name,last_name,email,phone,association_no,team_no,team_name,position,role,average,handicap,bls_bowler_id
 ```
 
 | Column                             | Required | Notes                                                                                                                             |
 | ---------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `member_id`                        | no       | Written by the import once the ledger has assigned one. Hand-made files can leave it blank; those rows fall back to key matching. |
+| `mbd_id`                           | no       | The Master Bowler Database ID from a linked league's export. Same person, same value, in every linked league.                     |
 | `first_name`, `last_name`          | yes      | Kept split because BLS exports them split and sign-in sheets sort by surname.                                                     |
 | `email`, `phone`                   | no       | Stored as exported. Normalised copies are computed, not stored.                                                                   |
-| `association_no`                   | no       | BTBA / USBC card number when BLS has it. Best global key when present.                                                            |
+| `association_no`                   | no       | BTBA / USBC card number when BLS has it. Second-best global key after `mbd_id`.                                                   |
 | `team_no`, `team_name`, `position` | no       | Per-season facts. Drive sign-in sheet grouping.                                                                                   |
 | `role`                             | no       | `bowler` (default) or `sub`.                                                                                                      |
 | `average`, `handicap`              | no       | Snapshot at export time; optional on the sign-in sheet.                                                                           |
@@ -107,12 +136,16 @@ no new dependency is needed.
 ### `_members/members.csv` — the ledger
 
 ```
-id,first_name,last_name,email,phone,association_no,merged_into,notes,first_seen,last_seen
+id,mbd_id,first_name,last_name,email,phone,association_no,merged_into,notes,first_seen,last_seen
 ```
 
-- **App-owned columns** (rewritten by the scan): `first_seen`, `last_seen`, and the contact
-  columns _when blank_. The scan fills them from the most recent season the person appears
-  in, "newest season wins".
+- **App-owned columns** (rewritten by the scan): `first_seen`, `last_seen`, `mbd_id` _when
+  blank_, and the contact columns _when blank_. The scan fills them from the person's rosters
+  with this precedence: a row that carries an `mbd_id` beats one that doesn't (a linked
+  league's export reflects the MBD, which is the master), then newest season wins.
+- Once every league is linked, `mbd_id` is filled for everyone and the ledger is little more
+  than a map from MBD ID to app id plus the user's notes and merges. That is the intended end
+  state; the fallback rules below exist for the road there.
 - **User-owned columns** (the scan never touches): `merged_into`, `notes`, and any contact
   column the user has typed over. Overrides are detected the same way `meta.json` keeps
   `name`: the prior file's value survives unless it is empty.
@@ -129,16 +162,22 @@ id,first_name,last_name,email,phone,association_no,merged_into,notes,first_seen,
 Each `players.csv` row is resolved to a ledger id by the first rule that matches:
 
 1. `member_id` present and known.
-2. `association_no` equal.
-3. Normalised email equal (lower-case, trimmed).
-4. Normalised name equal **and** last six digits of phone equal.
-5. Normalised name equal and unique in the ledger.
-6. Otherwise: new person, new id.
+2. `mbd_id` equal.
+3. `association_no` equal.
+4. Normalised email equal (lower-case, trimmed).
+5. Normalised name equal **and** last six digits of phone equal.
+6. Normalised name equal and unique in the ledger, **and** neither side has a conflicting
+   `mbd_id`.
+7. Otherwise: new person, new id.
 
 Normalised name = lower-case, diacritics stripped, punctuation and double spaces removed,
-`first last`. Rule 5 is the one that can be wrong (two John Smiths); the directory view lists
+`first last`. Rule 6 is the one that can be wrong (two John Smiths); the directory view lists
 "possible duplicates" (same normalised name, different ids) so the user can merge or ignore
-them. Nothing is merged automatically beyond these rules.
+them. Two ledger rows with _different_ `mbd_id` values are never proposed as duplicates: the
+MBD says they are different people. A row whose `mbd_id` matches a ledger entry but whose
+name differs is still matched (rule 2), and reported, because that is usually a rename or a
+typo fixed in the MBD rather than a different person. Nothing is merged automatically beyond
+these rules.
 
 ### In-memory model
 
@@ -147,6 +186,7 @@ New shared module `src/shared/members.ts`:
 ```ts
 export interface MemberRef {
   id: string
+  mbdId?: string
   firstName: string
   lastName: string
   email?: string
@@ -221,10 +261,10 @@ the existing `capture` calls.
 
 ### BLS import
 
-BLS is one database per league. Its bowler/team export (CSV or tab-delimited) carries the
-bowler's name, contact details, association number, team number and name, position, average
-and handicap, but the exact header names vary between BLS versions and I have not seen one
-from this centre. So the importer is a **column-mapping** step, not a fixed parser:
+The per-league export (CSV or tab-delimited) carries the bowler's MBD ID, name, contact
+details, association number, team number and name, position, average and handicap, but the
+exact header names vary between BLS versions and CDE's documentation could not be checked
+from here. So the importer is a **column-mapping** step, not a fixed parser:
 
 1. `previewRosterImport` reads the header row, proposes a mapping from a table of known BLS
    header spellings to the canonical columns, and returns the first few mapped rows plus any
@@ -235,10 +275,13 @@ from this centre. So the importer is a **column-mapping** step, not a fixed pars
    `member_id` filled from the ledger. If `players.csv` already exists it writes
    `players (2).csv` (the `importFiles` numbering) and says so; it never overwrites.
 
-**Needed from you:** one real BLS export (any league, personal data redacted is fine). It
-becomes a fixture under `src/main/lib/tests/fixtures/bls/` and the mapping table is locked
-against it. Until then the mapping table is a best guess and the preview step is what makes
-that safe.
+The preview flags an export with no recognisable MBD ID column, since that usually means the
+league isn't linked yet; the import still goes ahead and those rows use the fallback rules.
+
+**Needed from you:** one real per-league export from an MBD-linked league (personal data
+redacted is fine). It becomes a fixture under `src/main/lib/tests/fixtures/bls/` and the
+mapping table, including the MBD ID header, is locked against it. Until then the mapping
+table is a best guess and the preview step is what makes that safe.
 
 BLS `.bak` backups already live in `_archives`; they are opaque and stay untouched.
 
@@ -290,7 +333,7 @@ main except over IPC; `capture` calls only carry counts).
 
 1. **Read side.** `src/shared/members.ts`, CSV parser, `players.csv` discovery in the
    scanner, ledger healing, `members:snapshot`, Members tab and the roster badge. Tests: parser
-   edge cases, resolution rules 1–6, ledger healing preserves user columns and ids, snapshot
+   edge cases, resolution rules 1–7, ledger healing preserves user columns and ids, snapshot
    caching by mtime, scanner unaffected when no CSVs exist.
 2. **Import.** Preview + mapping dialog, `members:import`, remembered mapping, BLS fixture.
    Tests: mapping against the fixture, never-overwrite numbering, ids back-filled.
@@ -305,9 +348,12 @@ up in the directory.
 
 ## Open questions
 
-- Which BLS version and export screen do you use? One sample file settles the mapping.
-- Is the association number (BTBA) recorded in BLS for your leagues? It decides how much the
-  matcher can rely on rule 2 versus the name-based rules.
+- Which BLS version and export screen do you use? One per-league sample settles the mapping
+  and the MBD ID header name.
+- Are all leagues linked to the MBD, or only some? Unlinked leagues are where the fallback
+  rules and the duplicates list will actually be exercised.
+- Is the association number (BTBA) recorded in BLS for your leagues? It is the second key for
+  bowlers in unlinked leagues.
 - What does the current paper sign-in sheet look like: per team, per lane, averages shown,
   space for subs? A photo of one is enough to pin down the generated layout.
 - Should subs be tracked as members at all, or only named on the sheet?
