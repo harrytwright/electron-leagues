@@ -1,6 +1,12 @@
 import { useRef, useState } from 'react'
 import { Button, DropdownMenu, useKumoToastManager } from '@cloudflare/kumo'
-import { CaretUpDownIcon, FolderIcon, FolderOpenIcon, FolderPlusIcon } from '@phosphor-icons/react'
+import {
+  CaretUpDownIcon,
+  FolderIcon,
+  FolderOpenIcon,
+  FolderPlusIcon,
+  WrenchIcon
+} from '@phosphor-icons/react'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { pathBasename } from '@renderer/lib/path-basename'
 import { revealLabel } from '@renderer/lib/reveal-label'
@@ -12,6 +18,7 @@ import { appShortcutLabel } from '@renderer/lib/app-shortcut-label'
 /** Select-styled menu of the current and recent leagues folders. */
 export function LocationSwitcher({ root, onChanged }: Props): React.JSX.Element {
   const [recents, setRecents] = useState<string[]>([])
+  const [repairing, setRepairing] = useState(false)
   // Fetches settle in any order; only the most recent may land.
   const fetches = useRef(0)
   const { add } = useKumoToastManager()
@@ -36,6 +43,25 @@ export function LocationSwitcher({ root, onChanged }: Props): React.JSX.Element 
       await window.api.revealFile(root)
     } catch (caught) {
       add({ title: ipcErrorMessage(caught), variant: 'error' })
+    }
+  }
+
+  const repair = async (): Promise<void> => {
+    if (repairing) return
+    setRepairing(true)
+    try {
+      const result = await window.api.repairLocation()
+      add({
+        title:
+          result.repaired.length === 0
+            ? 'Nothing to repair'
+            : `Repaired ${result.repaired.join(', ')}`,
+        variant: 'success'
+      })
+    } catch (caught) {
+      add({ title: ipcErrorMessage(caught), variant: 'error' })
+    } finally {
+      setRepairing(false)
     }
   }
 
@@ -103,6 +129,9 @@ export function LocationSwitcher({ root, onChanged }: Props): React.JSX.Element 
         </DropdownMenu.Item>
         <DropdownMenu.Item icon={FolderOpenIcon} onClick={() => void reveal()}>
           {revealLabel()}
+        </DropdownMenu.Item>
+        <DropdownMenu.Item icon={WrenchIcon} disabled={repairing} onClick={() => void repair()}>
+          Repair location…
         </DropdownMenu.Item>
       </DropdownMenu.Content>
     </DropdownMenu>

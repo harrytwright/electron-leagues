@@ -24,6 +24,8 @@ const api = {
   chooseRoot: (mode: 'select' | 'init'): Promise<string | null> =>
     ipcRenderer.invoke('root:choose', mode),
   forgetRoot: (): Promise<void> => ipcRenderer.invoke('root:forget'),
+  repairLocation: (): Promise<{ repaired: string[]; warnings: string[] }> =>
+    ipcRenderer.invoke('root:repair'),
   /** Switch to a known location; null when it can't be used (missing or unreadable). */
   setRoot: (path: string): Promise<string | null> => ipcRenderer.invoke('root:set', path),
   recentRoots: (): Promise<string[]> => ipcRenderer.invoke('root:recents'),

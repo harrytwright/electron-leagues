@@ -14,7 +14,7 @@ import {
   createLeague,
   createSeason,
   importFiles,
-  initialiseRoot,
+  prepareRootSelection,
   repairReservedLocations,
   syncSeasonWithTemplates,
   zipArchivedSeasons,
@@ -189,8 +189,8 @@ function registerIpc(): void {
     })
     if (result.canceled || result.filePaths.length === 0) return null
     const root = resolve(result.filePaths[0])
+    await prepareRootSelection(root, mode, bundledTemplatesDir())
     if (mode === 'init') {
-      await initialiseRoot(root, bundledTemplatesDir())
       capture('root_initialised')
     }
     activateRoot(root)
@@ -218,6 +218,8 @@ function registerIpc(): void {
 
   handle('root:recents', () => recentRoots())
 
+  handle('root:repair', () => repairReservedLocations(requireRoot(), bundledTemplatesDir()))
+
   handle('root:forget', () => {
     envRootOverride = undefined
     store.delete('rootPath')
@@ -227,7 +229,6 @@ function registerIpc(): void {
   handle('leagues:scan', async () => {
     const root = currentRoot()
     if (!root) return null
-    await repairReservedLocations(root, bundledTemplatesDir())
     if (!watcher) watchRoot(root)
     return scanLeaguesRoot(root, { heal: true })
   })
@@ -247,26 +248,21 @@ function registerIpc(): void {
     return path
   })
 
-  handle(
-    'season:create',
-    async (_e, opts: Omit<CreateSeasonOptions, 'root' | 'templatesSource'>) => {
-      const result = await createSeason({
-        ...opts,
-        root: requireRoot(),
-        templatesSource: bundledTemplatesDir()
-      })
-      capture('season_created', { source: opts.source, archived: result.archived !== null })
-      return result
-    }
-  )
+  handle('season:create', async (_e, opts: Omit<CreateSeasonOptions, 'root'>) => {
+    const result = await createSeason({
+      ...opts,
+      root: requireRoot()
+    })
+    capture('season_created', { source: opts.source, archived: result.archived !== null })
+    return result
+  })
 
   handle(
     'season:sync-templates',
     async (_e, opts: Pick<CreateSeasonOptions, 'day' | 'leagueFolder' | 'seasonName'>) => {
       const result = await syncSeasonWithTemplates({
         ...opts,
-        root: requireRoot(),
-        templatesSource: bundledTemplatesDir()
+        root: requireRoot()
       })
       capture('season_templates_synced', { added: result.added.length })
       return result

@@ -174,3 +174,28 @@ it('reveals the current location', async () => {
 
   expect(api.revealFile).toHaveBeenCalledWith(CURRENT)
 })
+
+it('repairs the current location from the item after reveal', async () => {
+  const api = installMockApi({
+    repairLocation: vi
+      .fn()
+      .mockResolvedValueOnce({ repaired: ['_shared', '_templates/Rules.docx'], warnings: [] })
+      .mockResolvedValueOnce({ repaired: [], warnings: [] })
+  })
+  const user = userEvent.setup()
+  renderWithProviders(<LocationSwitcher root={CURRENT} onChanged={vi.fn()} />)
+
+  const menu = await openMenu(user)
+  const items = within(menu).getAllByRole('menuitem')
+  expect(items.at(-2)).toHaveTextContent(revealLabel())
+  expect(items.at(-1)).toHaveTextContent('Repair location…')
+  await user.click(within(menu).getByRole('menuitem', { name: 'Repair location…' }))
+
+  expect(api.repairLocation).toHaveBeenCalledOnce()
+  expect(await screen.findByText('Repaired _shared, _templates/Rules.docx')).toBeInTheDocument()
+
+  const reopened = await openMenu(user)
+  await user.click(within(reopened).getByRole('menuitem', { name: 'Repair location…' }))
+
+  expect(await screen.findByText('Nothing to repair')).toBeInTheDocument()
+})

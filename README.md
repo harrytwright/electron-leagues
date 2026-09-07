@@ -29,10 +29,11 @@ direct files first, then fills missing names from templates; previous filenames 
 empty copies nothing. These are snapshots, not live links. The pre-ticked wizard option moves the
 oldest live season into `_archives`, where seasons can be zipped on demand.
 
-Every scan checks the selected location for `_templates`, `_shared`, and `_archives`. Missing
-reserved folders are repaired, and only missing bundled `Rules.docx` and `Sign-In Sheet.docx` are
-restored. Edited defaults and custom templates are left alone. The selected root itself is never
-recreated if it has moved or become unavailable.
+Scans may update app-owned `meta.json` files, but never create reserved folders, copy bundled
+templates, or touch user documents. **New location…** creates `_templates`, `_shared`, and
+`_archives` and seeds missing bundled `Rules.docx` and `Sign-In Sheet.docx`; **Repair location…**
+does the same on demand. Edited defaults and custom templates are left alone, and the selected root
+itself is never recreated if it has moved or become unavailable.
 
 ## Using the app
 

@@ -157,6 +157,20 @@ describe('scanLeaguesRoot', () => {
     expect(tree.hasShared).toBe(false)
   })
 
+  test('still succeeds when _shared is a symbolic link', async () => {
+    const sharedTarget = await mkdtemp(join(tmpdir(), 'leagues-shared-'))
+    try {
+      await symlink(sharedTarget, join(root, '_shared'))
+
+      await expect(scanLeaguesRoot(root, { heal: true })).resolves.toMatchObject({
+        root,
+        hasShared: false
+      })
+    } finally {
+      await rm(sharedTarget, { recursive: true, force: true })
+    }
+  })
+
   test('exposes absolute paths for the templates and shared folders', async () => {
     const tree = await scanLeaguesRoot(root)
     expect(tree.templatesPath).toBe(join(root, '_templates'))

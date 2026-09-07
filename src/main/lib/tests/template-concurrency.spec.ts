@@ -41,7 +41,6 @@ test('season creation waits for an in-flight template transaction to finish writ
   let created = false
   const creating = createSeason({
     root,
-    templatesSource: source,
     day: 'monday',
     leagueFolder: 'Pairs',
     seasonName: '2026-27',
@@ -68,7 +67,7 @@ test('a failed repair releases the queue for a subsequent attempt', async () => 
   await writeFile(join(root, '_shared'), 'conflict')
   await expect(repairReservedLocations(root)).rejects.toThrow(/not a folder/)
   await rm(join(root, '_shared'))
-  await expect(repairReservedLocations(root)).resolves.toBeUndefined()
+  await expect(repairReservedLocations(root)).resolves.toMatchObject({ warnings: [] })
 })
 
 test('metadata skips hidden names before statting and tolerates vanished children', async () => {

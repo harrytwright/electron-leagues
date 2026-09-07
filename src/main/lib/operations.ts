@@ -36,6 +36,13 @@ const REQUIRED_TEMPLATE_NAMES: ReadonlySet<string> = new Set(REQUIRED_TEMPLATES)
 
 const templateTasks = new Map<string, Promise<void>>()
 
+export interface RepairResult {
+  repaired: string[]
+  warnings: string[]
+}
+
+export type RootSelectionMode = 'select' | 'init'
+
 /** Keep repair and its dependent readers together, including aliases of the same root. */
 export async function withTemplateLock<T>(root: string, run: () => Promise<T>): Promise<T> {
   const key = await realpath(root).catch((err) => {
@@ -67,14 +74,34 @@ async function exists(path: string): Promise<boolean> {
 export async function repairReservedLocations(
   root: string,
   templatesSource?: string
-): Promise<void> {
-  return withTemplateLock(root, () => repairReservedLocationsUnlocked(root, templatesSource))
+): Promise<RepairResult> {
+  try {
+    return await withTemplateLock(root, () =>
+      repairReservedLocationsUnlocked(root, templatesSource)
+    )
+  } catch (err) {
+    const mapped = toUserFacing(err)
+    throw mapped instanceof UserFacingError ? mapped : new UserFacingError(mapped.message)
+  }
 }
 
 async function repairReservedLocationsUnlocked(
   root: string,
   templatesSource?: string
-): Promise<void> {
+): Promise<RepairResult> {
+  try {
+    return await repairReservedLocationsUnchecked(root, templatesSource)
+  } catch (err) {
+    const mapped = toUserFacing(err)
+    throw mapped instanceof UserFacingError ? mapped : new UserFacingError(mapped.message)
+  }
+}
+
+async function repairReservedLocationsUnchecked(
+  root: string,
+  templatesSource?: string
+): Promise<RepairResult> {
+  const repaired: string[] = []
   const rootInfo = await stat(root).catch((err) => {
     throw toUserFacing(err)
   })
@@ -87,12 +114,15 @@ async function repairReservedLocationsUnlocked(
       throw err
     })
     if (!existing) {
+      let created = true
       await mkdir(target).catch((err: NodeJS.ErrnoException) => {
-        // Concurrent scans may both observe the missing folder. The winner is
+        // Concurrent repairs may both observe the missing folder. The winner is
         // valid only after the checks below inspect what now occupies it.
-        if (err.code !== 'EEXIST') throw err
+        if (err.code !== 'EEXIST') throw toUserFacing(err)
+        created = false
       })
       existing = await lstat(target)
+      if (created) repaired.push(folder)
     }
     if (existing?.isSymbolicLink()) {
       throw new UserFacingError(`Reserved folder “${folder}” can’t be a symbolic link`)
@@ -102,7 +132,7 @@ async function repairReservedLocationsUnlocked(
     }
   }
 
-  if (!templatesSource) return
+  if (!templatesSource) return { repaired, warnings: [] }
   const available = (await readDirectMetadata(templatesSource)).filter((file) =>
     REQUIRED_TEMPLATE_NAMES.has(file.relativePath)
   )
@@ -110,7 +140,9 @@ async function repairReservedLocationsUnlocked(
     available.filter((file) => file.kind === 'file').map((file) => file.relativePath)
   )
   for (const required of REQUIRED_TEMPLATES) {
-    if (!found.has(required)) throw new Error(`Bundled template “${required}” is missing`)
+    if (!found.has(required)) {
+      throw new UserFacingError(`Bundled template “${required}” is missing`)
+    }
   }
   const destination = join(root, '_templates')
   const existing = await readDirectMetadata(destination)
@@ -120,12 +152,26 @@ async function repairReservedLocationsUnlocked(
     }
   }
   const plan = await FILE_RULES['fill-missing'](existing, available)
-  await executeCopyPlan(plan, { templates: templatesSource, destination })
+  const copied = await executeCopyPlan(plan, { templates: templatesSource, destination })
+  repaired.push(...copied.added.map((name) => `_templates/${name}`))
+  return { repaired, warnings: [] }
 }
 
 /** Create/repair app-owned locations and seed only the two bundled defaults. */
-export async function initialiseRoot(root: string, templatesSource?: string): Promise<void> {
-  await repairReservedLocations(root, templatesSource)
+export async function initialiseRoot(
+  root: string,
+  templatesSource?: string
+): Promise<RepairResult> {
+  return repairReservedLocations(root, templatesSource)
+}
+
+/** Selecting an existing root is read-only; only initialisation repairs it. */
+export async function prepareRootSelection(
+  root: string,
+  mode: RootSelectionMode,
+  templatesSource?: string
+): Promise<RepairResult | null> {
+  return mode === 'init' ? initialiseRoot(root, templatesSource) : null
 }
 
 /** Create a new league folder under its weekday, with a fresh meta.json. */
@@ -172,8 +218,6 @@ async function moveDir(from: string, to: string): Promise<void> {
 
 export interface CreateSeasonOptions {
   root: string
-  /** Main supplies the app bundle; optional for focused library callers. */
-  templatesSource?: string
   day: Weekday
   leagueFolder: string
   seasonName: string
@@ -193,7 +237,7 @@ export async function createSeason(opts: CreateSeasonOptions): Promise<CreateSea
 async function createSeasonUnlocked(opts: CreateSeasonOptions): Promise<CreateSeasonResult> {
   const season = parseSeasonName(opts.seasonName)
   if (!season) throw new Error(`"${opts.seasonName}" is not a valid season name`)
-  await repairReservedLocationsUnlocked(opts.root, opts.templatesSource)
+  await repairReservedLocationsUnlocked(opts.root)
 
   const leaguePath = join(opts.root, opts.day, opts.leagueFolder)
   const seasonPath = join(leaguePath, season.name)
@@ -247,7 +291,6 @@ async function createSeasonUnlocked(opts: CreateSeasonOptions): Promise<CreateSe
 
 export interface SyncSeasonOptions {
   root: string
-  templatesSource?: string
   day: Weekday
   leagueFolder: string
   seasonName: string
@@ -264,7 +307,7 @@ export async function syncSeasonWithTemplates(
       opts.leagueFolder,
       opts.seasonName
     )
-    await repairReservedLocationsUnlocked(opts.root, opts.templatesSource)
+    await repairReservedLocationsUnlocked(opts.root)
     return syncMissingTemplates(seasonPath, join(opts.root, '_templates'))
   })
 }

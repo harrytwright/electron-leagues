@@ -8,6 +8,7 @@ import {
   createSeason,
   importFiles,
   initialiseRoot,
+  prepareRootSelection,
   repairReservedLocations,
   syncSeasonWithTemplates,
   zipArchivedSeasons
@@ -108,6 +109,12 @@ describe('initialiseRoot', () => {
     await expect(repairReservedLocations(root, outside)).rejects.toThrow(/not a regular file/)
     expect(await readFile(join(root, '_templates/Rules.docx/nested.txt'), 'utf8')).toBe('conflict')
   })
+
+  test('select mode does not create reserved folders', async () => {
+    await prepareRootSelection(root, 'select', outside)
+
+    expect(await readdir(root)).toEqual([])
+  })
 })
 
 describe('createLeague', () => {
@@ -129,6 +136,24 @@ describe('createLeague', () => {
 })
 
 describe('createSeason', () => {
+  test('does not restore a deleted bundled template as a side effect', async () => {
+    await makeTree(outside, { 'Rules.docx': 'bundled', 'Sign-In Sheet.docx': 'bundled' })
+    await initialiseRoot(root, outside)
+    await rm(join(root, '_templates/Rules.docx'))
+    await makeTree(root, { 'monday/Pairs': null })
+
+    await createSeason({
+      root,
+      day: 'monday',
+      leagueFolder: 'Pairs',
+      seasonName: '2026-27',
+      source: 'empty',
+      archiveOldest: false
+    })
+
+    expect(await exists(join(root, '_templates/Rules.docx'))).toBe(false)
+  })
+
   test('creates a season from templates', async () => {
     await makeTree(root, {
       '_templates/Rules.docx': 'template-rules',

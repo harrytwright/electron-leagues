@@ -38,6 +38,10 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
       skipped: []
     }),
     chooseRoot: vi.fn<RendererApi['chooseRoot']>().mockResolvedValue(null),
+    repairLocation: vi.fn<RendererApi['repairLocation']>().mockResolvedValue({
+      repaired: [],
+      warnings: []
+    }),
     openFile: vi.fn<RendererApi['openFile']>().mockResolvedValue(''),
     revealFile: vi.fn<RendererApi['revealFile']>().mockResolvedValue(undefined),
     forgetRoot: vi.fn<RendererApi['forgetRoot']>().mockResolvedValue(undefined),
