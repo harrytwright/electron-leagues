@@ -204,6 +204,7 @@ export function DirectoryBrowser({
         anchor={rowMenu.anchor}
         actions={actions(visible.find((row) => row.path === rowMenu.target))}
         onOpenChange={rowMenu.onOpenChange}
+        onRestoreFocus={rowMenu.restoreFocus}
       />
     </FileBrowserFrame>
   )

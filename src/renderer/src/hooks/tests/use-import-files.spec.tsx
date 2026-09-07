@@ -135,6 +135,7 @@ it('ignores a picker result after the destination changes', async () => {
     await picking
   })
   expect(api.importFiles).not.toHaveBeenCalled()
+  expect(await screen.findByText('The folder changed. No files were imported.')).toBeInTheDocument()
 })
 
 it('reports a refresh callback rejection and releases the busy state', async () => {

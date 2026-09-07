@@ -373,8 +373,8 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.gobowling.leagues')
 
   app.on('browser-window-created', (_, window) => {
-    // Main is the single accelerator owner. Register before the toolkit's
-    // dev shortcut watcher so reload cannot win this same input event.
+    // Main owns application accelerators in development and production,
+    // preventing native reload without relying on renderer keydown delivery.
     installAppShortcuts(window.webContents)
     optimizer.watchWindowShortcuts(window)
   })

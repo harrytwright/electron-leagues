@@ -152,6 +152,43 @@ it('exposes the visible actions button as a keyboard-operable menu trigger', asy
   expect(trigger).toHaveFocus()
 })
 
+it('redirects delayed popup focus return away from its invisible positioning trigger', async () => {
+  installMockApi()
+  const user = userEvent.setup()
+  renderBrowser([row('a.xlsx')])
+  const trigger = screen.getByRole('button', { name: 'Actions for a.xlsx' })
+  await user.click(trigger)
+  await user.keyboard('{Escape}')
+  const positioningTrigger = document.querySelector<HTMLButtonElement>('button[aria-hidden="true"]')
+  expect(positioningTrigger).not.toBeNull()
+  positioningTrigger?.focus()
+  expect(trigger).toHaveFocus()
+
+  // A late popup teardown must also preserve focus in a newly opened dialog.
+  const dialog = document.createElement('div')
+  dialog.setAttribute('role', 'dialog')
+  const input = document.createElement('input')
+  dialog.append(input)
+  document.body.append(dialog)
+  input.focus()
+  positioningTrigger?.focus()
+  expect(input).toHaveFocus()
+  dialog.remove()
+})
+
+it('returns delayed focus to the browser filter when the menu row has disappeared', async () => {
+  installMockApi()
+  const user = userEvent.setup()
+  renderBrowser([row('a.xlsx')])
+  await user.click(screen.getByRole('button', { name: 'Actions for a.xlsx' }))
+  const filter = screen.getByRole('textbox', { name: 'Filter this folder' })
+  fireEvent.change(filter, { target: { value: 'missing' } })
+  expect(screen.queryByRole('row', { name: 'a.xlsx' })).not.toBeInTheDocument()
+  const positioningTrigger = document.querySelector<HTMLButtonElement>('button[aria-hidden="true"]')
+  positioningTrigger?.focus()
+  expect(filter).toHaveFocus()
+})
+
 it('keeps badges beside the name', () => {
   installMockApi()
   renderBrowser([{ ...row('Season', 'folder'), badge: <span>Active</span> }])

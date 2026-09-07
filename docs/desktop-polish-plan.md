@@ -105,3 +105,21 @@ claim these checks passed unless actually run.
   findings. Independent verification: 298 tests passing, typecheck/lint and diff
   checks pass. Explicit refresh activity is deferred because directory reload
   does not expose completion; no synthetic progress was added.
+- Final fresh Fable cumulative review completed. Fixed the refresh tooltip,
+  made the activity live region persistent (errors remain visible but defer
+  announcement to error toasts), hardened delayed menu focus return and preserved
+  newer outside/dialog focus. A discarded picker selection now explains why
+  nothing was imported when its still-mounted destination changes.
+- Fable's proposed development reload exception and relaxed shortcut guards were
+  not adopted: file refresh must behave consistently in packaged/development
+  builds, and blocking commands behind overlays/editable fields is intentional.
+  Its multi-pane handler-map concern is latent, not a current path: the app mounts
+  one active browser frame. Keyboard-layout and native screen-reader/menu timing
+  observations remain manual acceptance checks, not claimed runtime verification.
+- Fable's focused follow-up identified missing-opener and unrelated-dialog focus
+  cases. Added browser-scoped fallback, snapshot-scoped new-dialog restoration,
+  focusable-descendant handling and regression coverage. Also covered quiet
+  status errors explicitly. Animation/screen-reader behavior is still a native
+  acceptance item; these tests simulate delayed focus return in the DOM.
+- Corrective pass verification: 304 tests passing, full typecheck/lint and diff
+  checks pass. Final native acceptance remains with the user.

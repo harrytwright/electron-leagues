@@ -362,6 +362,7 @@ export function TreeFileBrowser({
         anchor={rowMenu.anchor}
         actions={actions(rows.find((row) => row.entry.path === rowMenu.target))}
         onOpenChange={rowMenu.onOpenChange}
+        onRestoreFocus={rowMenu.restoreFocus}
       />
     </FileBrowserFrame>
   )

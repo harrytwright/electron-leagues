@@ -105,7 +105,7 @@ export function FileBrowserFrame({
             ) : null}
           </div>
           {actions}
-          <span title={`Refresh files (${appShortcutLabel('R')}`}>
+          <span title={`Refresh files (${appShortcutLabel('R')})`}>
             <IconButton
               aria-label="Refresh files"
               aria-keyshortcuts={appShortcutAria('R')}

@@ -85,7 +85,11 @@ export function useImportFiles(
     } finally {
       running.current = false
     }
-    if (lifecycle.current.generation === generation) await importPaths(paths)
+    if (lifecycle.current.generation === generation) {
+      await importPaths(paths)
+    } else if (lifecycle.current.mounted && paths.length > 0) {
+      add({ title: 'The folder changed. No files were imported.' })
+    }
   }
 
   return { importing, importPaths, pickFiles }

@@ -7,4 +7,5 @@ export interface Props {
   anchor: { left: number; top: number }
   actions: RowMenuItem[]
   onOpenChange: (open: boolean) => void
+  onRestoreFocus: (previous?: HTMLElement | null) => void
 }
