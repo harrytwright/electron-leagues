@@ -19,7 +19,7 @@ beforeEach(() => {
   Object.defineProperties(process, {
     getHeapStatistics: {
       configurable: true,
-      value: vi.fn(() => ({ usedHeapSize: 43 * 1024 }))
+      value: vi.fn(() => ({ usedHeapSize: 43008 }))
     },
     getCPUUsage: {
       configurable: true,
@@ -34,7 +34,7 @@ afterEach(() => {
 })
 
 it('samples renderer heap in kilobytes and CPU usage synchronously', () => {
-  expect(getRendererMetrics()).toEqual({ usedHeapKilobytes: 43, cpuPercent: 2.75 })
+  expect(getRendererMetrics()).toEqual({ usedHeapKilobytes: 43008, cpuPercent: 2.75 })
   expect(process.getHeapStatistics).toHaveBeenCalledOnce()
   expect(process.getCPUUsage).toHaveBeenCalledOnce()
 })

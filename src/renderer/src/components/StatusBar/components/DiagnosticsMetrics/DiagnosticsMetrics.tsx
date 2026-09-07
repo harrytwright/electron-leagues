@@ -1,8 +1,8 @@
 import { Text } from '@cloudflare/kumo'
 import { useRendererMetrics } from '@renderer/hooks/use-renderer-metrics'
 
-export function DiagnosticsMetrics(): React.JSX.Element | null {
-  const metrics = useRendererMetrics(true)
+export function DiagnosticsMetrics({ enabled }: { enabled: boolean }): React.JSX.Element | null {
+  const metrics = useRendererMetrics(enabled)
   if (!metrics) return null
 
   return (

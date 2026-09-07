@@ -21,7 +21,7 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
   appCommandListeners = []
   const api: RendererApi = {
     getRendererMetrics: vi.fn<RendererApi['getRendererMetrics']>(() => ({
-      usedHeapKilobytes: 42 * 1024,
+      usedHeapKilobytes: 43008,
       cpuPercent: 1.2
     })),
     scan: vi.fn<RendererApi['scan']>().mockResolvedValue(null),

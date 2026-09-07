@@ -6,7 +6,10 @@ import { installMockApi } from '../../tests/mock-api'
 import { StatusBar } from './index'
 import { useOperationFeedback } from '@renderer/hooks/use-operation-feedback'
 
-afterEach(() => vi.useRealTimers())
+afterEach(() => {
+  vi.useRealTimers()
+  Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+})
 
 function StartOperation(): React.JSX.Element {
   const { begin, finish } = useOperationFeedback()
@@ -97,8 +100,14 @@ it('polls only while enabled and visible, and cleans up', async () => {
   act(() => document.dispatchEvent(new Event('visibilitychange')))
   act(() => vi.advanceTimersByTime(2000))
   expect(api.getRendererMetrics).toHaveBeenCalledTimes(2)
+  Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+  act(() => document.dispatchEvent(new Event('visibilitychange')))
+  expect(api.getRendererMetrics).toHaveBeenCalledTimes(3)
+  fireEvent.click(screen.getByRole('button', { name: 'Status options' }))
+  fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Show diagnostics' }))
+  act(() => vi.advanceTimersByTime(2000))
+  expect(api.getRendererMetrics).toHaveBeenCalledTimes(3)
   view.unmount()
   expect(clearInterval).toHaveBeenCalled()
-  Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
   clearInterval.mockRestore()
 })

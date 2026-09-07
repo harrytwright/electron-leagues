@@ -5,7 +5,7 @@ export interface RendererMetrics {
 
 export function getRendererMetrics(): RendererMetrics {
   return {
-    usedHeapKilobytes: process.getHeapStatistics().usedHeapSize / 1024,
+    usedHeapKilobytes: process.getHeapStatistics().usedHeapSize,
     cpuPercent: process.getCPUUsage().percentCPUUsage
   }
 }

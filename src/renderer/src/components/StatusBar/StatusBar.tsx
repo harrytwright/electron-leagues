@@ -43,7 +43,7 @@ export function StatusBar({ path }: Props): React.JSX.Element {
           </Text>
         ) : null}
       </span>
-      {diagnostics ? <DiagnosticsMetrics /> : null}
+      <DiagnosticsMetrics enabled={diagnostics} />
       <DropdownMenu>
         <DropdownMenu.Trigger
           render={
