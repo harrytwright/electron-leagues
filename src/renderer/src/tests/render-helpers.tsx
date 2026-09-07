@@ -1,5 +1,5 @@
 import { render, type RenderResult } from '@testing-library/react'
-import { ToastProvider } from '@cloudflare/kumo'
+import { TestProviders } from './TestProviders'
 
 /**
  * Render a component under the same providers App mounts at its root.
@@ -7,5 +7,5 @@ import { ToastProvider } from '@cloudflare/kumo'
  * instead of remounting the component under test.
  */
 export function renderWithProviders(ui: React.ReactElement): RenderResult {
-  return render(ui, { wrapper: ToastProvider })
+  return render(ui, { wrapper: TestProviders })
 }

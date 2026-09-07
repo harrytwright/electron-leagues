@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useKumoToastManager } from '@cloudflare/kumo'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
+import { useOperationFeedback } from './use-operation-feedback'
 
 export interface FileImporter {
   importing: boolean
@@ -16,42 +17,75 @@ export function useImportFiles(
   onImported?: () => void | Promise<void>
 ): FileImporter {
   const [importing, setImporting] = useState(false)
+  const running = useRef(false)
+  const lifecycle = useRef({ dest, generation: 0, mounted: true })
   const { add } = useKumoToastManager()
+  const feedback = useOperationFeedback()
+
+  useEffect(() => {
+    const current = lifecycle.current
+    current.mounted = true
+    return () => {
+      current.mounted = false
+      current.generation += 1
+    }
+  }, [])
+
+  useEffect(() => {
+    const current = lifecycle.current
+    if (current.dest !== dest) {
+      current.dest = dest
+      current.generation += 1
+    }
+  }, [dest])
 
   const importPaths = async (paths: string[]): Promise<void> => {
     const usable = paths.filter(Boolean)
-    if (!dest || usable.length === 0 || importing) return
+    if (!dest || usable.length === 0 || running.current) return
+    running.current = true
     setImporting(true)
-    let copied: string[]
+    const destination = dest
+    const generation = lifecycle.current.generation
+    const operationId = feedback.begin(
+      `Importing ${usable.length} file${usable.length === 1 ? '' : 's'}`
+    )
     try {
       // Main reports what it actually copied — count that, not the request.
-      copied = await window.api.importFiles(dest, usable)
-    } catch (caught) {
-      add({ title: ipcErrorMessage(caught), variant: 'error' })
-      return
-    } finally {
-      setImporting(false)
-    }
-    add({
-      title:
+      const copied = await window.api.importFiles(destination, usable)
+      const message =
         copied.length === usable.length
           ? `Imported ${copied.length} file${copied.length === 1 ? '' : 's'}`
-          : `Imported ${copied.length} of ${usable.length} files`,
-      variant: 'success'
-    })
-    await onImported?.()
+          : `Imported ${copied.length} of ${usable.length} files`
+      if (lifecycle.current.generation === generation) await onImported?.()
+      feedback.finish(operationId, 'success', message)
+    } catch (caught) {
+      const message = ipcErrorMessage(caught)
+      feedback.finish(operationId, 'error', message)
+      if (lifecycle.current.generation === generation) {
+        add({ title: message, variant: 'error' })
+      }
+    } finally {
+      running.current = false
+      if (lifecycle.current.mounted) setImporting(false)
+    }
   }
 
   const pickFiles = async (): Promise<void> => {
-    if (importing) return
+    if (running.current) return
+    running.current = true
+    const generation = lifecycle.current.generation
     let paths: string[]
     try {
       paths = await window.api.pickFiles()
     } catch (caught) {
-      add({ title: ipcErrorMessage(caught), variant: 'error' })
+      if (lifecycle.current.generation === generation) {
+        add({ title: ipcErrorMessage(caught), variant: 'error' })
+      }
       return
+    } finally {
+      running.current = false
     }
-    await importPaths(paths)
+    if (lifecycle.current.generation === generation) await importPaths(paths)
   }
 
   return { importing, importPaths, pickFiles }

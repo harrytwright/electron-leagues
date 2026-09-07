@@ -31,7 +31,7 @@ it('shows loading, then FirstRun when scan returns null', async () => {
   render(<App />)
 
   expect(screen.getByText(/loading…/i)).toBeInTheDocument()
-  expect(await screen.findByRole('button', { name: /select existing folder/i })).toBeInTheDocument()
+  expect(await screen.findByRole('button', { name: /open location/i })).toBeInTheDocument()
   expect(screen.queryByText(/loading…/i)).not.toBeInTheDocument()
 })
 
@@ -176,7 +176,7 @@ it('rescans when the tree changes on disk', async () => {
   installMockApi({ scan })
 
   render(<App />)
-  expect(await screen.findByRole('button', { name: /select existing folder/i })).toBeInTheDocument()
+  expect(await screen.findByRole('button', { name: /open location/i })).toBeInTheDocument()
 
   act(() => emitTreeChanged())
 
@@ -232,7 +232,7 @@ it('escapes a broken folder by choosing another', async () => {
   await user.click(screen.getByRole('button', { name: 'Choose another folder' }))
 
   expect(api.forgetRoot).toHaveBeenCalled()
-  expect(await screen.findByRole('button', { name: /select existing folder/i })).toBeInTheDocument()
+  expect(await screen.findByRole('button', { name: /open location/i })).toBeInTheDocument()
 })
 
 it('restores the remembered league for the location after the first scan', async () => {
@@ -328,7 +328,7 @@ it('unsubscribes from tree changes on unmount', async () => {
   })
 
   const { unmount } = render(<App />)
-  await screen.findByRole('button', { name: /select existing folder/i })
+  await screen.findByRole('button', { name: /open location/i })
 
   unmount()
   expect(unsubscribe).toHaveBeenCalled()

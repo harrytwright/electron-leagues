@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'vitest'
-import { loadCollapsedDays, loadSelection, saveCollapsedDays, saveSelection } from '../local-store'
+import {
+  loadCollapsedDays,
+  loadDiagnosticsEnabled,
+  loadSelection,
+  saveCollapsedDays,
+  saveDiagnosticsEnabled,
+  saveSelection
+} from '../local-store'
 
 describe('selection memory', () => {
   test('round-trips per location', () => {
@@ -24,6 +31,17 @@ describe('selection memory', () => {
       JSON.stringify({ kind: 'league', day: 'someday', folderName: 'x' })
     )
     expect(loadSelection('/a')).toBeNull()
+  })
+})
+
+describe('diagnostics preference', () => {
+  test('is default-off, versioned and guarded', () => {
+    expect(loadDiagnosticsEnabled()).toBe(false)
+    saveDiagnosticsEnabled(true)
+    expect(localStorage.getItem('leagues:diagnostics:v1')).toBe('{"enabled":true}')
+    expect(loadDiagnosticsEnabled()).toBe(true)
+    localStorage.setItem('leagues:diagnostics:v1', JSON.stringify({ enabled: 'yes' }))
+    expect(loadDiagnosticsEnabled()).toBe(false)
   })
 })
 

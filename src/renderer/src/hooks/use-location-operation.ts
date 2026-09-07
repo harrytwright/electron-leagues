@@ -8,6 +8,7 @@ interface Options {
   root: string
   onChanged: () => void | Promise<void>
   onMissingRecent: () => void | Promise<void>
+  onError?: (message: string) => void
 }
 
 interface LocationOperation {
@@ -19,7 +20,8 @@ interface LocationOperation {
 export function useLocationOperation({
   root,
   onChanged,
-  onMissingRecent
+  onMissingRecent,
+  onError
 }: Options): LocationOperation {
   const [busy, setBusy] = useState(false)
   const running = useRef(false)
@@ -32,7 +34,9 @@ export function useLocationOperation({
     try {
       if (await operation()) await onChanged()
     } catch (caught) {
-      add({ title: ipcErrorMessage(caught), variant: 'error' })
+      const message = ipcErrorMessage(caught)
+      if (onError) onError(message)
+      else add({ title: message, variant: 'error' })
     } finally {
       running.current = false
       setBusy(false)
@@ -48,7 +52,9 @@ export function useLocationOperation({
     await run(async () => {
       const switched = await window.api.setRoot(path)
       if (switched !== null) return true
-      add({ title: 'That folder is no longer available', variant: 'error' })
+      const message = 'That folder is no longer available'
+      if (onError) onError(message)
+      else add({ title: message, variant: 'error' })
       await onMissingRecent()
       return false
     })

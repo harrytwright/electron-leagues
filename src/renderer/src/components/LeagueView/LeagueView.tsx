@@ -9,6 +9,7 @@ import { trashLabel } from '@renderer/lib/trash-label'
 import { useCrumbs } from '@renderer/hooks/use-crumbs'
 import { useDirListing } from '@renderer/hooks/use-dir-listing'
 import { useImportFiles } from '@renderer/hooks/use-import-files'
+import { useOperationFeedback } from '@renderer/hooks/use-operation-feedback'
 import { ImportFilesButton } from '../FileBrowser/components/ImportFilesButton'
 import { CrumbTrail } from '../CrumbTrail'
 import { DeleteResourceDialog, type DeleteTarget } from '../DeleteResourceDialog'
@@ -35,6 +36,7 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
   const [zipping, setZipping] = useState<string | null>(null)
   const [syncingTemplates, setSyncingTemplates] = useState(false)
   const { add } = useKumoToastManager()
+  const feedback = useOperationFeedback()
 
   // The league's own folder is presented from the scan (seasons carry status
   // badges, the archive lives elsewhere on disk); everything below it is listed
@@ -58,13 +60,16 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
   const zip = async (name: string): Promise<void> => {
     if (zipping) return
     setZipping(name)
+    const operationId = feedback.begin(`Zipping ${name}`)
     try {
       await window.api.zipArchive(league.folderName, [name])
-      add({ title: `Zipped ${name}`, variant: 'success' })
+      feedback.finish(operationId, 'success', `Zipped ${name}`)
       listing.reload()
       await onChanged()
     } catch (caught) {
-      add({ title: ipcErrorMessage(caught), variant: 'error' })
+      const message = ipcErrorMessage(caught)
+      feedback.finish(operationId, 'error', message)
+      add({ title: message, variant: 'error' })
     } finally {
       setZipping(null)
     }
@@ -73,24 +78,24 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
   const syncTemplates = async (): Promise<void> => {
     if (!atLiveSeasonRoot || syncingTemplates) return
     setSyncingTemplates(true)
+    const operationId = feedback.begin('Syncing templates')
     try {
       const result = await window.api.syncSeasonTemplates({
         day: league.day,
         leagueFolder: league.folderName,
         seasonName: liveSeason.name
       })
-      add({
-        title:
-          result.added.length === 0
-            ? 'Templates already up to date'
-            : `Added ${result.added.length} template${result.added.length === 1 ? '' : 's'}`,
-        description: `${result.skipped.length} item${result.skipped.length === 1 ? '' : 's'} skipped`,
-        variant: 'success'
-      })
+      const message =
+        result.added.length === 0
+          ? 'Templates already up to date'
+          : `Added ${result.added.length} template${result.added.length === 1 ? '' : 's'}`
+      feedback.finish(operationId, 'success', message)
       listing.reload()
       await onChanged()
     } catch (caught) {
-      add({ title: ipcErrorMessage(caught), variant: 'error' })
+      const message = ipcErrorMessage(caught)
+      feedback.finish(operationId, 'error', message)
+      add({ title: message, variant: 'error' })
     } finally {
       setSyncingTemplates(false)
     }

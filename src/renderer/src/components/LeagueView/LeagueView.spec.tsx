@@ -264,8 +264,6 @@ it('syncs missing templates only from a live season root and refreshes both view
     leagueFolder: 'Mixed triples',
     seasonName: '2025-26'
   })
-  expect(await screen.findByText('Added 1 template')).toBeInTheDocument()
-  expect(screen.getByText('1 item skipped')).toBeInTheDocument()
   await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
   expect(api.listDir).toHaveBeenCalledTimes(2)
 })
@@ -426,7 +424,6 @@ it('offers to zip archived seasons, once at a time, and reports the outcome', as
   await user.keyboard('{Escape}')
   finish([`${ARCHIVE_PATH}/2023-24.zip`])
 
-  expect(await screen.findByText('Zipped 2023-24')).toBeInTheDocument()
   await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
   expect(api.zipArchive).toHaveBeenCalledTimes(1)
 

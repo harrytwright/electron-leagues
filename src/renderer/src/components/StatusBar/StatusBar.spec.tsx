@@ -1,57 +1,63 @@
-import { act, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
+import { OperationFeedbackProvider } from '../OperationFeedbackProvider'
 import { installMockApi } from '../../tests/mock-api'
 import { StatusBar } from './index'
 
 afterEach(() => vi.useRealTimers())
 
-it('shows the complete path and formatted renderer metrics', () => {
-  installMockApi({
-    getRendererMetrics: vi.fn(() => ({
-      usedHeapKilobytes: 42.4 * 1024,
-      cpuPercent: 1.24
-    }))
-  })
+function renderStatus(): ReturnType<typeof render> {
+  return render(
+    <OperationFeedbackProvider>
+      <StatusBar path="/root/monday/Mixed triples/2025-26/Week 1" />
+    </OperationFeedbackProvider>
+  )
+}
+
+async function enableDiagnostics(): Promise<void> {
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('button', { name: 'Status options' }))
+  await user.click(await screen.findByRole('menuitemcheckbox', { name: 'Show diagnostics' }))
+}
+
+it('keeps the complete path visible and leaves diagnostics off by default', () => {
+  const api = installMockApi()
+  renderStatus()
   const path = '/root/monday/Mixed triples/2025-26/Week 1'
-
-  render(<StatusBar path={path} />)
-
-  const status = screen.getByRole('contentinfo', { name: 'Application status' })
-  expect(status).toHaveTextContent(path)
   expect(screen.getByTitle(path)).toHaveTextContent(path)
-  expect(status).toHaveTextContent('Heap 42 MB')
-  expect(status).toHaveTextContent('CPU 1.2%')
-  expect(status).not.toHaveAttribute('aria-live')
+  expect(api.getRendererMetrics).not.toHaveBeenCalled()
 })
 
-it('refreshes renderer metrics once per second', () => {
-  vi.useFakeTimers()
-  const getRendererMetrics = vi
-    .fn()
-    .mockReturnValueOnce({ usedHeapKilobytes: 10 * 1024, cpuPercent: 0.1 })
-    .mockReturnValue({ usedHeapKilobytes: 11 * 1024, cpuPercent: 0.25 })
-  installMockApi({ getRendererMetrics })
-
-  render(<StatusBar path="/root" />)
-  expect(screen.getByText('Heap 10 MB')).toBeInTheDocument()
-
-  act(() => vi.advanceTimersByTime(999))
-  expect(getRendererMetrics).toHaveBeenCalledOnce()
-
-  act(() => vi.advanceTimersByTime(1))
-  expect(screen.getByText('Heap 11 MB')).toBeInTheDocument()
-  expect(screen.getByText('CPU 0.3%')).toBeInTheDocument()
-  expect(getRendererMetrics).toHaveBeenCalledTimes(2)
-})
-
-it('clears its metric interval on unmount', () => {
-  vi.useFakeTimers()
+it('enables diagnostics from a checked status menu and persists the preference', async () => {
   installMockApi()
+  renderStatus()
+  await enableDiagnostics()
+  expect(await screen.findByText('Heap 42 MB')).toBeInTheDocument()
+  expect(localStorage.getItem('leagues:diagnostics:v1')).toBe('{"enabled":true}')
+  await userEvent.setup().click(screen.getByRole('button', { name: 'Status options' }))
+  expect(await screen.findByRole('menuitemcheckbox', { name: 'Show diagnostics' })).toHaveAttribute(
+    'aria-checked',
+    'true'
+  )
+})
+
+it('polls only while enabled and visible, and cleans up', async () => {
+  vi.useFakeTimers()
+  const api = installMockApi()
   const clearInterval = vi.spyOn(window, 'clearInterval')
-
-  const { unmount } = render(<StatusBar path="/root" />)
-  unmount()
-
-  expect(clearInterval).toHaveBeenCalledOnce()
+  const view = renderStatus()
+  fireEvent.click(screen.getByRole('button', { name: 'Status options' }))
+  fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Show diagnostics' }))
+  expect(api.getRendererMetrics).toHaveBeenCalledOnce()
+  act(() => vi.advanceTimersByTime(1000))
+  expect(api.getRendererMetrics).toHaveBeenCalledTimes(2)
+  Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
+  act(() => document.dispatchEvent(new Event('visibilitychange')))
+  act(() => vi.advanceTimersByTime(2000))
+  expect(api.getRendererMetrics).toHaveBeenCalledTimes(2)
+  view.unmount()
+  expect(clearInterval).toHaveBeenCalled()
+  Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
   clearInterval.mockRestore()
 })

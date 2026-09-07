@@ -1,5 +1,5 @@
 export type Mode = 'select' | 'init'
 
 export interface Props {
-  onChosen: () => void
+  onChosen: () => void | Promise<void>
 }

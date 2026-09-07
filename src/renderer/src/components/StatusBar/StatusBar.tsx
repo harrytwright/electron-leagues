@@ -1,36 +1,66 @@
-import { useEffect, useState } from 'react'
-import { Text } from '@cloudflare/kumo'
+import { useState } from 'react'
+import { DropdownMenu, Text } from '@cloudflare/kumo'
+import { GaugeIcon } from '@phosphor-icons/react'
+import { loadDiagnosticsEnabled, saveDiagnosticsEnabled } from '@renderer/lib/local-store'
+import { useOperationFeedback } from '@renderer/hooks/use-operation-feedback'
+import { IconButton } from '../IconButton'
+import { DiagnosticsMetrics } from './components/DiagnosticsMetrics'
 
 import type { Props } from './interface'
 
 export function StatusBar({ path }: Props): React.JSX.Element {
-  const [metrics, setMetrics] = useState(() => window.api.getRendererMetrics())
+  const [diagnostics, setDiagnostics] = useState(loadDiagnosticsEnabled)
+  const { activity } = useOperationFeedback()
 
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      setMetrics(window.api.getRendererMetrics())
-    }, 1000)
-
-    return () => window.clearInterval(interval)
-  }, [])
+  const toggleDiagnostics = (): void => {
+    const next = !diagnostics
+    saveDiagnosticsEnabled(next)
+    setDiagnostics(next)
+  }
 
   return (
     <footer
       aria-label="Application status"
-      className="flex h-5 w-full shrink-0 items-center gap-4 border-t border-kumo-line bg-kumo-base px-3 text-base"
+      className="flex min-h-7 w-full shrink-0 items-center gap-4 border-t border-kumo-line bg-kumo-base px-3"
     >
       <div className="min-w-0 flex-1">
-        <Text size="xs" truncate title={path}>
+        <Text truncate title={path}>
           {path}
         </Text>
       </div>
-      <div className="flex shrink-0 items-center gap-4 text-kumo-subtle tabular-nums">
-        <Text
-          size="xs"
-          variant="secondary"
-        >{`Heap ${Math.round(metrics.usedHeapKilobytes / 1024)} MB`}</Text>
-        <Text size="xs" variant="secondary">{`CPU ${metrics.cpuPercent.toFixed(1)}%`}</Text>
-      </div>
+      {activity ? (
+        <span
+          role="status"
+          aria-live="polite"
+          className="max-w-64 min-w-0 truncate"
+          title={activity.message}
+        >
+          <Text variant={activity.state === 'error' ? 'error' : 'secondary'}>
+            {activity.state === 'pending'
+              ? `${activity.label}…`
+              : (activity.message ??
+                `${activity.label} ${activity.state === 'success' ? 'complete' : 'failed'}`)}
+          </Text>
+        </span>
+      ) : null}
+      {diagnostics ? <DiagnosticsMetrics /> : null}
+      <DropdownMenu>
+        <DropdownMenu.Trigger
+          render={
+            <IconButton
+              variant="ghost"
+              size="sm"
+              icon={<GaugeIcon aria-hidden />}
+              aria-label="Status options"
+            />
+          }
+        />
+        <DropdownMenu.Content align="end">
+          <DropdownMenu.CheckboxItem checked={diagnostics} onCheckedChange={toggleDiagnostics}>
+            Show diagnostics
+          </DropdownMenu.CheckboxItem>
+        </DropdownMenu.Content>
+      </DropdownMenu>
     </footer>
   )
 }

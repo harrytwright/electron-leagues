@@ -7,6 +7,7 @@ import { LeagueView } from './components/LeagueView'
 import { Sidebar } from './components/Sidebar'
 import { StatusBar } from './components/StatusBar'
 import { Toolbar } from './components/Toolbar'
+import { OperationFeedbackProvider } from './components/OperationFeedbackProvider'
 import { ipcErrorMessage } from './lib/ipc-error'
 import { loadSelection, saveSelection } from './lib/local-store'
 import { findLeague, HOME, restoreSelection, type Selection } from './lib/selection'
@@ -93,6 +94,8 @@ function AppContent(): React.JSX.Element {
         setPhase('ready')
         if (restoredRoot.current !== scanned.root) {
           restoredRoot.current = scanned.root
+          setHomeNavigation(null)
+          setLeagueNavigation(null)
           setSelection(restoreSelection(scanned, loadSelection(scanned.root)))
         } else {
           // A league deleted or renamed on disk must not strand the selection.
@@ -132,7 +135,14 @@ function AppContent(): React.JSX.Element {
   const homeRoot = tree?.root
   const updateHomeCurrentDir = useCallback(
     (currentDir: string) => {
-      if (homeRoot) setHomeNavigation({ ownerRoot: homeRoot, currentDir })
+      if (
+        homeRoot &&
+        (currentDir === homeRoot ||
+          currentDir.startsWith(`${homeRoot}/`) ||
+          currentDir.startsWith(`${homeRoot}\\`))
+      ) {
+        setHomeNavigation({ ownerRoot: homeRoot, currentDir })
+      }
     },
     [homeRoot]
   )
@@ -175,7 +185,7 @@ function AppContent(): React.JSX.Element {
   }
 
   if (phase === 'no-root' || !tree) {
-    return <FirstRun onChosen={() => void refresh()} />
+    return <FirstRun onChosen={refresh} />
   }
 
   const selectedLeague = findLeague(tree, selection)
@@ -190,44 +200,46 @@ function AppContent(): React.JSX.Element {
   // Keyed on the location / league so each view's local state starts fresh
   // when they change.
   return (
-    <KumoSidebar.Provider
-      defaultOpen
-      collapsible="icon"
-      resizable={false}
-      contained
-      className="flex h-full flex-col"
-    >
-      <Toolbar
-        root={tree.root}
-        isHome={selection.kind === 'home'}
-        onHome={() => select(HOME)}
-        onLocationChanged={refresh}
-      />
-      <div className="flex min-h-0 w-full flex-1">
-        <Sidebar key={tree.root} tree={tree} selection={selection} onSelect={select} />
-        <main className="h-full min-w-0 flex-1 overflow-auto">
-          {selectedLeague ? (
-            <LeagueView
-              key={selectedLeague.path}
-              league={selectedLeague}
-              onChanged={refresh}
-              onCurrentDirChange={(currentDir) =>
-                setLeagueNavigation({ ownerPath: selectedLeague.path, currentDir })
-              }
-            />
-          ) : (
-            <HomeView
-              key={tree.root}
-              tree={tree}
-              onSelect={select}
-              onChanged={refresh}
-              onCurrentDirChange={updateHomeCurrentDir}
-            />
-          )}
-        </main>
-      </div>
-      <StatusBar path={statusPath} />
-    </KumoSidebar.Provider>
+    <OperationFeedbackProvider locationKey={tree.root}>
+      <KumoSidebar.Provider
+        defaultOpen
+        collapsible="icon"
+        resizable={false}
+        contained
+        className="flex h-full flex-col"
+      >
+        <Toolbar
+          root={tree.root}
+          isHome={selection.kind === 'home'}
+          onHome={() => select(HOME)}
+          onLocationChanged={refresh}
+        />
+        <div className="flex min-h-0 w-full flex-1">
+          <Sidebar key={tree.root} tree={tree} selection={selection} onSelect={select} />
+          <main className="h-full min-w-0 flex-1 overflow-auto">
+            {selectedLeague ? (
+              <LeagueView
+                key={selectedLeague.path}
+                league={selectedLeague}
+                onChanged={refresh}
+                onCurrentDirChange={(currentDir) =>
+                  setLeagueNavigation({ ownerPath: selectedLeague.path, currentDir })
+                }
+              />
+            ) : (
+              <HomeView
+                key={tree.root}
+                tree={tree}
+                onSelect={select}
+                onChanged={refresh}
+                onCurrentDirChange={updateHomeCurrentDir}
+              />
+            )}
+          </main>
+        </div>
+        <StatusBar path={statusPath} />
+      </KumoSidebar.Provider>
+    </OperationFeedbackProvider>
   )
 }
 

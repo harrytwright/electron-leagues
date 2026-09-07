@@ -9,6 +9,8 @@ import { selectionSchema, type Selection } from './selection'
  */
 
 const collapsedDaysSchema = z.array(z.enum(WEEKDAYS))
+const diagnosticsPreferenceSchema = z.object({ enabled: z.boolean() })
+const DIAGNOSTICS_KEY = 'leagues:diagnostics:v1'
 
 function key(root: string, name: string): string {
   return `leagues:${root}:${name}`
@@ -47,4 +49,12 @@ export function loadCollapsedDays(root: string): Weekday[] {
 
 export function saveCollapsedDays(root: string, days: readonly Weekday[]): void {
   write(key(root, 'collapsed-days'), days)
+}
+
+export function loadDiagnosticsEnabled(): boolean {
+  return read(DIAGNOSTICS_KEY, diagnosticsPreferenceSchema)?.enabled ?? false
+}
+
+export function saveDiagnosticsEnabled(enabled: boolean): void {
+  write(DIAGNOSTICS_KEY, { enabled })
 }

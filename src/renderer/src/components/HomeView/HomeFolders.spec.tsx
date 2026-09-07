@@ -139,6 +139,5 @@ it('imports picked files into the folder being viewed', async () => {
   await waitFor(() =>
     expect(api.importFiles).toHaveBeenCalledWith(`${SHARED}/Forms`, ['/tmp/a.pdf'])
   )
-  expect(await screen.findByText('Imported 1 file')).toBeInTheDocument()
   expect(onImported).toHaveBeenCalledOnce()
 })
