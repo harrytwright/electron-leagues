@@ -31,6 +31,13 @@ export async function assertInsideRoot(root: string, target: string): Promise<st
   return resolved
 }
 
+/** Reject path syntax where an exact league folder name is required. */
+export function assertLeagueFolderName(name: string): void {
+  if (!name || name === '.' || name === '..' || basename(name) !== name) {
+    throw new UserFacingError('Invalid league folder')
+  }
+}
+
 /** Resolve an exact `weekday/league/season` target and reject symlink aliases. */
 export async function resolveLiveSeasonRoot(
   root: string,
@@ -39,14 +46,7 @@ export async function resolveLiveSeasonRoot(
   seasonName: string
 ): Promise<string> {
   if (!isWeekday(day)) throw new UserFacingError('Invalid league day')
-  if (
-    !leagueFolder ||
-    leagueFolder === '.' ||
-    leagueFolder === '..' ||
-    basename(leagueFolder) !== leagueFolder
-  ) {
-    throw new UserFacingError('Invalid league folder')
-  }
+  assertLeagueFolderName(leagueFolder)
   const season = parseSeasonName(seasonName)
   if (!season || season.name !== seasonName) throw new UserFacingError('Invalid season name')
 

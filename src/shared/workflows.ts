@@ -29,8 +29,6 @@ export const WORKFLOWS: Record<WorkflowId, WorkflowDefinition> = {
 /** The creation form owns the available workflows and their display order. */
 export const NEW_SEASON_WORKFLOWS: readonly WorkflowId[] = ['templates', 'previous', 'empty']
 
-export const RUNNING_SEASON_WORKFLOWS: readonly WorkflowId[] = NEW_SEASON_WORKFLOWS
-
 export const STOPPED_SEASON_WORKFLOWS: readonly WorkflowId[] = ['templates', 'empty']
 
 export function isWorkflowId(value: string): value is WorkflowId {

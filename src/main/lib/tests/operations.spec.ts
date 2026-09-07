@@ -13,6 +13,7 @@ import {
   syncSeasonWithTemplates,
   zipArchivedSeasons
 } from '../operations'
+import { UserFacingError } from '../fs-errors'
 
 let root: string
 let outside: string
@@ -136,6 +137,47 @@ describe('createLeague', () => {
 })
 
 describe('createSeason', () => {
+  test('rejects an unknown workflow without creating anything', async () => {
+    await expect(
+      createSeason({
+        root,
+        day: 'monday',
+        leagueFolder: 'Pairs',
+        seasonName: '2026-27',
+        source: 'unknown',
+        archiveOldest: false
+      })
+    ).rejects.toEqual(new UserFacingError('Unknown season workflow'))
+
+    expect(await readdir(root)).toEqual([])
+  })
+
+  test('rejects a day that escapes the root', async () => {
+    await expect(
+      createSeason({
+        root,
+        day: '..',
+        leagueFolder: 'Pairs',
+        seasonName: '2026-27',
+        source: 'empty',
+        archiveOldest: false
+      })
+    ).rejects.toEqual(new UserFacingError('Invalid league day'))
+  })
+
+  test('rejects a league folder that escapes its weekday', async () => {
+    await expect(
+      createSeason({
+        root,
+        day: 'monday',
+        leagueFolder: '../x',
+        seasonName: '2026-27',
+        source: 'empty',
+        archiveOldest: false
+      })
+    ).rejects.toEqual(new UserFacingError('Invalid league folder'))
+  })
+
   test('does not restore a deleted bundled template as a side effect', async () => {
     await makeTree(outside, { 'Rules.docx': 'bundled', 'Sign-In Sheet.docx': 'bundled' })
     await initialiseRoot(root, outside)

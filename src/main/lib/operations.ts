@@ -17,10 +17,10 @@ import { basename, extname, join } from 'node:path'
 import { healMeta, parseLeagueMetaInput } from '../../shared/meta'
 import { compareSeasonNames, parseSeasonName, type SeasonName } from '../../shared/season'
 import { sanitiseFolderName } from '../../shared/sanitise'
-import type { Weekday } from '../../shared/weekday'
-import type { WorkflowId } from '../../shared/workflows'
+import { isWeekday, type Weekday } from '../../shared/weekday'
+import { isWorkflowId } from '../../shared/workflows'
 import { toUserFacing, UserFacingError } from './fs-errors'
-import { resolveLiveSeasonRoot } from './paths'
+import { assertLeagueFolderName, resolveLiveSeasonRoot } from './paths'
 import {
   executeCopyPlan,
   FILE_RULES,
@@ -218,10 +218,10 @@ async function moveDir(from: string, to: string): Promise<void> {
 
 export interface CreateSeasonOptions {
   root: string
-  day: Weekday
+  day: string
   leagueFolder: string
   seasonName: string
-  source: WorkflowId
+  source: string
   archiveOldest: boolean
 }
 
@@ -235,6 +235,9 @@ export async function createSeason(opts: CreateSeasonOptions): Promise<CreateSea
 }
 
 async function createSeasonUnlocked(opts: CreateSeasonOptions): Promise<CreateSeasonResult> {
+  if (!isWorkflowId(opts.source)) throw new UserFacingError('Unknown season workflow')
+  if (!isWeekday(opts.day)) throw new UserFacingError('Invalid league day')
+  assertLeagueFolderName(opts.leagueFolder)
   const season = parseSeasonName(opts.seasonName)
   if (!season) throw new Error(`"${opts.seasonName}" is not a valid season name`)
   await repairReservedLocationsUnlocked(opts.root)
@@ -291,7 +294,7 @@ async function createSeasonUnlocked(opts: CreateSeasonOptions): Promise<CreateSe
 
 export interface SyncSeasonOptions {
   root: string
-  day: Weekday
+  day: string
   leagueFolder: string
   seasonName: string
 }
