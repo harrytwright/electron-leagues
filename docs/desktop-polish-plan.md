@@ -46,6 +46,13 @@ into a configurable mega-component.
 - Test startup recovery, operation lifetimes and diagnostics subscription cleanup.
 - Reuse main's existing recent-location storage/pruning, not a second renderer
   store. Keep startup errors inline; pause diagnostic sampling while hidden.
+- Keep activity tracking small: a location-scoped provider with operation IDs,
+  pending labels and completion/error state. Finishing an older operation must
+  not overwrite a newer result; changing location resets the visible activity.
+  Instrument imports, template sync and archive zip, plus explicit refresh when
+  its actual completion can be tracked. Do not announce watcher churn.
+- Diagnostics default off, enabled through a discoverable status-bar menu, with
+  a guarded versioned UI preference. Isolate ticking metrics from the app shell.
 
 ## Review and release gates
 
@@ -67,8 +74,30 @@ Record native visual checks separately: DOM tests cannot establish macOS traffic
 light geometry, Windows caption controls or native focus/menu behavior. Do not
 claim these checks passed unless actually run.
 
+### Native acceptance checklist (not yet executed)
+
+- On macOS and Windows, check the minimum 800×500 window in light/dark themes,
+  sidebar expanded/collapsed, and maximized/fullscreen where supported. Verify
+  caption controls remain clear and blank toolbar space still drags the window.
+- Open each task dialog; verify initial focus, Tab containment, Escape, Enter,
+  busy dismissal protection and focus return after closing.
+- Cancel each native folder picker. Open a valid existing folder, create a test
+  location, and choose a recent folder that has since been moved/deleted.
+- Invoke row menus by mouse, keyboard and ellipsis, including bottom/right-edge
+  rows. Check menu placement, action parity, row selection and focus restoration.
+- In a packaged app, verify Cmd/Ctrl+O, R and F execute once without reloading the
+  renderer. Check they do not escape a modal, hijack typing or fire on key repeat.
+- Import/sync using disposable fixtures; switch views/locations during delayed
+  work. Check path/activity remain coherent and errors remain discoverable.
+- Toggle diagnostics, hide/restore the window, then disable them. Check status
+  legibility with long paths and confirm normal navigation remains responsive.
+
 ## Progress
 
 - Pass 1 implemented and cold-reviewed by a fresh Astra: no actionable findings.
   Independent verification: 277 tests passing, typecheck/lint and diff checks pass.
   Native geometry/focus checks remain outstanding.
+- Pass 2 implemented and cold-reviewed by a fresh Astra. Fixed its visible
+  actions-button accessibility finding and a stale-menu target edge case; Astra
+  verified those fixes. Independent full suite: 288 tests passing. Typecheck,
+  lint and diff checks pass. Native accelerator behavior remains on the checklist.

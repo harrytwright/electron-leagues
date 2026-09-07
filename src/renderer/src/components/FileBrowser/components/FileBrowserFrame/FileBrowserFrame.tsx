@@ -8,6 +8,8 @@ import { TreeStructureIcon } from '@phosphor-icons/react/dist/csr/TreeStructure'
 import { XIcon } from '@phosphor-icons/react/dist/csr/X'
 import { IconButton } from '../../../IconButton'
 import type { Props } from './interface'
+import { useAppCommandHandler } from '@renderer/hooks/use-app-commands'
+import { appShortcutAria, appShortcutLabel } from '@renderer/lib/app-shortcut-label'
 
 /** Shared desktop pane: fixed controls and status, with a scrolling file area. */
 export function FileBrowserFrame({
@@ -26,7 +28,11 @@ export function FileBrowserFrame({
 }: Props): React.JSX.Element {
   const [dragging, setDragging] = useState(false)
   const dragDepth = useRef(0)
+  const filterRef = useRef<HTMLInputElement>(null)
   const canDrop = !readOnly && onDropFiles !== undefined
+
+  useAppCommandHandler('refresh', onRefresh)
+  useAppCommandHandler('focus-filter', () => filterRef.current?.focus())
 
   return (
     <section
@@ -78,7 +84,10 @@ export function FileBrowserFrame({
               className="pointer-events-none absolute top-1/2 left-2 z-1 -translate-y-1/2 text-kumo-subtle"
             />
             <Input
+              ref={filterRef}
               aria-label={filterLabel}
+              aria-keyshortcuts={appShortcutAria('F')}
+              title={`${filterLabel} (${appShortcutLabel('F')})`}
               placeholder={`${filterLabel}…`}
               value={query}
               onValueChange={onQueryChange}
@@ -96,13 +105,16 @@ export function FileBrowserFrame({
             ) : null}
           </div>
           {actions}
-          <IconButton
-            aria-label="Refresh files"
-            variant="ghost"
-            size="sm"
-            icon={<ArrowClockwiseIcon aria-hidden size={16} />}
-            onClick={onRefresh}
-          />
+          <span title={`Refresh files (${appShortcutLabel('R')}`}>
+            <IconButton
+              aria-label="Refresh files"
+              aria-keyshortcuts={appShortcutAria('R')}
+              variant="ghost"
+              size="sm"
+              icon={<ArrowClockwiseIcon aria-hidden size={16} />}
+              onClick={onRefresh}
+            />
+          </span>
         </div>
       </div>
       <div className="min-h-0 flex-1 scroll-pt-10 overflow-auto">{children}</div>

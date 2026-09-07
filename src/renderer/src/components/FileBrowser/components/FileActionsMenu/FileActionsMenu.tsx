@@ -1,33 +1,44 @@
-import { DropdownMenu, Table } from '@cloudflare/kumo'
-import { DotsThreeIcon } from '@phosphor-icons/react/dist/csr/DotsThree'
-import { revealLabel } from '@renderer/lib/reveal-label'
-import { IconButton } from '../../../IconButton'
+import { DropdownMenu } from '@cloudflare/kumo'
+import { Fragment } from 'react'
 import type { Props } from './interface'
 
-/** Shared row actions; callers compose domain-specific actions after Open and Reveal. */
-export function FileActionsMenu({ name, onOpen, onReveal, children }: Props): React.JSX.Element {
+/** One controlled menu shared by every row and every invocation method in a browser. */
+export function FileActionsMenu({
+  id,
+  label,
+  open,
+  anchor,
+  actions,
+  onOpenChange
+}: Props): React.JSX.Element {
   return (
-    <Table.Cell
-      onClick={(event) => event.stopPropagation()}
-      onDoubleClick={(event) => event.stopPropagation()}
-    >
-      <DropdownMenu>
-        <DropdownMenu.Trigger
-          render={
-            <IconButton
-              variant="ghost"
-              size="sm"
-              icon={<DotsThreeIcon aria-hidden size={16} weight="bold" />}
-              aria-label={`Actions for ${name}`}
-            />
-          }
-        />
-        <DropdownMenu.Content>
-          <DropdownMenu.Item onClick={onOpen}>Open</DropdownMenu.Item>
-          <DropdownMenu.Item onClick={onReveal}>{revealLabel()}</DropdownMenu.Item>
-          {children}
-        </DropdownMenu.Content>
-      </DropdownMenu>
-    </Table.Cell>
+    <DropdownMenu open={open} onOpenChange={onOpenChange}>
+      <DropdownMenu.Trigger
+        render={
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-hidden
+            aria-label={label}
+            className="pointer-events-none fixed size-px opacity-0"
+            style={{ left: anchor.left, top: anchor.top }}
+          />
+        }
+      />
+      <DropdownMenu.Content id={id}>
+        {actions.map((action, index) => (
+          <Fragment key={`${action.label}-${index}`}>
+            {action.separatorBefore ? <DropdownMenu.Separator /> : null}
+            <DropdownMenu.Item
+              variant={action.variant}
+              disabled={action.disabled}
+              onClick={action.onSelect}
+            >
+              {action.label}
+            </DropdownMenu.Item>
+          </Fragment>
+        ))}
+      </DropdownMenu.Content>
+    </DropdownMenu>
   )
 }

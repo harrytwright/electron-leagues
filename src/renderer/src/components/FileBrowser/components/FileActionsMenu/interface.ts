@@ -1,8 +1,10 @@
-import type { ReactNode } from 'react'
+import type { RowMenuItem } from '../../row'
 
 export interface Props {
-  name: string
-  onOpen: () => void
-  onReveal: () => void
-  children?: ReactNode
+  id: string
+  label: string
+  open: boolean
+  anchor: { left: number; top: number }
+  actions: RowMenuItem[]
+  onOpenChange: (open: boolean) => void
 }

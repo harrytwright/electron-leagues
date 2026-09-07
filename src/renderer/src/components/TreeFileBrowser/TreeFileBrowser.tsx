@@ -4,6 +4,7 @@ import { BrowserEmpty } from '../FileBrowser/components/BrowserEmpty'
 import { BrowserNoMatches } from '../FileBrowser/components/BrowserNoMatches'
 import { BrowserMessageRow } from '../FileBrowser/components/BrowserMessageRow'
 import { FileActionsMenu } from '../FileBrowser/components/FileActionsMenu'
+import { FileActionsButton } from '../FileBrowser/components/FileActionsButton'
 import { FileModified } from '../FileBrowser/components/FileModified'
 import { useFileActions } from '@renderer/hooks/use-file-actions'
 import { useFileSelection } from '@renderer/hooks/use-file-selection'
@@ -22,6 +23,9 @@ import { FILE_ROW_CLASS, FILE_TABLE_CLASS } from '../FileBrowser/styles'
 import { fileRows } from './file-tree'
 import type { FileRow, Props, Sort, SortColumn } from './interface'
 import { useTreeFolders } from '@renderer/hooks/use-tree-folders'
+import { revealLabel } from '@renderer/lib/reveal-label'
+import { useRowActionsMenu } from '@renderer/hooks/use-row-actions-menu'
+import type { RowMenuItem } from '../FileBrowser/row'
 
 export function TreeFileBrowser({
   name,
@@ -38,6 +42,7 @@ export function TreeFileBrowser({
   const { openFile, revealFile } = useFileActions()
   const filter = query.trim().toLocaleLowerCase()
   const rows = fileRows(listing.entries ?? [], tree.branches, tree.expanded, sort, filter)
+  const rowMenu = useRowActionsMenu(rows.map((row) => row.entry.path))
   const selection = useFileSelection(rows.map((row) => row.entry.path))
   const selectedRow = rows.find((row) => row.entry.path === selection.selected)
   const folderCount = listing.entries?.filter((entry) => entry.kind === 'folder').length ?? 0
@@ -55,12 +60,41 @@ export function TreeFileBrowser({
     await openFile(row.entry.path)
   }
 
+  const actions = (row: FileRow | undefined): RowMenuItem[] =>
+    row
+      ? [
+          { label: 'Open', onSelect: () => void open(row) },
+          { label: revealLabel(), onSelect: () => void revealFile(row.entry.path) }
+        ]
+      : []
+
+  const openContextMenu = (
+    event: React.MouseEvent<HTMLTableRowElement> | React.KeyboardEvent<HTMLTableRowElement>,
+    row: FileRow
+  ): void => {
+    event.preventDefault()
+    selection.focus(row.entry.path)
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const pointer = 'clientX' in event && event.clientX > 0
+    rowMenu.openAt(
+      row.entry.path,
+      pointer
+        ? { left: event.clientX, top: event.clientY }
+        : { left: bounds.right - 24, top: bounds.top },
+      event.currentTarget
+    )
+  }
+
   const onKeyDown = (
     event: React.KeyboardEvent<HTMLTableRowElement>,
     row: FileRow,
     index: number
   ): void => {
     if (event.target !== event.currentTarget) return
+    if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+      openContextMenu(event, row)
+      return
+    }
     switch (event.key) {
       case 'ArrowRight':
         if (row.entry.kind === 'folder') {
@@ -209,6 +243,7 @@ export function TreeFileBrowser({
                     aria-expanded={entry.kind === 'folder' ? expanded : undefined}
                     className={FILE_ROW_CLASS}
                     onDoubleClick={() => void open(row)}
+                    onContextMenu={(event) => openContextMenu(event, row)}
                     onKeyDown={(event) => onKeyDown(event, row, index)}
                   >
                     <Table.Cell className="relative">
@@ -267,10 +302,19 @@ export function TreeFileBrowser({
                       />
                     </Table.Cell>
                     <Table.Cell className="truncate text-kumo-subtle">{fileType(entry)}</Table.Cell>
-                    <FileActionsMenu
+                    <FileActionsButton
                       name={entry.name}
-                      onOpen={() => void open(row)}
-                      onReveal={() => void revealFile(entry.path)}
+                      menuId={rowMenu.id}
+                      expanded={rowMenu.target === entry.path}
+                      onClick={(event) => {
+                        selection.focus(entry.path)
+                        const bounds = event.currentTarget.getBoundingClientRect()
+                        rowMenu.openAt(
+                          entry.path,
+                          { left: bounds.right, top: bounds.bottom },
+                          event.currentTarget
+                        )
+                      }}
                     />
                   </Table.Row>
                   {branchMessage ? (
@@ -311,6 +355,14 @@ export function TreeFileBrowser({
           )}
         </Table.Body>
       </Table>
+      <FileActionsMenu
+        id={rowMenu.id}
+        label={`Actions for ${rows.find((row) => row.entry.path === rowMenu.target)?.entry.name ?? 'file'}`}
+        open={rowMenu.target !== null && rows.some((row) => row.entry.path === rowMenu.target)}
+        anchor={rowMenu.anchor}
+        actions={actions(rows.find((row) => row.entry.path === rowMenu.target))}
+        onOpenChange={rowMenu.onOpenChange}
+      />
     </FileBrowserFrame>
   )
 }

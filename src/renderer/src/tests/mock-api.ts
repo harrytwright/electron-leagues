@@ -1,17 +1,24 @@
 import { vi } from 'vitest'
 import type { LeaguesApi } from '../../../preload/index'
+import type { AppCommandEvent } from '../../../shared/app-command'
 
 export type RendererApi = LeaguesApi
 
 let treeChangedListeners: Array<() => void> = []
+let appCommandListeners: Parameters<RendererApi['onAppCommand']>[0][] = []
 
 /** Fire the tree:changed event into whatever the component under test registered. */
 export function emitTreeChanged(): void {
   for (const listener of treeChangedListeners) listener()
 }
 
+export function emitAppCommand(event: AppCommandEvent): void {
+  for (const listener of appCommandListeners) listener(event)
+}
+
 export function installMockApi(overrides: Partial<RendererApi> = {}): RendererApi {
   treeChangedListeners = []
+  appCommandListeners = []
   const api: RendererApi = {
     getRendererMetrics: vi.fn<RendererApi['getRendererMetrics']>(() => ({
       usedHeapKilobytes: 42 * 1024,
@@ -39,6 +46,12 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
       treeChangedListeners.push(listener)
       return () => {
         treeChangedListeners = treeChangedListeners.filter((l) => l !== listener)
+      }
+    }),
+    onAppCommand: vi.fn<RendererApi['onAppCommand']>((listener) => {
+      appCommandListeners.push(listener)
+      return () => {
+        appCommandListeners = appCommandListeners.filter((item) => item !== listener)
       }
     }),
     getAnalyticsConfig: vi.fn<RendererApi['getAnalyticsConfig']>().mockResolvedValue({

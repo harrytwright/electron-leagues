@@ -82,6 +82,42 @@ it('composes Open and reveal with custom row actions without opening twice', asy
   expect(onZip).toHaveBeenCalledOnce()
 })
 
+it('shares row actions across pointer and keyboard menus, selecting and restoring focus', async () => {
+  installMockApi()
+  const unavailable = vi.fn()
+  const user = userEvent.setup()
+  renderBrowser([
+    row('a.xlsx'),
+    {
+      ...row('Archive', 'folder'),
+      menuItems: [{ label: 'Restricted action', disabled: true, onSelect: unavailable }]
+    }
+  ])
+
+  const archive = screen.getByRole('row', { name: 'Archive' })
+  fireEvent.contextMenu(archive, { clientX: 20, clientY: 30 })
+  expect(archive).toHaveAttribute('aria-selected', 'true')
+  expect(
+    within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Open' })
+  ).toBeVisible()
+  expect(screen.getByRole('menuitem', { name: 'Restricted action' })).toHaveAttribute(
+    'aria-disabled',
+    'true'
+  )
+  await user.keyboard('{Escape}')
+  expect(archive).toHaveFocus()
+
+  await user.keyboard('{Shift>}{F10}{/Shift}')
+  expect(await screen.findByRole('menu')).toBeVisible()
+  await user.keyboard('{Escape}')
+  const trigger = screen.getByRole('button', { name: 'Actions for a.xlsx' })
+  await user.click(trigger)
+  expect(screen.getAllByRole('menu')).toHaveLength(1)
+  await user.keyboard('{Escape}')
+  expect(trigger).toHaveFocus()
+  expect(unavailable).not.toHaveBeenCalled()
+})
+
 it('reports native open and reveal failures as toasts', async () => {
   installMockApi({
     openFile: vi.fn().mockResolvedValue('No associated application'),
@@ -96,6 +132,24 @@ it('reports native open and reveal failures as toasts', async () => {
     within(await screen.findByRole('menu')).getByRole('menuitem', { name: revealLabel() })
   )
   expect(await screen.findByText('Reveal failed')).toBeInTheDocument()
+})
+
+it('exposes the visible actions button as a keyboard-operable menu trigger', async () => {
+  installMockApi()
+  const user = userEvent.setup()
+  renderBrowser([row('a.xlsx')])
+  const trigger = screen.getByRole('button', { name: 'Actions for a.xlsx' })
+  expect(trigger).toHaveAttribute('aria-haspopup', 'menu')
+  expect(trigger).toHaveAttribute('aria-expanded', 'false')
+  trigger.focus()
+  await user.keyboard('{ArrowDown}')
+  const menu = await screen.findByRole('menu')
+  expect(trigger).toHaveAttribute('aria-expanded', 'true')
+  const controlled = document.getElementById(trigger.getAttribute('aria-controls') ?? '')
+  expect(controlled).toContainElement(menu)
+  await user.keyboard('{Escape}')
+  expect(trigger).toHaveAttribute('aria-expanded', 'false')
+  expect(trigger).toHaveFocus()
 })
 
 it('keeps badges beside the name', () => {

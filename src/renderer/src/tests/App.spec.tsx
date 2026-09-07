@@ -4,7 +4,7 @@ import { expect, it, vi } from 'vitest'
 import type { LeaguesTree } from '@shared/tree'
 import App from '../App'
 import { makeDirEntry, makeLeague, makeTree } from './fixtures'
-import { emitTreeChanged, installMockApi } from './mock-api'
+import { emitAppCommand, emitTreeChanged, installMockApi } from './mock-api'
 
 function treeWithMondayLeagues(root = '/root', ...folderNames: string[]): LeaguesTree {
   const names = folderNames.length > 0 ? folderNames : ['Mixed triples']
@@ -46,6 +46,24 @@ it('shows Home on Shared documents and reports that directory in the status bar'
   expect(contentRow).toContainElement(screen.getByRole('navigation', { name: 'Leagues' }))
   expect(contentRow?.nextElementSibling).toBe(status)
   expect(within(status).getByTitle('/root/_shared')).toHaveTextContent('/root/_shared')
+})
+
+it('routes application commands to the visible browser and location control', async () => {
+  const scan = vi.fn().mockResolvedValue(makeTree())
+  const api = installMockApi({ scan })
+  render(<App />)
+  await screen.findByRole('heading', { name: 'Home' })
+
+  act(() => emitAppCommand({ command: 'focus-filter', repeat: false, composing: false }))
+  const filter = screen.getByRole('textbox', { name: 'Filter loaded files' })
+  expect(filter).toHaveFocus()
+  filter.blur()
+
+  const listCalls = vi.mocked(api.listDir).mock.calls.length
+  act(() => emitAppCommand({ command: 'refresh', repeat: false, composing: false }))
+  await waitFor(() => expect(api.listDir).toHaveBeenCalledTimes(listCalls + 1))
+  act(() => emitAppCommand({ command: 'open-location', repeat: false, composing: false }))
+  expect(api.chooseRoot).toHaveBeenCalledExactlyOnceWith('select')
 })
 
 it('updates the status path from the location root through league navigation', async () => {

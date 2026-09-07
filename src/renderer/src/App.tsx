@@ -10,6 +10,7 @@ import { Toolbar } from './components/Toolbar'
 import { ipcErrorMessage } from './lib/ipc-error'
 import { loadSelection, saveSelection } from './lib/local-store'
 import { findLeague, HOME, restoreSelection, type Selection } from './lib/selection'
+import { useAppCommands } from './hooks/use-app-commands'
 
 type Phase = 'loading' | 'no-root' | 'ready' | 'error'
 
@@ -68,6 +69,7 @@ function ScanError({ message, onRetry, onChooseAnother }: ScanErrorProps): React
 }
 
 function AppContent(): React.JSX.Element {
+  useAppCommands()
   const [phase, setPhase] = useState<Phase>('loading')
   const [tree, setTree] = useState<LeaguesTree | null>(null)
   const [scanError, setScanError] = useState<string | null>(null)

@@ -7,6 +7,7 @@ import { stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import icon from '../../resources/icon.png?asset'
 import type { Weekday } from '../shared/weekday'
+import { installAppShortcuts } from './lib/app-shortcuts'
 import { capture, initAnalytics, shutdownAnalytics } from './lib/analytics'
 import { oneDriveStatus } from './lib/onedrive'
 import {
@@ -372,6 +373,9 @@ app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.gobowling.leagues')
 
   app.on('browser-window-created', (_, window) => {
+    // Main is the single accelerator owner. Register before the toolkit's
+    // dev shortcut watcher so reload cannot win this same input event.
+    installAppShortcuts(window.webContents)
     optimizer.watchWindowShortcuts(window)
   })
 

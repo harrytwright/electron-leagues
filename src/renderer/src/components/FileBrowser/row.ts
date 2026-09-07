@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 
 export interface RowMenuItem {
   label: string
+  separatorBefore?: boolean
   variant?: 'default' | 'danger'
   disabled?: boolean
   onSelect: () => void

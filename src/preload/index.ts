@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { DirEntry, LeaguesTree } from '../shared/tree'
 import type { Weekday } from '../shared/weekday'
 import type { WorkflowId } from '../shared/workflows'
+import type { AppCommandEvent } from '../shared/app-command'
 import { getRendererMetrics } from './renderer-metrics'
 
 export type { RendererMetrics } from './renderer-metrics'
@@ -52,6 +53,12 @@ const api = {
     const wrapped = (): void => listener()
     ipcRenderer.on('tree:changed', wrapped)
     return () => ipcRenderer.removeListener('tree:changed', wrapped)
+  },
+  onAppCommand: (listener: (event: AppCommandEvent) => void): (() => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, command: AppCommandEvent): void =>
+      listener(command)
+    ipcRenderer.on('app:command', wrapped)
+    return () => ipcRenderer.removeListener('app:command', wrapped)
   }
 }
 

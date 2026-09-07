@@ -4,16 +4,20 @@ import { BrowserEmpty } from '../FileBrowser/components/BrowserEmpty'
 import { BrowserNoMatches } from '../FileBrowser/components/BrowserNoMatches'
 import { BrowserMessageRow } from '../FileBrowser/components/BrowserMessageRow'
 import { FileActionsMenu } from '../FileBrowser/components/FileActionsMenu'
+import { FileActionsButton } from '../FileBrowser/components/FileActionsButton'
 import { FileModified } from '../FileBrowser/components/FileModified'
 import { useFileActions } from '@renderer/hooks/use-file-actions'
 import { useFileSelection } from '@renderer/hooks/use-file-selection'
 import { useId, useState } from 'react'
-import { DropdownMenu, Table } from '@cloudflare/kumo'
+import { Table } from '@cloudflare/kumo'
 import { FileBrowserFrame } from '../FileBrowser/components/FileBrowserFrame'
 import { FileEntryIcon } from '../FileBrowser/components/FileEntryIcon'
 import { fileType } from '../FileBrowser/file-type'
 import { FILE_ROW_CLASS, FILE_TABLE_CLASS } from '../FileBrowser/styles'
 import type { BrowserRow, Props } from './interface'
+import type { RowMenuItem } from '../FileBrowser/row'
+import { revealLabel } from '@renderer/lib/reveal-label'
+import { useRowActionsMenu } from '@renderer/hooks/use-row-actions-menu'
 
 /** Flat directory pane for the league overview and its archive, preserving scan order. */
 export function DirectoryBrowser({
@@ -35,6 +39,7 @@ export function DirectoryBrowser({
   const { openFile, revealFile } = useFileActions()
   const filter = query.trim().toLocaleLowerCase()
   const visible = rows.filter((row) => row.name.toLocaleLowerCase().includes(filter))
+  const rowMenu = useRowActionsMenu(visible.map((row) => row.path))
   const selection = useFileSelection(visible.map((row) => row.path))
   const selectedRow = visible.find((row) => row.path === selection.selected)
   const loading = listing?.entries === null
@@ -43,6 +48,35 @@ export function DirectoryBrowser({
   const open = async (row: BrowserRow): Promise<void> => {
     if (row.kind === 'folder') onNavigate(row)
     else await openFile(row.path)
+  }
+
+  const actions = (row: BrowserRow | undefined): RowMenuItem[] =>
+    row
+      ? [
+          { label: 'Open', onSelect: () => void open(row) },
+          { label: revealLabel(), onSelect: () => void revealFile(row.path) },
+          ...(row.menuItems ?? []).map((item, index) => ({
+            ...item,
+            separatorBefore: index === 0
+          }))
+        ]
+      : []
+
+  const openContextMenu = (
+    event: React.MouseEvent<HTMLTableRowElement> | React.KeyboardEvent<HTMLTableRowElement>,
+    row: BrowserRow
+  ): void => {
+    event.preventDefault()
+    selection.focus(row.path)
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const pointer = 'clientX' in event && event.clientX > 0
+    rowMenu.openAt(
+      row.path,
+      pointer
+        ? { left: event.clientX, top: event.clientY }
+        : { left: bounds.right - 24, top: bounds.top },
+      event.currentTarget
+    )
   }
 
   return (
@@ -114,7 +148,14 @@ export function DirectoryBrowser({
                 aria-label={row.name}
                 className={FILE_ROW_CLASS}
                 onDoubleClick={() => void open(row)}
-                onKeyDown={(event) => selection.onKeyDown(event, index, () => void open(row))}
+                onContextMenu={(event) => openContextMenu(event, row)}
+                onKeyDown={(event) => {
+                  if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+                    openContextMenu(event, row)
+                    return
+                  }
+                  selection.onKeyDown(event, index, () => void open(row))
+                }}
               >
                 <Table.Cell>
                   <div className="flex min-w-0 items-center gap-2 pl-8">
@@ -137,28 +178,33 @@ export function DirectoryBrowser({
                 <Table.Cell className="truncate text-kumo-subtle">
                   {row.typeLabel ?? fileType(row)}
                 </Table.Cell>
-                <FileActionsMenu
+                <FileActionsButton
                   name={row.name}
-                  onOpen={() => void open(row)}
-                  onReveal={() => void revealFile(row.path)}
-                >
-                  {row.menuItems?.length ? <DropdownMenu.Separator /> : null}
-                  {row.menuItems?.map((item) => (
-                    <DropdownMenu.Item
-                      key={item.label}
-                      variant={item.variant}
-                      disabled={item.disabled}
-                      onClick={item.onSelect}
-                    >
-                      {item.label}
-                    </DropdownMenu.Item>
-                  ))}
-                </FileActionsMenu>
+                  menuId={rowMenu.id}
+                  expanded={rowMenu.target === row.path}
+                  onClick={(event) => {
+                    selection.focus(row.path)
+                    const bounds = event.currentTarget.getBoundingClientRect()
+                    rowMenu.openAt(
+                      row.path,
+                      { left: bounds.right, top: bounds.bottom },
+                      event.currentTarget
+                    )
+                  }}
+                />
               </Table.Row>
             ))
           )}
         </Table.Body>
       </Table>
+      <FileActionsMenu
+        id={rowMenu.id}
+        label={`Actions for ${visible.find((row) => row.path === rowMenu.target)?.name ?? 'file'}`}
+        open={rowMenu.target !== null && visible.some((row) => row.path === rowMenu.target)}
+        anchor={rowMenu.anchor}
+        actions={actions(visible.find((row) => row.path === rowMenu.target))}
+        onOpenChange={rowMenu.onOpenChange}
+      />
     </FileBrowserFrame>
   )
 }
