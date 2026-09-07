@@ -5,10 +5,23 @@ at `321fd9f` (Polish desktop task dialogs and location toolbar).
 
 ## Goal
 
-Keep a directory of everyone who bowls at the centre — name, email, phone — together with
-which leagues, seasons and teams they bowl in. Populate it from BLS (Bowling League Secretary)
-exports rather than by hand. Use it to generate the season's sign-in sheet instead of the blank
-`Sign-In Sheet.docx` template.
+Make this app the centre's **membership system**: a register of everyone who bowls here (name,
+email, phone, member number, status) together with which leagues, seasons and teams they bowl
+in. Populate it in bulk from BLS (Bowling League Secretary) exports rather than by hand. Use it
+to generate the season's sign-in sheet instead of the blank `Sign-In Sheet.docx` template, and
+later to issue member ID cards and link members to the POS so visits and purchases can be
+tracked against a member.
+
+Two systems, two jobs:
+
+|            | BLS + MBD                                                                                                               | This app                                                                                                                                                                         |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Owns       | Scoring: averages, handicaps, standings, and the shared bowler list that ties a bowler's scores together across leagues | Membership: who the member is to the centre, their number and card, status, contact preferences, which leagues and teams they are in, documents and sign-in sheets, the POS link |
+| Data flows | Out, as per-league exports                                                                                              | In, by bulk import; onwards to cards and the POS                                                                                                                                 |
+| Key        | MBD ID                                                                                                                  | Member number, with the MBD ID kept as the link back to scoring                                                                                                                  |
+
+The exports are the feed from scoring to membership. Nothing flows the other way: the app never
+writes to BLS or the MBD.
 
 Three questions any design has to answer:
 
@@ -38,11 +51,15 @@ refresh contact details in the ledger, never a roster.
 
 What this means for the design:
 
-- The MBD, not this app, is the master for a bowler's identity and contact details. The app
-  reads exports and never writes back.
-- The MBD ID is the primary match key. The ledger still mints its own ids, because a bowler
-  can appear in an unlinked league or a hand-made roster before their MBD ID is known, and
-  re-keying a directory later is worse than carrying two columns.
+- The MBD is the master for a bowler's _scoring_ identity: the MBD ID is what ties a person's
+  scores together across leagues, and it is the key this app matches exports on. This app is
+  the master for _membership_: the member number, card, status and the contact details as the
+  centre knows them. Exports seed and refresh contact details; a value the user has corrected
+  in the register wins over any later export.
+- The register mints its own member numbers rather than reusing the MBD ID, because the
+  number goes on a card and into the POS, a member can exist before they bowl in a linked
+  league (or without ever bowling in one), and re-keying a directory later is worse than
+  carrying two columns.
 - Column names in the export are unverified: CDE's site and knowledge base are not reachable
   from where this was written. The import is designed as a column-mapping step for that
   reason, and one real per-league export pins it down.
@@ -133,27 +150,35 @@ Rules: header row required; unknown extra columns are preserved in an `extra` ma
 (quoted fields, embedded commas, CRLF) with a hand-written parser (~60 lines, unit-tested) so
 no new dependency is needed.
 
-### `_members/members.csv` — the ledger
+### `_members/members.csv` — the membership register
+
+This is the file the app owns and the one the rest of the design hangs off. "Ledger" elsewhere
+in this doc means this file.
 
 ```
-id,mbd_id,first_name,last_name,email,phone,association_no,merged_into,notes,first_seen,last_seen
+id,mbd_id,first_name,last_name,email,phone,association_no,status,joined,card_issued,consent_marketing,merged_into,notes,first_seen,last_seen
 ```
 
+- **`id` is the member number.** Six digits, random within 100000–999999 and checked against
+  the register when minted, never sequential: two machines importing at the same time must
+  not hand out the same number, and a sequential scheme can't promise that. Six digits is
+  short enough to read out at the desk and to type into a POS, and encodes cleanly in a Code
+  128 barcode or a QR code for the card. A number is never reused, even after a merge.
 - **App-owned columns** (rewritten by the scan): `first_seen`, `last_seen`, `mbd_id` _when
   blank_, and the contact columns _when blank_. The scan fills them from the person's rosters
   with this precedence: a row that carries an `mbd_id` beats one that doesn't (a linked
-  league's export reflects the MBD, which is the master), then newest season wins.
-- Once every league is linked, `mbd_id` is filled for everyone and the ledger is little more
-  than a map from MBD ID to app id plus the user's notes and merges. That is the intended end
-  state; the fallback rules below exist for the road there.
-- **User-owned columns** (the scan never touches): `merged_into`, `notes`, and any contact
-  column the user has typed over. Overrides are detected the same way `meta.json` keeps
-  `name`: the prior file's value survives unless it is empty.
-- `merged_into` points at another `id`. The merged row stays (so its `id` in old `players.csv`
-  files still resolves) but everything is reported under the target.
-- Ids are short random tokens (`m_7f3k2q`), never sequential, so two machines importing at
-  the same time cannot mint the same id. If OneDrive produces a conflict copy of the ledger,
-  the worst case is a duplicate person that the user merges, not a corrupted id space.
+  league's export reflects the MBD), then newest season wins.
+- **User-owned columns** (the scan never touches): `status`, `joined`, `card_issued`,
+  `consent_marketing`, `merged_into`, `notes`, and any contact column the user has typed over.
+  Overrides are detected the same way `meta.json` keeps `name`: the prior file's value survives
+  unless it is empty. `status` is `active` or `lapsed`; the scan proposes `lapsed` in the
+  duplicates/problems list when someone hasn't appeared in a live season for a full season,
+  but never sets it.
+- `merged_into` points at another `id`. The merged row stays (so its number in old
+  `players.csv` files, and on an old card, still resolves) but everything is reported under
+  the target.
+- If OneDrive produces a conflict copy of the register, the worst case is a duplicate person
+  that the user merges, not a corrupted number space.
 - Written only when the serialised content differs from what was read, exactly as the scanner
   does for `meta.json`.
 
@@ -185,13 +210,17 @@ New shared module `src/shared/members.ts`:
 
 ```ts
 export interface MemberRef {
-  id: string
+  id: string // member number
   mbdId?: string
   firstName: string
   lastName: string
   email?: string
   phone?: string
   associationNo?: string
+  status: 'active' | 'lapsed'
+  joined?: string
+  cardIssued?: string
+  consentMarketing: boolean
   notes?: string
 }
 
@@ -309,10 +338,11 @@ because every other document in the tree is a docx and secretaries edit them.
 
 ### UI surfaces
 
-- **Home → Members tab** (alongside Shared documents and Templates): the global directory.
-  Columns: name, email, phone, leagues (badges, one per current membership), last seen. Row
-  menu: copy email, show possible duplicates, merge into… Filter box reuses the season
-  filter styling.
+- **Home → Members tab** (alongside Shared documents and Templates): the register. Columns:
+  member number, name, email, phone, status, leagues (badges, one per current membership),
+  last seen. Row menu: copy email, show possible duplicates, merge into…, print card. Filter
+  box reuses the season filter styling and matches on number as well as name, so a scanned
+  or typed card number finds the member.
 - **League → season row**: an item count already exists; add a "Roster · 24" badge when
   `players.csv` is present.
 - **Season root toolbar** (next to _Sync with templates_): _Import roster…_ (opens the
@@ -322,12 +352,50 @@ because every other document in the tree is a docx and secretaries edit them.
 - Dropping a `.csv` onto a season root offers "Import as roster" instead of plain copy; any
   other file keeps the current copy-in behaviour.
 
+### Member cards
+
+A card is a print job from the register: name, member number, the centre's name, and the
+number as a barcode. Rendered as HTML and printed with Electron's `webContents.printToPDF`
+onto a card-sheet layout, so there is no document to keep and nothing new in the folder tree
+beyond an optional PDF the user chooses to save. Code 128 is a small enough encoder to write
+and test in-repo (bars as SVG rects); QR would mean one small dependency. Printing a card sets
+`card_issued` on the member. Which of barcode or QR depends on what the POS scanner reads,
+which is one of the open questions.
+
+### The POS link
+
+The app is a desktop file organiser; it is not online and has no server, and the register is
+a CSV in OneDrive. A POS can't query that live, and it shouldn't have to. The realistic shape
+is the same one the BLS side uses: **exchange files keyed on the member number.**
+
+1. **Out: members → POS customers.** An export from the register in whatever customer-import
+   format the POS takes (most take CSV), with the member number as the customer reference.
+   Re-exporting is idempotent on that reference. The POS becomes the place where a card is
+   scanned and a sale is recorded against a member.
+2. **In: POS sales → the app.** A POS sales-by-customer report imported the same way a BLS
+   roster is: dropped on the app, mapped once, and joined to the register on member number.
+   That gives visits, spend and last-seen per member for reports, without the app storing
+   every transaction.
+
+Only if the POS has to look up a member against _our_ data rather than its own customer list
+does the app need a live service and a real database. If that day comes, the register becomes
+the import/export format of that database and the member numbers carry over unchanged; nothing
+in this design has to be re-keyed. The decisions that keep that door open are made now: stable
+random member numbers, the MBD ID kept as a separate column, no personal data in analytics,
+and a `schemaVersion`-style header comment on the register so a migrator can tell what it is
+reading.
+
+Transaction-level data stays in the POS. The app only ever holds per-member roll-ups from the
+imported reports, and those live in memory from the imported file, not in a growing CSV.
+
 ## Privacy
 
-`_members/members.csv` and every `players.csv` hold personal data in a shared OneDrive folder.
-Two small things worth doing from the start: leave `_members` out of archive zips unless the
-user ticks it, and don't send member fields to analytics or Sentry (the snapshot never leaves
-main except over IPC; `capture` calls only carry counts).
+`_members/members.csv` and every `players.csv` hold personal data in a shared OneDrive folder,
+and the POS link adds behavioural data on top. Things worth doing from the start: leave
+`_members` out of archive zips unless the user ticks it; don't send member fields to analytics
+or Sentry (the snapshot never leaves main except over IPC; `capture` calls only carry counts);
+keep `consent_marketing` in the register so a mailing export can filter on it; and keep
+purchase history in the POS rather than copying it into the folder tree.
 
 ## Phased delivery
 
@@ -340,8 +408,13 @@ main except over IPC; `capture` calls only carry counts).
 3. **Sign-in sheet.** `docx.ts`, `signin:generate`, the season toolbar action, "previous
    season" copying `players.csv` verified. Tests: unzip the output and assert names, team
    order and file naming.
-4. **Later, if wanted.** Merge UI polish, token-based custom templates, editing a member
-   in-app (today: edit `members.csv` in Excel and rescan).
+4. **Membership management.** Status, joined and consent columns in the UI, edit a member
+   in-app (until then: edit `members.csv` in Excel and rescan), lapsed-member proposals,
+   mailing export filtered on consent.
+5. **Cards.** Card print layout, barcode encoder, `card_issued`.
+6. **POS.** Customer export in the POS's format, sales-report import and per-member roll-ups
+   in the Members tab. Format work waits on knowing the POS.
+7. **Later, if wanted.** Merge UI polish, token-based custom sign-in templates.
 
 Phase 1 is useful on its own: a hand-made `players.csv` in a season folder immediately shows
 up in the directory.
@@ -357,3 +430,9 @@ up in the directory.
 - What does the current paper sign-in sheet look like: per team, per lane, averages shown,
   space for subs? A photo of one is enough to pin down the generated layout.
 - Should subs be tracked as members at all, or only named on the sheet?
+- Which POS, and what do its customer import and sales-by-customer report look like? That
+  decides the two file formats in phase 6 and whether the card needs a barcode or a QR.
+- Will there be members who never bowl in a league (casual members, juniors, social)? If so
+  the register needs an "add member" path that doesn't start from a roster import; the
+  design allows it, phase 4 would include it.
+- What goes on the card besides name and number: photo, expiry, centre logo?
