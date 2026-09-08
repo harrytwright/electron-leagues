@@ -89,10 +89,10 @@ it('updates the status path from the location root through league navigation', a
   await user.click(screen.getByRole('button', { name: 'Pairs' }))
   expect(within(status).getByTitle(leaguePath)).toBeInTheDocument()
 
-  await user.dblClick(screen.getByRole('row', { name: '2025-26' }))
+  await user.dblClick(screen.getByRole('row', { name: /^2025-26/ }))
   expect(within(status).getByTitle(seasonPath)).toBeInTheDocument()
 
-  await user.dblClick(await screen.findByRole('row', { name: 'Week 1' }))
+  await user.dblClick(await screen.findByRole('row', { name: /^Week 1/ }))
   expect(within(status).getByTitle(weekPath)).toBeInTheDocument()
 
   await user.click(screen.getByRole('button', { name: 'Trios' }))
@@ -129,7 +129,7 @@ it('keeps the current Home pane and status in sync on a redundant Home click', a
   const user = userEvent.setup()
   render(<App />)
   await user.click(await screen.findByRole('tab', { name: 'Templates' }))
-  await user.dblClick(await screen.findByRole('row', { name: 'Admin' }))
+  await user.dblClick(await screen.findByRole('row', { name: /^Admin/ }))
   await user.click(screen.getByRole('button', { name: 'Go home' }))
 
   expect(screen.getByRole('tab', { name: 'Templates' })).toHaveAttribute('aria-selected', 'true')

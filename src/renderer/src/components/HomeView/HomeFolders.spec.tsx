@@ -52,16 +52,16 @@ it('drills into folders and back out through the breadcrumbs', async () => {
     />
   )
 
-  expect(await screen.findByRole('row', { name: 'Opening times.docx' })).toBeInTheDocument()
-  await user.dblClick(screen.getByRole('row', { name: 'Forms' }))
+  expect(await screen.findByRole('row', { name: /^Opening times.docx/ })).toBeInTheDocument()
+  await user.dblClick(screen.getByRole('row', { name: /^Forms/ }))
 
-  expect(await screen.findByRole('row', { name: 'Entry form.pdf' })).toBeInTheDocument()
-  expect(screen.queryByRole('row', { name: 'Opening times.docx' })).not.toBeInTheDocument()
+  expect(await screen.findByRole('row', { name: /^Entry form.pdf/ })).toBeInTheDocument()
+  expect(screen.queryByRole('row', { name: /^Opening times.docx/ })).not.toBeInTheDocument()
   expect(currentCrumb()).toHaveTextContent('Forms')
 
   await user.click(crumbLink('Shared documents'))
 
-  expect(await screen.findByRole('row', { name: 'Opening times.docx' })).toBeInTheDocument()
+  expect(await screen.findByRole('row', { name: /^Opening times.docx/ })).toBeInTheDocument()
   expect(screen.queryByRole('link')).not.toBeInTheDocument()
   expect(currentCrumb()).toHaveTextContent('Shared documents')
 })
@@ -81,10 +81,10 @@ it('re-lists the current folder when the tree changes on disk', async () => {
     />
   )
 
-  expect(await screen.findByRole('row', { name: 'Old.docx' })).toBeInTheDocument()
+  expect(await screen.findByRole('row', { name: /^Old.docx/ })).toBeInTheDocument()
   act(() => emitTreeChanged())
 
-  expect(await screen.findByRole('row', { name: 'New.docx' })).toBeInTheDocument()
+  expect(await screen.findByRole('row', { name: /^New.docx/ })).toBeInTheDocument()
   expect(listDir).toHaveBeenCalledTimes(2)
 })
 
@@ -101,8 +101,8 @@ it('offers a way back when the folder being viewed can no longer be read', async
     />
   )
 
-  await user.dblClick(await screen.findByRole('row', { name: 'Forms' }))
-  await screen.findByRole('row', { name: 'Entry form.pdf' })
+  await user.dblClick(await screen.findByRole('row', { name: /^Forms/ }))
+  await screen.findByRole('row', { name: /^Entry form.pdf/ })
   // The folder is deleted under us; the next listing fails.
   listDir.mockRejectedValue(
     new Error("Error invoking remote method 'dir:list': Error: That folder no longer exists")
@@ -113,7 +113,7 @@ it('offers a way back when the folder being viewed can no longer be read', async
   listDir.mockImplementation(listingFor(tree))
   await user.click(screen.getByRole('button', { name: 'Back to Shared documents' }))
 
-  expect(await screen.findByRole('row', { name: 'Opening times.docx' })).toBeInTheDocument()
+  expect(await screen.findByRole('row', { name: /^Opening times.docx/ })).toBeInTheDocument()
 })
 
 it('imports picked files into the folder being viewed', async () => {
@@ -132,8 +132,8 @@ it('imports picked files into the folder being viewed', async () => {
     />
   )
 
-  await user.dblClick(await screen.findByRole('row', { name: 'Forms' }))
-  await screen.findByRole('row', { name: 'Entry form.pdf' })
+  await user.dblClick(await screen.findByRole('row', { name: /^Forms/ }))
+  await screen.findByRole('row', { name: /^Entry form.pdf/ })
   await user.click(screen.getByRole('button', { name: /add files…/i }))
 
   await waitFor(() =>

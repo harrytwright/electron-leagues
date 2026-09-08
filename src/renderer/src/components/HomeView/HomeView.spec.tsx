@@ -39,13 +39,13 @@ it('starts on one full-height Shared documents browser and lazily opens Template
   expect(screen.getByRole('heading', { level: 1, name: 'Home' })).toBeInTheDocument()
   expect(screen.queryByText('/root')).not.toBeInTheDocument()
   expect(await screen.findByRole('treegrid', { name: 'Shared documents' })).toBeInTheDocument()
-  expect(screen.getByRole('row', { name: 'Opening times.docx' })).toBeInTheDocument()
+  expect(screen.getByRole('row', { name: /^Opening times.docx/ })).toBeInTheDocument()
   expect(api.listDir).toHaveBeenCalledExactlyOnceWith('/root/_shared')
   expect(onCurrentDirChange).toHaveBeenLastCalledWith('/root/_shared')
 
   await user.click(screen.getByRole('tab', { name: 'Templates' }))
-  expect(await screen.findByRole('row', { name: 'Rules.docx' })).toBeInTheDocument()
-  expect(screen.queryByRole('row', { name: 'Opening times.docx' })).not.toBeInTheDocument()
+  expect(await screen.findByRole('row', { name: /^Rules.docx/ })).toBeInTheDocument()
+  expect(screen.queryByRole('row', { name: /^Opening times.docx/ })).not.toBeInTheDocument()
   expect(api.listDir).toHaveBeenLastCalledWith('/root/_templates')
   expect(onCurrentDirChange).toHaveBeenLastCalledWith('/root/_templates')
 })
@@ -75,10 +75,10 @@ it('focuses the first child row after opening a Home folder with Enter', async (
   const user = userEvent.setup()
   renderHome()
 
-  await user.click(await screen.findByRole('row', { name: 'Admin' }))
+  await user.click(await screen.findByRole('row', { name: /^Admin/ }))
   await user.keyboard('{Enter}')
 
-  const child = await screen.findByRole('row', { name: 'Contacts.docx' })
+  const child = await screen.findByRole('row', { name: /^Contacts.docx/ })
   expect(document.activeElement).toBe(child)
 })
 
@@ -95,8 +95,8 @@ it('only offers Other items when needed, opening files and revealing folders', a
   )
 
   await user.click(screen.getByRole('tab', { name: 'Other items' }))
-  await user.dblClick(screen.getByRole('row', { name: 'Random stuff' }))
-  await user.dblClick(screen.getByRole('row', { name: 'notes.txt' }))
+  await user.dblClick(screen.getByRole('row', { name: /^Random stuff/ }))
+  await user.dblClick(screen.getByRole('row', { name: /^notes.txt/ }))
 
   expect(api.revealFile).toHaveBeenCalledWith('/root/Random stuff')
   expect(api.openFile).toHaveBeenCalledWith('/root/notes.txt')
@@ -119,10 +119,10 @@ it('resets navigation, filter, and selection when tabs switch', async () => {
   const user = userEvent.setup()
   renderHome(makeTree(), onCurrentDirChange)
 
-  await screen.findByRole('row', { name: 'Admin' })
+  await screen.findByRole('row', { name: /^Admin/ })
   await user.type(screen.getByRole('textbox', { name: 'Filter loaded files' }), 'admin')
-  await user.dblClick(await screen.findByRole('row', { name: 'Admin' }))
-  expect(await screen.findByRole('row', { name: 'Contacts.docx' })).toBeInTheDocument()
+  await user.dblClick(await screen.findByRole('row', { name: /^Admin/ }))
+  expect(await screen.findByRole('row', { name: /^Contacts.docx/ })).toBeInTheDocument()
   expect(screen.getByRole('textbox', { name: 'Filter loaded files' })).toHaveValue('')
   await user.type(screen.getByRole('textbox', { name: 'Filter loaded files' }), 'contacts')
   expect(onCurrentDirChange).toHaveBeenLastCalledWith(folder.path)
@@ -130,9 +130,9 @@ it('resets navigation, filter, and selection when tabs switch', async () => {
   await user.click(screen.getByRole('tab', { name: 'Templates' }))
   await user.click(screen.getByRole('tab', { name: 'Shared documents' }))
 
-  expect(await screen.findByRole('row', { name: 'Admin' })).toBeInTheDocument()
+  expect(await screen.findByRole('row', { name: /^Admin/ })).toBeInTheDocument()
   expect(screen.getByRole('textbox', { name: 'Filter loaded files' })).toHaveValue('')
-  expect(screen.getByRole('row', { name: 'Admin' })).toHaveAttribute('aria-selected', 'false')
+  expect(screen.getByRole('row', { name: /^Admin/ })).toHaveAttribute('aria-selected', 'false')
   expect(onCurrentDirChange).toHaveBeenLastCalledWith('/root/_shared')
   expect(api.listDir).toHaveBeenLastCalledWith('/root/_shared')
 })
@@ -146,7 +146,7 @@ it('imports into the currently navigated Home directory', async () => {
   const user = userEvent.setup()
   renderHome()
 
-  await user.dblClick(await screen.findByRole('row', { name: 'Admin' }))
+  await user.dblClick(await screen.findByRole('row', { name: /^Admin/ }))
   await screen.findByText('This folder is empty')
   await user.click(screen.getByRole('button', { name: 'Add files…' }))
 

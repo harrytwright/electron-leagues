@@ -10,6 +10,7 @@ export function FileActionsButton({ name, menuId, expanded, onClick }: Props): R
       onDoubleClick={(event) => event.stopPropagation()}
     >
       <IconButton
+        tabIndex={-1}
         variant="ghost"
         size="sm"
         icon={<DotsThreeIcon aria-hidden size={16} weight="bold" />}
@@ -17,12 +18,6 @@ export function FileActionsButton({ name, menuId, expanded, onClick }: Props): R
         aria-haspopup="menu"
         aria-expanded={expanded}
         aria-controls={expanded ? menuId : undefined}
-        onKeyDown={(event) => {
-          if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
-          event.preventDefault()
-          event.stopPropagation()
-          event.currentTarget.click()
-        }}
         onClick={onClick}
       />
     </Table.Cell>

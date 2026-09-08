@@ -26,7 +26,7 @@ export function fileRows(
     return (order || names.compare(a.name, b.name)) * (sort.direction === 'ascending' ? 1 : -1)
   })
 
-  return sorted.flatMap((entry, index) => {
+  const visible = sorted.flatMap((entry) => {
     const matches = !query || entry.name.toLocaleLowerCase().includes(query)
     const children = branches.get(entry.path)?.entries ?? []
     const descendants =
@@ -34,15 +34,17 @@ export function fileRows(
         ? fileRows(children, branches, expanded, sort, matches ? '' : query, [...ancestors, entry])
         : []
     if (!matches && descendants.length === 0) return []
-    return [
-      {
-        entry,
-        ancestors,
-        expanded: expanded.has(entry.path) || descendants.length > 0,
-        position: index + 1,
-        siblings: sorted.length
-      },
-      ...descendants
-    ]
+    return [{ entry, descendants }]
   })
+
+  return visible.flatMap(({ entry, descendants }, index) => [
+    {
+      entry,
+      ancestors,
+      expanded: expanded.has(entry.path) || descendants.length > 0,
+      position: index + 1,
+      siblings: visible.length
+    },
+    ...descendants
+  ])
 }

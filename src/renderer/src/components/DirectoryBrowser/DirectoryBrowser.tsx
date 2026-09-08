@@ -88,8 +88,7 @@ export function DirectoryBrowser({
       row.path,
       pointer
         ? { left: event.clientX, top: event.clientY }
-        : { left: bounds.right - 24, top: bounds.top },
-      event.currentTarget
+        : { left: bounds.right - 24, top: bounds.top }
     )
   }
 
@@ -101,6 +100,10 @@ export function DirectoryBrowser({
       query={query}
       filterLabel="Filter this folder"
       onQueryChange={setQuery}
+      onFilterTab={() => {
+        selection.focus(selectedRow?.path ?? visible[0]?.path)
+        return visible.length > 0
+      }}
       onRefresh={onRefresh}
       onDropFiles={onDropFiles}
       selection={selectedRow?.name}
@@ -159,7 +162,6 @@ export function DirectoryBrowser({
               <Table.Row
                 key={row.key}
                 {...selection.rowProps(row.path)}
-                aria-label={row.name}
                 className={FILE_ROW_CLASS}
                 onDoubleClick={() => void open(row)}
                 onContextMenu={(event) => openContextMenu(event, row)}
@@ -179,7 +181,7 @@ export function DirectoryBrowser({
                     <span title={row.name} className="truncate font-medium">
                       {row.name}
                     </span>
-                    {row.badge}
+                    {row.badge ? <> {row.badge}</> : null}
                   </div>
                 </Table.Cell>
                 <Table.Cell className="whitespace-nowrap text-kumo-subtle">
@@ -199,11 +201,7 @@ export function DirectoryBrowser({
                   onClick={(event) => {
                     selection.focus(row.path)
                     const bounds = event.currentTarget.getBoundingClientRect()
-                    rowMenu.openAt(
-                      row.path,
-                      { left: bounds.right, top: bounds.bottom },
-                      event.currentTarget
-                    )
+                    rowMenu.openAt(row.path, { left: bounds.right, top: bounds.bottom })
                   }}
                 />
               </Table.Row>
@@ -217,8 +215,12 @@ export function DirectoryBrowser({
         open={rowMenu.target !== null && visible.some((row) => row.path === rowMenu.target)}
         anchor={rowMenu.anchor}
         actions={actions(visible.find((row) => row.path === rowMenu.target))}
-        onOpenChange={rowMenu.onOpenChange}
-        onRestoreFocus={rowMenu.restoreFocus}
+        onOpenChange={(open, reason) => {
+          const target = rowMenu.target
+          rowMenu.onOpenChange(open)
+          if (!open && reason === 'escape-key') selection.focus(target ?? undefined)
+        }}
+        onRestoreFocus={() => selection.focus(rowMenu.target ?? undefined)}
       />
     </FileBrowserFrame>
   )

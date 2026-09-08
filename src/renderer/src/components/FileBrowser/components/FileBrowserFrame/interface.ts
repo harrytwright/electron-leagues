@@ -7,6 +7,7 @@ export interface Props {
   query: string
   filterLabel: string
   onQueryChange: (value: string) => void
+  onFilterTab: () => boolean
   onRefresh: () => void
   onDropFiles?: (paths: string[]) => void | Promise<void>
   actions?: ReactNode

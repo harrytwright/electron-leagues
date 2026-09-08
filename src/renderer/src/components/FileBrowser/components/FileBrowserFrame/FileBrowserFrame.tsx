@@ -19,6 +19,7 @@ export function FileBrowserFrame({
   query,
   filterLabel,
   onQueryChange,
+  onFilterTab,
   onRefresh,
   onDropFiles,
   actions,
@@ -91,6 +92,10 @@ export function FileBrowserFrame({
               placeholder={`${filterLabel}…`}
               value={query}
               onValueChange={onQueryChange}
+              onKeyDown={(event) => {
+                if (event.key !== 'Tab' || event.shiftKey) return
+                if (onFilterTab()) event.preventDefault()
+              }}
               className="h-7 rounded-md pr-7 pl-7 text-base"
             />
             {query ? (
@@ -118,12 +123,13 @@ export function FileBrowserFrame({
         </div>
       </div>
       <div className="min-h-0 flex-1 scroll-pt-10 overflow-auto">{children}</div>
-      <div
-        aria-live="polite"
-        className="flex min-h-9 shrink-0 items-center justify-between gap-4 border-t border-kumo-line px-4 py-2 text-kumo-subtle"
-      >
-        <span>{summary}</span>
-        <span className="truncate">{selection ?? 'Double-click to open'}</span>
+      <div className="flex min-h-9 shrink-0 items-center justify-between gap-4 border-t border-kumo-line px-4 py-2 text-kumo-subtle">
+        <span aria-live="polite">{summary}</span>
+        <span className="truncate">
+          {selection
+            ? `${selection} · Double-click or Enter to open`
+            : 'Double-click or Enter to open'}
+        </span>
       </div>
       {dragging ? (
         <div className="pointer-events-none absolute inset-1 z-20 flex items-center justify-center rounded-md bg-kumo-base/90 outline-2 -outline-offset-2 outline-kumo-focus outline-dashed">

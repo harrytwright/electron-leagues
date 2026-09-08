@@ -94,8 +94,7 @@ export function TreeFileBrowser({
       row.entry.path,
       pointer
         ? { left: event.clientX, top: event.clientY }
-        : { left: bounds.right - 24, top: bounds.top },
-      event.currentTarget
+        : { left: bounds.right - 24, top: bounds.top }
     )
   }
 
@@ -111,7 +110,7 @@ export function TreeFileBrowser({
     }
     switch (event.key) {
       case 'ArrowRight':
-        if (row.entry.kind === 'folder') {
+        if (row.entry.kind === 'folder' && !filter) {
           if (!row.expanded) tree.toggle(row.entry.path)
           else if (rows[index + 1]?.ancestors.at(-1)?.path === row.entry.path)
             focus(rows[index + 1])
@@ -152,6 +151,10 @@ export function TreeFileBrowser({
       query={query}
       filterLabel="Filter loaded files"
       onQueryChange={setQuery}
+      onFilterTab={() => {
+        selection.focus(selectedRow?.entry.path ?? rows[0]?.entry.path)
+        return rows.length > 0
+      }}
       onRefresh={refresh}
       onDropFiles={onDropFiles}
       selection={selectedRow?.entry.name}
@@ -218,7 +221,7 @@ export function TreeFileBrowser({
         </Table.Header>
         <Table.Body>
           {listing.error || listing.entries === null || rows.length === 0 ? (
-            <BrowserMessageRow>
+            <BrowserMessageRow level={1}>
               {listing.error ? (
                 <BrowserError message={listing.error} onRetry={refresh} onBack={onBack} />
               ) : listing.entries === null ? (
@@ -250,7 +253,6 @@ export function TreeFileBrowser({
                 <Fragment key={entry.path}>
                   <Table.Row
                     {...selection.rowProps(entry.path)}
-                    aria-label={entry.name}
                     aria-level={ancestors.length + 1}
                     aria-posinset={row.position}
                     aria-setsize={row.siblings}
@@ -275,8 +277,8 @@ export function TreeFileBrowser({
                       >
                         {entry.kind === 'folder' ? (
                           <IconButton
+                            tabIndex={-1}
                             aria-label={`${expanded ? 'Collapse' : 'Expand'} ${entry.name}`}
-                            aria-expanded={expanded}
                             variant="ghost"
                             size="xs"
                             className="size-6 shrink-0"
@@ -323,16 +325,12 @@ export function TreeFileBrowser({
                       onClick={(event) => {
                         selection.focus(entry.path)
                         const bounds = event.currentTarget.getBoundingClientRect()
-                        rowMenu.openAt(
-                          entry.path,
-                          { left: bounds.right, top: bounds.bottom },
-                          event.currentTarget
-                        )
+                        rowMenu.openAt(entry.path, { left: bounds.right, top: bounds.bottom })
                       }}
                     />
                   </Table.Row>
                   {branchMessage ? (
-                    <Table.Row className="even:bg-transparent">
+                    <Table.Row aria-level={ancestors.length + 2} className="even:bg-transparent">
                       <Table.Cell colSpan={4}>
                         <div
                           role={branch?.error ? 'alert' : 'status'}
@@ -375,8 +373,12 @@ export function TreeFileBrowser({
         open={rowMenu.target !== null && rows.some((row) => row.entry.path === rowMenu.target)}
         anchor={rowMenu.anchor}
         actions={actions(rows.find((row) => row.entry.path === rowMenu.target))}
-        onOpenChange={rowMenu.onOpenChange}
-        onRestoreFocus={rowMenu.restoreFocus}
+        onOpenChange={(open, reason) => {
+          const target = rowMenu.target
+          rowMenu.onOpenChange(open)
+          if (!open && reason === 'escape-key') selection.focus(target ?? undefined)
+        }}
+        onRestoreFocus={() => selection.focus(rowMenu.target ?? undefined)}
       />
     </FileBrowserFrame>
   )

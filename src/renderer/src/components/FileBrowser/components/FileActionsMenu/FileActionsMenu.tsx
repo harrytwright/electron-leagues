@@ -1,5 +1,6 @@
+import { Menu } from '@cloudflare/kumo/primitives/menu'
 import { DropdownMenu } from '@cloudflare/kumo'
-import { Fragment } from 'react'
+import { Fragment, useRef } from 'react'
 import type { Props } from './interface'
 
 /** One controlled menu shared by every row and every invocation method in a browser. */
@@ -12,9 +13,14 @@ export function FileActionsMenu({
   onOpenChange,
   onRestoreFocus
 }: Props): React.JSX.Element {
+  const popup = useRef<HTMLDivElement>(null)
+
   return (
-    <DropdownMenu open={open} onOpenChange={onOpenChange}>
-      <DropdownMenu.Trigger
+    <Menu.Root
+      open={open}
+      onOpenChange={(nextOpen, eventDetails) => onOpenChange(nextOpen, eventDetails.reason)}
+    >
+      <Menu.Trigger
         id={`${id}-trigger`}
         render={
           <button
@@ -22,46 +28,43 @@ export function FileActionsMenu({
             tabIndex={-1}
             aria-hidden
             aria-label={label}
-            onFocus={(event) => {
-              if (open) return
-              // Base UI can return focus after the popup's exit animation.
-              // Never leave it on this positioning-only trigger, and preserve
-              // a newer focus target (such as a dialog opened by a menu action).
-              onRestoreFocus(
-                event.relatedTarget instanceof HTMLElement ? event.relatedTarget : null
-              )
-              if (document.activeElement === event.currentTarget) {
-                // The original row can disappear during a watcher refresh.
-                // Fall back to a visible control in this browser, never to the
-                // hidden positioning button or a different pane.
-                if (document.activeElement === event.currentTarget) {
-                  const browser = event.currentTarget.closest('[data-file-drop-target]')
-                  const fallback =
-                    browser?.querySelector<HTMLElement>('tr[tabindex="0"]') ??
-                    browser?.querySelector<HTMLInputElement>('input')
-                  fallback?.focus()
-                }
-              }
-            }}
             className="pointer-events-none fixed size-px opacity-0"
             style={{ left: anchor.left, top: anchor.top }}
           />
         }
       />
-      <DropdownMenu.Content id={id}>
-        {actions.map((action, index) => (
-          <Fragment key={`${action.label}-${index}`}>
-            {action.separatorBefore ? <DropdownMenu.Separator /> : null}
-            <DropdownMenu.Item
-              variant={action.variant}
-              disabled={action.disabled}
-              onClick={action.onSelect}
-            >
-              {action.label}
-            </DropdownMenu.Item>
-          </Fragment>
-        ))}
-      </DropdownMenu.Content>
-    </DropdownMenu>
+      <Menu.Portal>
+        <Menu.Positioner sideOffset={8}>
+          <Menu.Popup
+            ref={popup}
+            id={id}
+            aria-label={label}
+            finalFocus={false}
+            className="data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=open]:fade-in-0 data-[state=closed]:fade-out-0 data-[state=open]:zoom-in-95 data-[state=closed]:zoom-out-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 max-h-[var(--available-height)] min-w-36 overflow-y-auto rounded-lg bg-kumo-control p-1.5 text-kumo-default shadow-lg ring ring-kumo-line"
+          >
+            {actions.map((action, index) => (
+              <Fragment key={`${action.label}-${index}`}>
+                {action.separatorBefore ? <DropdownMenu.Separator /> : null}
+                <DropdownMenu.Item
+                  variant={action.variant}
+                  disabled={action.disabled}
+                  onClick={() => {
+                    action.onSelect()
+                    queueMicrotask(() => {
+                      const active = document.activeElement
+                      if (active === document.body || (active && popup.current?.contains(active))) {
+                        onRestoreFocus()
+                      }
+                    })
+                  }}
+                >
+                  {action.label}
+                </DropdownMenu.Item>
+              </Fragment>
+            ))}
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
   )
 }

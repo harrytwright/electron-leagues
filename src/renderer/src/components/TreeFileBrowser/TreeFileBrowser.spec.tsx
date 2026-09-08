@@ -45,7 +45,7 @@ function renderFiles(overrides: Partial<Props> = {}): ReturnType<typeof renderWi
 }
 
 function row(name: string): HTMLElement {
-  return screen.getByRole('row', { name })
+  return screen.getByRole('row', { name: new RegExp(`^${name}`) })
 }
 
 it('loads folders only when expanded, retaining the hierarchy and cached children', async () => {
@@ -55,11 +55,11 @@ it('loads folders only when expanded, retaining the hierarchy and cached childre
   expect(api.listDir).not.toHaveBeenCalled()
 
   await user.click(screen.getByRole('button', { name: 'Expand Weekly results' }))
-  expect(await screen.findByRole('row', { name: 'Week 1' })).toHaveAttribute('aria-level', '2')
+  expect(await screen.findByRole('row', { name: /^Week 1/ })).toHaveAttribute('aria-level', '2')
   expect(row('Weekly results')).toHaveAttribute('aria-expanded', 'true')
   expect(row('Rules.pdf')).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Collapse Weekly results' }))
-  expect(screen.queryByRole('row', { name: 'Week 1' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('row', { name: /^Week 1/ })).not.toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Expand Weekly results' }))
   expect(row('Week 1')).toBeInTheDocument()
   expect(api.listDir).toHaveBeenCalledExactlyOnceWith(weeks.path)
@@ -80,6 +80,16 @@ it('selects on click, opens files on double-click, and reports OS open errors', 
   expect(await screen.findByText('No application is associated with this file')).toBeInTheDocument()
 })
 
+it('names the actions menu on the menu element', async () => {
+  installMockApi()
+  const user = userEvent.setup()
+  const document = makeDirEntry({ name: 'Rules.docx', path: `${season}/Rules.docx` })
+  renderFiles({ listing: { entries: [document], error: null, reload: vi.fn() } })
+
+  await user.click(screen.getByRole('button', { name: 'Actions for Rules.docx' }))
+  expect(await screen.findByRole('menu', { name: 'Actions for Rules.docx' })).toBeVisible()
+})
+
 it('supports arrow-key navigation and opens nested folders with their full breadcrumb trail', async () => {
   installMockApi({ listDir: vi.fn().mockResolvedValue([week1]) })
   const onNavigate = vi.fn()
@@ -88,7 +98,7 @@ it('supports arrow-key navigation and opens nested folders with their full bread
 
   await user.click(row('Weekly results'))
   await user.keyboard('{ArrowRight}')
-  await screen.findByRole('row', { name: 'Week 1' })
+  await screen.findByRole('row', { name: /^Week 1/ })
   await user.keyboard('{ArrowRight}')
   expect(row('Week 1')).toHaveFocus()
   await user.keyboard('{ArrowLeft}')
@@ -107,18 +117,32 @@ it('filters loaded descendants while keeping their parents and restores the coll
   renderFiles()
   await user.click(screen.getByRole('button', { name: 'Expand Weekly results' }))
   await user.click(await screen.findByRole('button', { name: 'Expand Week 1' }))
-  await screen.findByRole('row', { name: 'Results.xlsx' })
+  await screen.findByRole('row', { name: /^Results\.xlsx/ })
   await user.click(screen.getByRole('button', { name: 'Collapse all' }))
 
   await user.type(screen.getByRole('textbox', { name: 'Filter loaded files' }), 'results.xlsx')
   expect(row('Results.xlsx')).toHaveAttribute('aria-level', '3')
+  expect(row('Weekly results')).toHaveAttribute('aria-posinset', '1')
+  expect(row('Weekly results')).toHaveAttribute('aria-setsize', '1')
   expect(row('Weekly results')).toBeInTheDocument()
   expect(row('Week 1')).toBeInTheDocument()
-  expect(screen.queryByRole('row', { name: 'Rules.pdf' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('row', { name: /^Rules\.pdf/ })).not.toBeInTheDocument()
   expect(api.listDir).toHaveBeenCalledTimes(2)
   await user.click(screen.getByRole('button', { name: 'Clear filter' }))
   expect(row('Weekly results')).toHaveAttribute('aria-expanded', 'false')
-  expect(screen.queryByRole('row', { name: 'Week 1' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('row', { name: /^Week 1/ })).not.toBeInTheDocument()
+})
+
+it('does not expand a folder with ArrowRight while filtering', async () => {
+  const api = installMockApi()
+  const user = userEvent.setup()
+  renderFiles()
+  await user.type(screen.getByRole('textbox', { name: 'Filter loaded files' }), 'weekly')
+  await user.click(row('Weekly results'))
+  await user.keyboard('{ArrowRight}')
+
+  expect(api.listDir).not.toHaveBeenCalled()
+  expect(row('Weekly results')).toHaveAttribute('aria-expanded', 'false')
 })
 
 it('sorts siblings naturally with folders first and keeps children under their parent', async () => {
@@ -127,16 +151,26 @@ it('sorts siblings naturally with folders first and keeps children under their p
   const user = userEvent.setup()
   renderFiles()
   await user.click(screen.getByRole('button', { name: 'Expand Weekly results' }))
-  await screen.findByRole('row', { name: 'Week 10' })
+  await screen.findByRole('row', { name: /^Week 10/ })
 
   const names = (): Array<string | null> =>
     within(screen.getByRole('treegrid'))
       .getAllByRole('row')
       .slice(1)
-      .map((entry) => entry.getAttribute('aria-label'))
-  expect(names()).toEqual(['Weekly results', 'Week 1', 'Week 10', 'Rules.pdf'])
+      .map((entry) => entry.textContent)
+  expect(names()).toEqual([
+    expect.stringContaining('Weekly results'),
+    expect.stringContaining('Week 1'),
+    expect.stringContaining('Week 10'),
+    expect.stringContaining('Rules.pdf')
+  ])
   await user.click(screen.getByRole('button', { name: 'Name' }))
-  expect(names()).toEqual(['Weekly results', 'Week 10', 'Week 1', 'Rules.pdf'])
+  expect(names()).toEqual([
+    expect.stringContaining('Weekly results'),
+    expect.stringContaining('Week 10'),
+    expect.stringContaining('Week 1'),
+    expect.stringContaining('Rules.pdf')
+  ])
   expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute(
     'aria-sort',
     'descending'
@@ -173,7 +207,7 @@ it('refreshes expanded folders on disk changes and ignores older responses', asy
   renderFiles()
   await user.click(screen.getByRole('button', { name: 'Expand Weekly results' }))
   act(emitTreeChanged)
-  await screen.findByRole('row', { name: 'Week 1' })
+  await screen.findByRole('row', { name: /^Week 1/ })
   await act(async () => finishOld([]))
   expect(row('Week 1')).toBeInTheDocument()
   expect(api.listDir).toHaveBeenCalledTimes(2)
