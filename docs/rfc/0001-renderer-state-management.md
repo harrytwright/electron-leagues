@@ -5,7 +5,7 @@
 | Status   | Proposed                                                                             |
 | Author   | Harry Wright (drafted with Claude)                                                   |
 | Date     | 2026-09-08                                                                           |
-| Baseline | `claude/sidebar-treeview-redesign-8thsrj` at `eaf857f` (304 tests passing)           |
+| Baseline | `claude/sidebar-treeview-redesign-8thsrj` at `8523525` (326 tests passing)           |
 | Scope    | Renderer only. Main-process code, IPC contracts and the on-disk model are unchanged. |
 
 ## Summary
@@ -38,12 +38,20 @@ Each is correct and each is tested, but the cost shows up in the code around the
   four with the members snapshot (its design says it is "re-requested on `tree:changed`").
 - **Refresh callbacks are drilled.** `refresh` travels `App → LeagueView → NewSeasonDialog`,
   `App → HomeView → NewLeagueDialog`, and `Toolbar → LocationSwitcher` as `onChanged` props, purely
-  so a leaf can ask the root to re-fetch.
+  so a leaf can ask the root to re-fetch. The application menu adds two more entry points: the
+  `refresh` command reaches each pane's `onRefresh` through `FileBrowserFrame`, and `App` mounts a
+  second `useLocationOperation` for the `open-location` / `new-location` commands, whose
+  `onChanged` is again `refresh`.
+- **Single-flight guards are per instance.** `useLocationOperation` keeps its own `running` ref,
+  so with one instance in `App` and one in `LocationSwitcher` the "only one location operation at
+  a time" rule holds per caller rather than app-wide.
 - **Navigation state is reported upward for one consumer.** `LeagueView` and `HomeView` call
   `onCurrentDirChange` so that `App` can hold `leagueNavigation` / `homeNavigation` with
   owner-path guards, all so `StatusBar` can print the current folder.
-- **Caches die with their component.** A league's listings are lost when you switch leagues and
-  re-fetched when you come back. `useTreeFolders` keeps its own branch cache per browser instance.
+- **Caches die with their owner.** Since `5ab115e` the browser panes stay mounted across folder
+  changes and `LeagueView` owns the `useTreeFolders` cache and tree sort, so they survive
+  navigation inside a league. They are still lost when you switch leagues, because `LeagueView`
+  is keyed on the league path, and re-fetched when you come back.
 - **UI memory is a bespoke store.** `lib/local-store.ts` hand-rolls per-location localStorage
   reads with zod guards; `App` tracks `restoredRoot` in a ref to know when to re-hydrate.
 - **Feedback plumbing is hand-rolled too.** `OperationFeedbackProvider` keeps a pending map and
@@ -66,8 +74,13 @@ plus a data grid and an import wizard.
 
 ## Non-goals
 
-- Replacing view-local `useState` for filter text, sort, crumbs, row selection or dialog open
-  flags. That state is deliberately reset by `key` when the view changes and should stay local.
+- Replacing view-local `useState` for filter text, crumbs, row selection or dialog open flags.
+  That state is deliberately reset when the folder changes, either by `key` or by the guarded
+  keyed-state pattern `useFileSelection(currentDir, …)` now uses, and should stay local. The tree
+  sort that `LeagueView` lifted in `5ab115e` is owner state, not app state, and stays where it is.
+- Turning the one-shot focus request (`pendingFocusDir` and `consumeFocusRequest` in
+  `LeagueView`) into store state. It is an imperative signal consumed once by the next mount and
+  a ref is the right tool for it.
 - Moving UI memory into `electron-store` in main. Worth a separate discussion (see open
   questions); this RFC keeps it in the renderer.
 - Rewriting `DirectoryBrowser` / `TreeFileBrowser` onto TanStack Table. Possible later; not
@@ -175,16 +188,18 @@ difference.
 
 **What replaces what**
 
-| Today                                                  | With Query                                                                                                                                                                                         |
-| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `phase` state machine in `App`                         | Derived: `isPending` → loading, `isError` → error, `data === null` → no-root, else ready                                                                                                           |
-| `scanGeneration`, `generation`, `requests` race guards | Query deduplicates in-flight fetches per key and drops results for a key no longer observed. `use-dir-listing.spec.ts`'s "slow earlier folder" case is a Query invariant.                          |
-| "Keep old rows during re-list, never across folders"   | Query's default: same key refetch keeps `data` with `isFetching`; a new key starts with no data. No `placeholderData` needed.                                                                      |
-| `useDirListing(dir)`                                   | Same signature, implemented as `useQuery({ ...dirListingQuery(dir), enabled: dir !== null })`. Components do not change in that phase.                                                             |
-| `useTreeFolders().branches`                            | `useQueries` over the expanded paths; `branches` becomes a derived `Map`.                                                                                                                          |
-| `onChanged` / `refresh` props                          | `useMutation` with `onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tree'] })`. `await`ing the invalidation preserves today's "dialog closes after the new season is visible" timing. |
-| `begin` / `finish` calls in each flow                  | A `MutationCache` with `onMutate` / `onSuccess` / `onError` reading `mutation.meta.label`, feeding the existing `OperationFeedbackContext`.                                                        |
-| `forgetAndRestart`                                     | `queryClient.setQueryData(treeQuery.queryKey, null)` plus `removeQueries` for `['dir']`.                                                                                                           |
+| Today                                                    | With Query                                                                                                                                                                                         |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `phase` state machine in `App`                           | Derived: `isPending` → loading, `isError` → error, `data === null` → no-root, else ready                                                                                                           |
+| `scanGeneration`, `generation`, `requests` race guards   | Query deduplicates in-flight fetches per key and drops results for a key no longer observed. `use-dir-listing.spec.ts`'s "slow earlier folder" case is a Query invariant.                          |
+| "Keep old rows during re-list, never across folders"     | Query's default: same key refetch keeps `data` with `isFetching`; a new key starts with no data. No `placeholderData` needed.                                                                      |
+| `useDirListing(dir)`                                     | Same signature, implemented as `useQuery({ ...dirListingQuery(dir), enabled: dir !== null })`. Components do not change in that phase.                                                             |
+| `useTreeFolders().branches`                              | `useQueries` over the expanded paths; `branches` becomes a derived `Map`. `LeagueView` still owns the hook and passes the same `TreeFolders` shape down, so `TreeFileBrowser` is untouched.        |
+| `refresh` app command → `onRefresh` → `listing.reload()` | `queryClient.invalidateQueries()`, the same call the watcher makes. A pane-scoped variant (`['dir', currentDir]`) is available if a full refresh ever proves too broad.                            |
+| `useLocationOperation`'s `busy` state and `running` ref  | `useMutation({ mutationKey: ['location'] })` for choose and switch, with `useIsMutating({ mutationKey: ['location'] })` as one app-wide guard shared by `App` and `LocationSwitcher`.              |
+| `onChanged` / `refresh` props                            | `useMutation` with `onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tree'] })`. `await`ing the invalidation preserves today's "dialog closes after the new season is visible" timing. |
+| `begin` / `finish` calls in each flow                    | A `MutationCache` with `onMutate` / `onSuccess` / `onError` reading `mutation.meta.label`, feeding the existing `OperationFeedbackContext`.                                                        |
+| `forgetAndRestart`                                       | `queryClient.setQueryData(treeQuery.queryKey, null)` plus `removeQueries` for `['dir']`.                                                                                                           |
 
 Structural sharing is a quiet win: `LeaguesTree` is plain JSON from IPC, so an unchanged league
 keeps its object identity across scans and memoised children stop re-rendering on every
@@ -234,10 +249,12 @@ parent both need, or that must survive a remount or a restart. Everything else s
 
 ### Sidebar tree view
 
-This branch is the sidebar tree-view redesign. If the sidebar and the season browser end up
-showing the same expanded folders, the `expanded` set moves from `useTreeFolders` into the
-workspace store and both read it. If they stay independent, it stays local. The RFC does not
-decide that; it only makes either choice cheap.
+This branch is the sidebar tree-view redesign. The expanded set and branch cache already moved
+one level up, from `TreeFileBrowser` to `LeagueView`, in `5ab115e`. If the sidebar and the
+season browser end up showing the same expanded folders, the next step is one more level: the
+`expanded` set moves into the workspace store and both read it, while the branch data itself is
+already shared through the Query cache. If they stay independent, it stays in `LeagueView`. The
+RFC does not decide that; it only makes either choice cheap.
 
 ### TanStack Table and Form, when members lands
 
@@ -295,10 +312,12 @@ the extra subscription is harmless.
    `use-dir-listing.spec.ts` cases become the acceptance test.
 3. **Tree and recents.** Move `scan` into `treeQuery`; derive `phase`; delete `scanGeneration`.
    Move `recentRoots` (used by `LocationSwitcher` and `FirstRun`) onto a query.
-   `useTreeFolders` becomes `useQueries` over the expanded set.
+   `useTreeFolders` becomes `useQueries` over the expanded set, keeping the `TreeFolders`
+   interface that `LeagueView` passes to `TreeFileBrowser`.
 4. **Mutations and feedback.** Convert create league, create season, sync templates, zip, trash,
    import and location switching to `useMutation` with `meta.label`. Route feedback through a
-   `MutationCache`. Remove the drilled `onChanged` props once no caller needs them.
+   `MutationCache`. Point the `refresh` and location app-command handlers at the query client.
+   Remove the drilled `onChanged` props once no caller needs them.
 5. **Workspace store.** Introduce `createWorkspaceStore`, migrate selection, current folder,
    collapsed days and diagnostics; delete `lib/local-store.ts` and the navigation state in
    `App`. Note the restoration-by-derivation behaviour change in the PR description.
