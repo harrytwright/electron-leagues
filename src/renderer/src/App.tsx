@@ -121,6 +121,7 @@ function AppContent(): React.JSX.Element {
     onMissingRecent: () => undefined
   })
   useAppCommandHandler('open-location', () => void locationOperation.choose('select'))
+  useAppCommandHandler('new-location', () => void locationOperation.choose('init'))
 
   const forgetAndRestart = useCallback(async () => {
     await window.api.forgetRoot()

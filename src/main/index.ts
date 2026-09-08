@@ -1,13 +1,13 @@
-import { electronApp, is, optimizer } from '@electron-toolkit/utils'
+import { electronApp, is } from '@electron-toolkit/utils'
 import { watch, type FSWatcher } from 'chokidar'
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron'
 import Store from 'electron-store'
 import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import icon from '../../resources/icon.png?asset'
 import type { Weekday } from '../shared/weekday'
-import { installAppShortcuts } from './lib/app-shortcuts'
+import { buildAppMenuTemplate, buildEditableContextMenuTemplate } from './lib/app-menu'
 import { capture, initAnalytics, shutdownAnalytics } from './lib/analytics'
 import { oneDriveStatus } from './lib/onedrive'
 import {
@@ -322,7 +322,7 @@ function createWindow(): void {
     minWidth: 800,
     minHeight: 500,
     show: false,
-    autoHideMenuBar: true,
+    autoHideMenuBar: process.platform !== 'darwin',
     titleBarStyle: 'hidden',
     // macOS needs the flag to expose titlebar-area CSS environment variables,
     // but only Windows and Linux accept configurable overlay options.
@@ -349,13 +349,24 @@ function createWindow(): void {
   }
 
   nativeTheme.on('updated', onThemeUpdated)
-  mainWindow.on('closed', () => nativeTheme.removeListener('updated', onThemeUpdated))
+  const createdWindow = mainWindow
+  mainWindow.on('closed', () => {
+    nativeTheme.removeListener('updated', onThemeUpdated)
+    if (mainWindow === createdWindow) mainWindow = null
+  })
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     void shell.openExternal(details.url)
     return { action: 'deny' }
+  })
+
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    if (!params.isEditable) return
+    Menu.buildFromTemplate(buildEditableContextMenuTemplate(params.editFlags)).popup({
+      window: createdWindow
+    })
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -368,17 +379,22 @@ function createWindow(): void {
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.gobowling.leagues')
 
-  app.on('browser-window-created', (_, window) => {
-    // Main owns application accelerators in development and production,
-    // preventing native reload without relying on renderer keydown delivery.
-    installAppShortcuts(window.webContents)
-    optimizer.watchWindowShortcuts(window)
-  })
-
   capture('app_opened', { platform: process.platform })
 
   registerIpc()
   createWindow()
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      buildAppMenuTemplate(process.platform, is.dev, (command) => {
+        if (!mainWindow || mainWindow.isDestroyed()) return
+        mainWindow.webContents.send('app:command', {
+          command,
+          repeat: false,
+          composing: false
+        })
+      })
+    )
+  )
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

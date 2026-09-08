@@ -35,13 +35,15 @@ it('shows loading, then FirstRun when scan returns null', async () => {
   expect(screen.queryByText(/loading…/i)).not.toBeInTheDocument()
 })
 
-it('opens a location from the application command during FirstRun', async () => {
+it('opens or creates a location from application commands during FirstRun', async () => {
   const api = installMockApi({ scan: vi.fn().mockResolvedValue(null) })
   render(<App />)
   await screen.findByRole('button', { name: /open location/i })
 
   act(() => emitAppCommand({ command: 'open-location', repeat: false, composing: false }))
-  expect(api.chooseRoot).toHaveBeenCalledExactlyOnceWith('select')
+  await waitFor(() => expect(api.chooseRoot).toHaveBeenCalledExactlyOnceWith('select'))
+  act(() => emitAppCommand({ command: 'new-location', repeat: false, composing: false }))
+  await waitFor(() => expect(api.chooseRoot).toHaveBeenLastCalledWith('init'))
 })
 
 it('shows Home on Shared documents and reports that directory in the status bar', async () => {
