@@ -115,7 +115,14 @@ it('shows the archive row for zipped-only archives and hides it when empty', () 
 })
 
 it('selects league rows with one click and opens the keyboard-selected season with Enter', async () => {
-  const api = installMockApi()
+  const childPath = `${LEAGUE_PATH}/2024-25/Rules.docx`
+  const api = installMockApi({
+    listDir: vi.fn(
+      listingFor({
+        [`${LEAGUE_PATH}/2024-25`]: [makeDirEntry({ name: 'Rules.docx', path: childPath })]
+      })
+    )
+  })
   const user = userEvent.setup()
   const onCurrentDirChange = vi.fn()
   renderLeague(fullLeague(), onCurrentDirChange)
@@ -130,6 +137,41 @@ it('selects league rows with one click and opens the keyboard-selected season wi
   await user.keyboard('{Enter}')
   expect(onCurrentDirChange).toHaveBeenCalledExactlyOnceWith(`${LEAGUE_PATH}/2024-25`)
   expect(await screen.findByRole('treegrid', { name: '2024-25' })).toBeInTheDocument()
+  const child = await screen.findByRole('row', { name: 'Rules.docx' })
+  expect(document.activeElement).toBe(child)
+})
+
+it('keeps expanded tree folders when navigating into a sibling and back', async () => {
+  const seasonPath = `${LEAGUE_PATH}/2025-26`
+  const expandedPath = `${seasonPath}/Weekly results`
+  const siblingPath = `${seasonPath}/Admin`
+  installMockApi({
+    listDir: vi.fn(
+      listingFor({
+        [seasonPath]: [
+          makeDirEntry({ name: 'Weekly results', kind: 'folder', path: expandedPath }),
+          makeDirEntry({ name: 'Admin', kind: 'folder', path: siblingPath })
+        ],
+        [expandedPath]: [makeDirEntry({ name: 'Week 1', path: `${expandedPath}/Week 1.xlsx` })],
+        [siblingPath]: []
+      })
+    )
+  })
+  const user = userEvent.setup()
+  renderLeague()
+
+  await user.dblClick(screen.getByRole('row', { name: '2025-26' }))
+  await user.click(await screen.findByRole('button', { name: 'Expand Weekly results' }))
+  expect(await screen.findByRole('row', { name: 'Week 1' })).toBeInTheDocument()
+  await user.dblClick(screen.getByRole('row', { name: 'Admin' }))
+  await screen.findByText('This folder is empty')
+  await user.click(screen.getAllByRole('link', { name: '2025-26' })[0])
+
+  expect(await screen.findByRole('row', { name: 'Week 1' })).toBeInTheDocument()
+  expect(screen.getByRole('row', { name: 'Weekly results' })).toHaveAttribute(
+    'aria-expanded',
+    'true'
+  )
 })
 
 it('filters the league overview without reading folders and restores the season order', async () => {

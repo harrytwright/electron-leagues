@@ -1,10 +1,13 @@
+import { useCallback, useRef, useState } from 'react'
 import { useCrumbs } from '@renderer/hooks/use-crumbs'
 import { useDirListing } from '@renderer/hooks/use-dir-listing'
 import { useImportFiles } from '@renderer/hooks/use-import-files'
+import { useTreeFolders } from '@renderer/hooks/use-tree-folders'
 import { ImportFilesButton } from '@renderer/components/FileBrowser/components/ImportFilesButton'
 import { CrumbTrail } from '@renderer/components/CrumbTrail'
 import { DirectoryBrowser } from '@renderer/components/DirectoryBrowser'
 import { TreeFileBrowser } from '@renderer/components/TreeFileBrowser'
+import type { Sort } from '@renderer/components/TreeFileBrowser/interface'
 import type { Props } from './interface'
 
 export function FolderPane({
@@ -16,12 +19,31 @@ export function FolderPane({
 }: Props): React.JSX.Element {
   const trail = useCrumbs(baseDir, onCurrentDirChange)
   const listing = useDirListing(present ? trail.currentDir : null)
+  const tree = useTreeFolders()
+  const [sort, setSort] = useState<Sort>({ column: 'name', direction: 'ascending' })
+  const pendingFocusDir = useRef<string | null>(null)
   const importer = useImportFiles(present ? trail.currentDir : undefined, async () => {
     listing.reload()
     await onChanged()
   })
 
-  const jumpTo = trail.jumpTo
+  const consumeFocusRequest = useCallback((currentDir: string): boolean => {
+    if (pendingFocusDir.current !== currentDir) return false
+    pendingFocusDir.current = null
+    return true
+  }, [])
+  const enterMany = (
+    folders: Parameters<typeof trail.enterMany>[0],
+    focusFirstRow: boolean
+  ): void => {
+    const destination = folders.at(-1)
+    pendingFocusDir.current = focusFirstRow && destination ? destination.path : null
+    trail.enterMany(folders)
+  }
+  const jumpTo = (depth: number): void => {
+    pendingFocusDir.current = depth === 0 ? baseDir : trail.crumbs[depth - 1].path
+    trail.jumpTo(depth)
+  }
 
   return (
     <div role="tabpanel" aria-label={label} className="flex min-h-0 flex-1 flex-col">
@@ -34,16 +56,21 @@ export function FolderPane({
       </div>
       {present ? (
         <TreeFileBrowser
-          key={trail.currentDir}
+          currentDir={trail.currentDir}
           name={trail.crumbs.at(-1)?.name ?? label}
           listing={listing}
+          tree={tree}
+          sort={sort}
+          onSortChange={setSort}
           readOnly={false}
-          onNavigate={trail.enterMany}
+          onNavigate={enterMany}
+          consumeFocusRequest={consumeFocusRequest}
           onDropFiles={importer.importPaths}
           onBack={{ label: `Back to ${label}`, action: () => jumpTo(0) }}
         />
       ) : (
         <DirectoryBrowser
+          currentDir={baseDir}
           name={label}
           heading="Files"
           rows={[]}

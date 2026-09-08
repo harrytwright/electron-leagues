@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { Badge, Button, DropdownMenu, Text, useKumoToastManager } from '@cloudflare/kumo'
 import { DotsThreeIcon } from '@phosphor-icons/react'
 import type { SeasonNode } from '@shared/tree'
@@ -10,6 +10,7 @@ import { useCrumbs } from '@renderer/hooks/use-crumbs'
 import { useDirListing } from '@renderer/hooks/use-dir-listing'
 import { useImportFiles } from '@renderer/hooks/use-import-files'
 import { useOperationFeedback } from '@renderer/hooks/use-operation-feedback'
+import { useTreeFolders } from '@renderer/hooks/use-tree-folders'
 import { ImportFilesButton } from '../FileBrowser/components/ImportFilesButton'
 import { CrumbTrail } from '../CrumbTrail'
 import { DeleteResourceDialog, type DeleteTarget } from '../DeleteResourceDialog'
@@ -17,6 +18,7 @@ import { DirectoryBrowser, type BrowserRow } from '../DirectoryBrowser'
 import { IconButton } from '../IconButton'
 import { NewSeasonDialog } from '../NewSeasonDialog'
 import { TreeFileBrowser } from '../TreeFileBrowser'
+import type { Sort } from '../TreeFileBrowser/interface'
 import type { Props } from './interface'
 
 function seasonBadgeVariant(status: SeasonNode['status']): 'success' | 'info' {
@@ -35,6 +37,9 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null)
   const [zipping, setZipping] = useState<string | null>(null)
   const [syncingTemplates, setSyncingTemplates] = useState(false)
+  const [treeSort, setTreeSort] = useState<Sort>({ column: 'name', direction: 'ascending' })
+  const tree = useTreeFolders()
+  const pendingFocusDir = useRef<string | null>(null)
   const { add } = useKumoToastManager()
   const feedback = useOperationFeedback()
 
@@ -54,8 +59,27 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
     await onChanged()
   })
 
-  const enter = trail.enter
-  const jumpTo = trail.jumpTo
+  const consumeFocusRequest = useCallback((currentDir: string): boolean => {
+    if (pendingFocusDir.current !== currentDir) return false
+    pendingFocusDir.current = null
+    return true
+  }, [])
+  const enter = (row: BrowserRow, focusFirstRow: boolean): void => {
+    pendingFocusDir.current = focusFirstRow ? row.path : null
+    trail.enter(row)
+  }
+  const enterMany = (
+    folders: Parameters<typeof trail.enterMany>[0],
+    focusFirstRow: boolean
+  ): void => {
+    const destination = folders.at(-1)
+    pendingFocusDir.current = focusFirstRow && destination ? destination.path : null
+    trail.enterMany(folders)
+  }
+  const jumpTo = (depth: number): void => {
+    pendingFocusDir.current = depth === 0 ? league.path : trail.crumbs[depth - 1].path
+    trail.jumpTo(depth)
+  }
 
   const zip = async (name: string): Promise<void> => {
     if (zipping) return
@@ -253,17 +277,21 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
       <div className="flex min-h-0 w-full flex-1 flex-col">
         {inSeason ? (
           <TreeFileBrowser
-            key={trail.currentDir}
+            currentDir={trail.currentDir}
             name={trail.crumbs[trail.crumbs.length - 1].name}
             listing={listing}
+            tree={tree}
+            sort={treeSort}
+            onSortChange={setTreeSort}
             readOnly={inArchive}
-            onNavigate={trail.enterMany}
+            onNavigate={enterMany}
+            consumeFocusRequest={consumeFocusRequest}
             onDropFiles={inArchive ? undefined : importer.importPaths}
             onBack={{ label: `Back to ${league.meta.name}`, action: () => jumpTo(0) }}
           />
         ) : (
           <DirectoryBrowser
-            key={trail.currentDir}
+            currentDir={trail.currentDir}
             name={trail.atBase ? league.meta.name : trail.crumbs[trail.crumbs.length - 1].name}
             heading={
               trail.atBase ? 'Seasons and files' : atArchiveRoot ? 'Archived seasons' : 'Files'
@@ -277,6 +305,7 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
               else listing.reload()
             }}
             onNavigate={enter}
+            consumeFocusRequest={consumeFocusRequest}
             onDropFiles={inArchive ? undefined : importer.importPaths}
             onBack={{ label: `Back to ${league.meta.name}`, action: () => jumpTo(0) }}
             emptyTitle={trail.atBase ? 'No seasons yet' : 'This folder is empty'}

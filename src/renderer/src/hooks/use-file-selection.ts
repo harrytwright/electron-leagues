@@ -3,14 +3,20 @@ import { useRef, useState, type ComponentPropsWithRef, type KeyboardEvent } from
 interface Selection {
   selected: string | null
   focus: (path: string | undefined) => void
+  focusFirstRow: () => void
   rowProps: (path: string) => ComponentPropsWithRef<'tr'>
   onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>, index: number, open: () => void) => void
 }
 
 /** Roving row focus shared by flat and tree grids; tree-specific keys stay with the tree. */
-export function useFileSelection(paths: readonly string[]): Selection {
-  const [selected, setSelected] = useState<string | null>(null)
+export function useFileSelection(currentDir: string, paths: readonly string[]): Selection {
+  const [state, setState] = useState<{ dir: string; selected: string | null }>({
+    dir: currentDir,
+    selected: null
+  })
+  if (state.dir !== currentDir) setState({ dir: currentDir, selected: null })
   const elements = useRef(new Map<string, HTMLTableRowElement>())
+  const selected = state.dir === currentDir ? state.selected : null
   const focusPath = selected !== null && paths.includes(selected) ? selected : paths[0]
   const focus = (path: string | undefined): void => {
     if (path !== undefined) elements.current.get(path)?.focus()
@@ -18,6 +24,7 @@ export function useFileSelection(paths: readonly string[]): Selection {
   return {
     selected,
     focus,
+    focusFirstRow: () => focus(paths[0]),
     rowProps: (path) => ({
       ref: (element) => {
         if (element) elements.current.set(path, element)
@@ -25,7 +32,7 @@ export function useFileSelection(paths: readonly string[]): Selection {
       },
       'aria-selected': selected === path,
       tabIndex: focusPath === path ? 0 : -1,
-      onFocus: () => setSelected(path),
+      onFocus: () => setState({ dir: currentDir, selected: path }),
       onClick: () => focus(path)
     }),
     onKeyDown: (event, index, open) => {

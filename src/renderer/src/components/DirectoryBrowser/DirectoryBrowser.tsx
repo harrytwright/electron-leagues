@@ -8,7 +8,7 @@ import { FileActionsButton } from '../FileBrowser/components/FileActionsButton'
 import { FileModified } from '../FileBrowser/components/FileModified'
 import { useFileActions } from '@renderer/hooks/use-file-actions'
 import { useFileSelection } from '@renderer/hooks/use-file-selection'
-import { useId, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { Table } from '@cloudflare/kumo'
 import { FileBrowserFrame } from '../FileBrowser/components/FileBrowserFrame'
 import { FileEntryIcon } from '../FileBrowser/components/FileEntryIcon'
@@ -21,6 +21,7 @@ import { useRowActionsMenu } from '@renderer/hooks/use-row-actions-menu'
 
 /** Flat directory pane for the league overview and its archive, preserving scan order. */
 export function DirectoryBrowser({
+  currentDir,
   name,
   heading,
   rows,
@@ -29,24 +30,37 @@ export function DirectoryBrowser({
   listing,
   onRefresh,
   onNavigate,
+  consumeFocusRequest,
   onDropFiles,
   onBack,
   emptyTitle,
   emptyDescription
 }: Props): React.JSX.Element {
-  const [query, setQuery] = useState('')
+  const [queryState, setQueryState] = useState({ dir: currentDir, value: '' })
+  if (queryState.dir !== currentDir) setQueryState({ dir: currentDir, value: '' })
+  const query = queryState.dir === currentDir ? queryState.value : ''
+  const setQuery = (value: string): void => setQueryState({ dir: currentDir, value })
   const instructions = useId()
   const { openFile, revealFile } = useFileActions()
   const filter = query.trim().toLocaleLowerCase()
   const visible = rows.filter((row) => row.name.toLocaleLowerCase().includes(filter))
   const rowMenu = useRowActionsMenu(visible.map((row) => row.path))
-  const selection = useFileSelection(visible.map((row) => row.path))
+  const selection = useFileSelection(
+    currentDir,
+    visible.map((row) => row.path)
+  )
   const selectedRow = visible.find((row) => row.path === selection.selected)
   const loading = listing?.entries === null
   const error = listing?.error
 
-  const open = async (row: BrowserRow): Promise<void> => {
-    if (row.kind === 'folder') onNavigate(row)
+  useEffect(() => {
+    if (listing?.entries !== null && consumeFocusRequest?.(currentDir)) {
+      selection.focusFirstRow()
+    }
+  }, [consumeFocusRequest, currentDir, listing?.entries, selection])
+
+  const open = async (row: BrowserRow, focusFirstRow = false): Promise<void> => {
+    if (row.kind === 'folder') onNavigate(row, focusFirstRow)
     else await openFile(row.path)
   }
 
@@ -154,7 +168,7 @@ export function DirectoryBrowser({
                     openContextMenu(event, row)
                     return
                   }
-                  selection.onKeyDown(event, index, () => void open(row))
+                  selection.onKeyDown(event, index, () => void open(row, true))
                 }}
               >
                 <Table.Cell>

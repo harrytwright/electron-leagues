@@ -9,6 +9,7 @@ export function OtherPane({ entries, root, onChanged }: Props): React.JSX.Elemen
         <CrumbTrail names={['Other items']} onNavigate={() => {}} />
       </div>
       <DirectoryBrowser
+        currentDir={root}
         name="Other items"
         heading="Other items"
         rows={entries.map((entry) => ({ ...entry, key: entry.path }))}

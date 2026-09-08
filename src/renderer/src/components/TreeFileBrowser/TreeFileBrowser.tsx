@@ -8,7 +8,7 @@ import { FileActionsButton } from '../FileBrowser/components/FileActionsButton'
 import { FileModified } from '../FileBrowser/components/FileModified'
 import { useFileActions } from '@renderer/hooks/use-file-actions'
 import { useFileSelection } from '@renderer/hooks/use-file-selection'
-import { Fragment, useId, useState } from 'react'
+import { Fragment, useEffect, useId, useState } from 'react'
 import { Button, cn, Loader, Table } from '@cloudflare/kumo'
 import { ArrowDownIcon } from '@phosphor-icons/react/dist/csr/ArrowDown'
 import { ArrowUpIcon } from '@phosphor-icons/react/dist/csr/ArrowUp'
@@ -21,40 +21,54 @@ import { FileEntryIcon } from '../FileBrowser/components/FileEntryIcon'
 import { fileType } from '../FileBrowser/file-type'
 import { FILE_ROW_CLASS, FILE_TABLE_CLASS } from '../FileBrowser/styles'
 import { fileRows } from './file-tree'
-import type { FileRow, Props, Sort, SortColumn } from './interface'
-import { useTreeFolders } from '@renderer/hooks/use-tree-folders'
+import type { FileRow, Props, SortColumn } from './interface'
 import { revealLabel } from '@renderer/lib/reveal-label'
 import { useRowActionsMenu } from '@renderer/hooks/use-row-actions-menu'
 import type { RowMenuItem } from '../FileBrowser/row'
 
 export function TreeFileBrowser({
+  currentDir,
   name,
   listing,
+  tree,
+  sort,
+  onSortChange,
   readOnly,
   onNavigate,
+  consumeFocusRequest,
   onDropFiles,
   onBack
 }: Props): React.JSX.Element {
-  const tree = useTreeFolders()
-  const [query, setQuery] = useState('')
-  const [sort, setSort] = useState<Sort>({ column: 'name', direction: 'ascending' })
+  const [queryState, setQueryState] = useState({ dir: currentDir, value: '' })
+  if (queryState.dir !== currentDir) setQueryState({ dir: currentDir, value: '' })
+  const query = queryState.dir === currentDir ? queryState.value : ''
+  const setQuery = (value: string): void => setQueryState({ dir: currentDir, value })
   const instructions = useId()
   const { openFile, revealFile } = useFileActions()
   const filter = query.trim().toLocaleLowerCase()
   const rows = fileRows(listing.entries ?? [], tree.branches, tree.expanded, sort, filter)
   const rowMenu = useRowActionsMenu(rows.map((row) => row.entry.path))
-  const selection = useFileSelection(rows.map((row) => row.entry.path))
+  const selection = useFileSelection(
+    currentDir,
+    rows.map((row) => row.entry.path)
+  )
   const selectedRow = rows.find((row) => row.entry.path === selection.selected)
   const folderCount = listing.entries?.filter((entry) => entry.kind === 'folder').length ?? 0
   const fileCount = (listing.entries?.length ?? 0) - folderCount
+
+  useEffect(() => {
+    if (listing.entries !== null && consumeFocusRequest?.(currentDir)) {
+      selection.focusFirstRow()
+    }
+  }, [consumeFocusRequest, currentDir, listing.entries, selection])
 
   const focus = (row: FileRow | undefined): void => {
     if (row) selection.focus(row.entry.path)
   }
 
-  const open = async (row: FileRow): Promise<void> => {
+  const open = async (row: FileRow, focusFirstRow = false): Promise<void> => {
     if (row.entry.kind === 'folder') {
-      onNavigate([...row.ancestors, row.entry])
+      onNavigate([...row.ancestors, row.entry], focusFirstRow)
       return
     }
     await openFile(row.entry.path)
@@ -111,18 +125,18 @@ export function TreeFileBrowser({
         }
         break
       default:
-        selection.onKeyDown(event, index, () => void open(row))
+        selection.onKeyDown(event, index, () => void open(row, true))
         return
     }
     event.preventDefault()
   }
 
   const sortBy = (column: SortColumn): void => {
-    setSort((current) => ({
+    onSortChange({
       column,
       direction:
-        current.column === column && current.direction === 'ascending' ? 'descending' : 'ascending'
-    }))
+        sort.column === column && sort.direction === 'ascending' ? 'descending' : 'ascending'
+    })
   }
 
   const refresh = (): void => {

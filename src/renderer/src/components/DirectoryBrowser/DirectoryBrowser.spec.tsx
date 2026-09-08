@@ -14,6 +14,7 @@ function row(name: string, kind: BrowserRow['kind'] = 'file', mtime?: number): B
 function renderBrowser(rows: BrowserRow[], props: Partial<Props> = {}): void {
   renderWithProviders(
     <DirectoryBrowser
+      currentDir="/documents"
       name="Documents"
       heading="Files"
       rows={rows}
@@ -37,7 +38,10 @@ it('selects rows without opening, then opens files with Enter and folders with d
   await user.keyboard('{Enter}')
   expect(api.openFile).toHaveBeenCalledWith('/documents/a.xlsx')
   await user.dblClick(screen.getByRole('row', { name: 'sub' }))
-  expect(onNavigate).toHaveBeenCalledWith(expect.objectContaining({ path: '/documents/sub' }))
+  expect(onNavigate).toHaveBeenCalledWith(
+    expect.objectContaining({ path: '/documents/sub' }),
+    false
+  )
 })
 
 it('moves row focus with arrows and Home/End, leaving menu key events alone', async () => {

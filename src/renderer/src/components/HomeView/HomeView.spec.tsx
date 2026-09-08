@@ -61,6 +61,27 @@ it('keeps genuine reserved-folder repair failures transparent and recoverable', 
   expect(api.listDir).not.toHaveBeenCalled()
 })
 
+it('focuses the first child row after opening a Home folder with Enter', async () => {
+  const folder = makeDirEntry({ name: 'Admin', kind: 'folder', path: '/root/_shared/Admin' })
+  installMockApi({
+    listDir: vi.fn((dir: string) =>
+      Promise.resolve(
+        dir === '/root/_shared'
+          ? [folder]
+          : [makeDirEntry({ name: 'Contacts.docx', path: `${folder.path}/Contacts.docx` })]
+      )
+    )
+  })
+  const user = userEvent.setup()
+  renderHome()
+
+  await user.click(await screen.findByRole('row', { name: 'Admin' }))
+  await user.keyboard('{Enter}')
+
+  const child = await screen.findByRole('row', { name: 'Contacts.docx' })
+  expect(document.activeElement).toBe(child)
+})
+
 it('only offers Other items when needed, opening files and revealing folders', async () => {
   const api = installMockApi()
   const user = userEvent.setup()

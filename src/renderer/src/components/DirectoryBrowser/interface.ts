@@ -5,6 +5,7 @@ import type { BackAction } from '../FileBrowser/interface'
 export type { BrowserRow } from '../FileBrowser/row'
 
 export interface Props {
+  currentDir: string
   name: string
   heading: string
   rows: BrowserRow[]
@@ -12,7 +13,8 @@ export interface Props {
   readOnly: boolean
   listing?: DirListing
   onRefresh: () => void
-  onNavigate: (row: BrowserRow) => void
+  onNavigate: (row: BrowserRow, focusFirstRow: boolean) => void
+  consumeFocusRequest?: (currentDir: string) => boolean
   onDropFiles?: (paths: string[]) => void | Promise<void>
   onBack?: BackAction
   emptyTitle: string
