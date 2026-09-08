@@ -14,7 +14,7 @@ function TaskDialogRoot({
 }: TaskDialogProps): React.JSX.Element {
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog size={size} className="w-full max-w-lg p-5">
+      <Dialog size={size} className="app-modal w-full max-w-lg p-5">
         {children}
       </Dialog>
     </Dialog.Root>

@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import type { LeaguesTree } from '@shared/tree'
@@ -35,6 +35,15 @@ it('shows loading, then FirstRun when scan returns null', async () => {
   expect(screen.queryByText(/loading…/i)).not.toBeInTheDocument()
 })
 
+it('opens a location from the application command during FirstRun', async () => {
+  const api = installMockApi({ scan: vi.fn().mockResolvedValue(null) })
+  render(<App />)
+  await screen.findByRole('button', { name: /open location/i })
+
+  act(() => emitAppCommand({ command: 'open-location', repeat: false, composing: false }))
+  expect(api.chooseRoot).toHaveBeenCalledExactlyOnceWith('select')
+})
+
 it('shows Home on Shared documents and reports that directory in the status bar', async () => {
   installMockApi({ scan: vi.fn().mockResolvedValue(makeTree()) })
 
@@ -55,8 +64,13 @@ it('routes application commands to the visible browser and location control', as
   await screen.findByRole('heading', { name: 'Home' })
 
   act(() => emitAppCommand({ command: 'focus-filter', repeat: false, composing: false }))
-  const filter = screen.getByRole('textbox', { name: 'Filter loaded files' })
+  const filter = screen.getByRole<HTMLInputElement>('textbox', { name: 'Filter loaded files' })
   expect(filter).toHaveFocus()
+  fireEvent.change(filter, { target: { value: 'rules' } })
+  filter.setSelectionRange(2, 2)
+  act(() => emitAppCommand({ command: 'focus-filter', repeat: false, composing: false }))
+  expect(filter.selectionStart).toBe(0)
+  expect(filter.selectionEnd).toBe(5)
   filter.blur()
 
   const listCalls = vi.mocked(api.listDir).mock.calls.length

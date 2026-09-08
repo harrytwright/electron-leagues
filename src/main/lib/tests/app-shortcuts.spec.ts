@@ -4,7 +4,7 @@ import { vi } from 'vitest'
 
 const input = (overrides: Partial<ShortcutInput> = {}): ShortcutInput => ({
   type: 'keyDown',
-  key: 'r',
+  code: 'KeyR',
   control: true,
   meta: false,
   alt: false,
@@ -39,9 +39,11 @@ it('prevents the owned accelerator and forwards exactly one typed command', () =
 
 describe('appCommandForInput', () => {
   it('maps the three exact Windows/Linux application shortcuts', () => {
-    expect(appCommandForInput(input({ key: 'O' }), 'win32')?.command).toBe('open-location')
+    expect(appCommandForInput(input({ code: 'KeyO', shift: true }), 'win32')?.command).toBe(
+      'open-location'
+    )
     expect(appCommandForInput(input(), 'linux')?.command).toBe('refresh')
-    expect(appCommandForInput(input({ key: 'f' }), 'win32')?.command).toBe('focus-filter')
+    expect(appCommandForInput(input({ code: 'KeyF' }), 'win32')?.command).toBe('focus-filter')
   })
 
   it('uses Command alone on macOS', () => {
@@ -53,9 +55,16 @@ describe('appCommandForInput', () => {
 
   it('rejects additional modifiers and unrelated native shortcuts', () => {
     expect(appCommandForInput(input({ shift: true }), 'linux')).toBeNull()
+    expect(appCommandForInput(input({ code: 'KeyO' }), 'linux')).toBeNull()
     expect(appCommandForInput(input({ alt: true }), 'linux')).toBeNull()
-    expect(appCommandForInput(input({ key: 'x' }), 'linux')).toBeNull()
+    expect(appCommandForInput(input({ code: 'KeyX' }), 'linux')).toBeNull()
     expect(appCommandForInput(input({ type: 'keyUp' }), 'linux')).toBeNull()
+  })
+
+  it('matches the physical key code for non-Latin keyboard layouts', () => {
+    expect(appCommandForInput(input({ code: 'KeyO', shift: true }), 'linux')?.command).toBe(
+      'open-location'
+    )
   })
 
   it('preserves repeat and composition boundary state for renderer guards', () => {

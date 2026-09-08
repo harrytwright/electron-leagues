@@ -12,7 +12,6 @@ import { pathBasename } from '@renderer/lib/path-basename'
 import { revealLabel } from '@renderer/lib/reveal-label'
 import { useLocationOperation } from '@renderer/hooks/use-location-operation'
 import type { Props } from './interface'
-import { useAppCommandHandler } from '@renderer/hooks/use-app-commands'
 import { appShortcutLabel } from '@renderer/lib/app-shortcut-label'
 
 /** Select-styled menu of the current and recent leagues folders. */
@@ -36,7 +35,6 @@ export function LocationSwitcher({ root, onChanged }: Props): React.JSX.Element 
   const locations = recents.includes(root) ? recents : [root, ...recents]
   const locationOperation = useLocationOperation({ root, onChanged, onMissingRecent: loadRecents })
   const openLocation = (): void => void locationOperation.choose('select')
-  useAppCommandHandler('open-location', openLocation)
 
   const reveal = async (): Promise<void> => {
     try {

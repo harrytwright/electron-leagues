@@ -33,7 +33,12 @@ export function FileBrowserFrame({
   const canDrop = !readOnly && onDropFiles !== undefined
 
   useAppCommandHandler('refresh', onRefresh)
-  useAppCommandHandler('focus-filter', () => filterRef.current?.focus())
+  useAppCommandHandler('focus-filter', () => {
+    const filter = filterRef.current
+    if (!filter) return
+    if (document.activeElement === filter) filter.select()
+    else filter.focus()
+  })
 
   return (
     <section

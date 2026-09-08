@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'vitest'
 import { revealLabel } from '../reveal-label'
 import { trashLabel } from '../trash-label'
+import { appShortcutAria, appShortcutLabel } from '../app-shortcut-label'
 
 function pretendPlatform(platform: string): void {
   Object.defineProperty(window, 'electron', {
@@ -27,4 +28,14 @@ test.each([
 
 test('reads as linux when the bridge is absent', () => {
   expect(revealLabel()).toBe('Show in file manager')
+})
+
+test.each([
+  ['darwin', '⇧⌘O', 'Meta+Shift+O'],
+  ['win32', 'Ctrl+Shift+O', 'Control+Shift+O'],
+  ['linux', 'Ctrl+Shift+O', 'Control+Shift+O']
+])('open-location shortcut labels for %s', (platform, visible, aria) => {
+  pretendPlatform(platform)
+  expect(appShortcutLabel('O')).toBe(visible)
+  expect(appShortcutAria('O')).toBe(aria)
 })

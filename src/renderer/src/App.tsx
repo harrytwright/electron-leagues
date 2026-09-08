@@ -11,7 +11,8 @@ import { OperationFeedbackProvider } from './components/OperationFeedbackProvide
 import { ipcErrorMessage } from './lib/ipc-error'
 import { loadSelection, saveSelection } from './lib/local-store'
 import { findLeague, HOME, restoreSelection, type Selection } from './lib/selection'
-import { useAppCommands } from './hooks/use-app-commands'
+import { useAppCommandHandler, useAppCommands } from './hooks/use-app-commands'
+import { useLocationOperation } from './hooks/use-location-operation'
 
 type Phase = 'loading' | 'no-root' | 'ready' | 'error'
 
@@ -113,6 +114,13 @@ function AppContent(): React.JSX.Element {
       setPhase('error')
     }
   }, [])
+
+  const locationOperation = useLocationOperation({
+    root: tree?.root ?? '',
+    onChanged: refresh,
+    onMissingRecent: () => undefined
+  })
+  useAppCommandHandler('open-location', () => void locationOperation.choose('select'))
 
   const forgetAndRestart = useCallback(async () => {
     await window.api.forgetRoot()

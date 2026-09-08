@@ -14,8 +14,12 @@ function isEditable(element: Element | null): boolean {
 }
 
 function overlayOpen(): boolean {
+  // Kumo Dialog drops arbitrary ARIA props; TaskDialog marks its modal popup
+  // through the supported className prop. Toasts carry neither this marker nor aria-modal=true.
   return Boolean(
-    document.querySelector('[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]')
+    document.querySelector(
+      '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"], [role="dialog"].app-modal, [role="alertdialog"].app-modal, [role="menu"], [role="listbox"]'
+    )
   )
 }
 
@@ -44,7 +48,7 @@ export function useAppCommands(): void {
           event.repeat ||
           event.composing ||
           overlayOpen() ||
-          isEditable(document.activeElement)
+          (event.command === 'open-location' && isEditable(document.activeElement))
         ) {
           return
         }

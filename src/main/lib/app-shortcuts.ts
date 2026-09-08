@@ -2,7 +2,7 @@ import type { AppCommand, AppCommandEvent } from '../../shared/app-command'
 
 export interface ShortcutInput {
   type: string
-  key: string
+  code: string
   control: boolean
   meta: boolean
   alt: boolean
@@ -30,18 +30,21 @@ export function appCommandForInput(
 ): AppCommandEvent | null {
   const primary =
     platform === 'darwin' ? input.meta && !input.control : input.control && !input.meta
-  if (!primary || input.alt || input.shift) return null
+  if (!primary || input.alt) return null
 
   if (input.type !== 'keyDown') return null
   let command: AppCommand | undefined
-  switch (input.key.toLocaleLowerCase()) {
-    case 'o':
+  switch (input.code) {
+    case 'KeyO':
+      if (!input.shift) return null
       command = 'open-location'
       break
-    case 'r':
+    case 'KeyR':
+      if (input.shift) return null
       command = 'refresh'
       break
-    case 'f':
+    case 'KeyF':
+      if (input.shift) return null
       command = 'focus-filter'
       break
   }
