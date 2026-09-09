@@ -1,13 +1,15 @@
+---
+Status: Accepted
+Author: Claude
+Created: 2026-09-06
+Updated: 2026-09-09
+Baseline: TBC
+Reviewer: Harry Wright <haroldtomwright@gmail.com>
+---
+
 # RFC 0001: League members database
 
-|            |                                                                        |
-| ---------- | ---------------------------------------------------------------------- |
-| Status     | Accepted                                                               |
-| Author     | Harry Wright                                                           |
-| Created    | 2026-09-06                                                             |
-| Updated    | 2026-09-09                                                             |
-| Baseline   | `321fd9f` on `claude/league-members-database-3jt90g`                   |
-| Supersedes | The export-driven draft at `docs/members-database-design.md` (removed) |
+> Supersedes: The export-driven draft at `docs/members-database-design.md` (removed)
 
 ## Summary
 
