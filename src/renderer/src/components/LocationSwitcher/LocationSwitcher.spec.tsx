@@ -83,7 +83,7 @@ it('explains when a remembered location cannot be used and refreshes the list', 
   const menu = await openMenu(user)
   await user.click(await within(menu).findByRole('menuitemradio', { name: /^leagues/ }))
 
-  expect(await screen.findByText('That folder is no longer available')).toBeInTheDocument()
+  expect(await screen.findByText(`“leagues” is no longer available at ${USB}`)).toBeInTheDocument()
   expect(api.setRoot).toHaveBeenCalledWith(USB)
   expect(onChanged).not.toHaveBeenCalled()
   expect(recentRoots).toHaveBeenCalledTimes(2)
@@ -101,9 +101,25 @@ it('reports a missing location even when refreshing recents also fails', async (
   const menu = await openMenu(user)
   await user.click(await within(menu).findByRole('menuitemradio', { name: /^leagues/ }))
 
-  expect(await screen.findByText('That folder is no longer available')).toBeInTheDocument()
+  expect(await screen.findByText(`“leagues” is no longer available at ${USB}`)).toBeInTheDocument()
   await waitFor(() => expect(recentRoots).toHaveBeenCalledTimes(2))
   expect(screen.queryByText('Recents failed')).not.toBeInTheDocument()
+})
+
+it('names a missing Windows location and includes its full path', async () => {
+  const windowsPath = 'C:\\Users\\me\\Bowling leagues'
+  installMockApi({
+    recentRoots: vi.fn().mockResolvedValueOnce([CURRENT, windowsPath]).mockResolvedValue([CURRENT]),
+    setRoot: vi.fn().mockResolvedValue(null)
+  })
+  const user = userEvent.setup()
+  renderWithProviders(<LocationSwitcher root={CURRENT} onChanged={vi.fn()} />)
+
+  const menu = await openMenu(user)
+  await user.click(await within(menu).findByRole('menuitemradio', { name: /^Bowling leagues/ }))
+  expect(
+    await screen.findByText(`“Bowling leagues” is no longer available at ${windowsPath}`)
+  ).toBeInTheDocument()
 })
 
 it('creates a new location through the native picker', async () => {

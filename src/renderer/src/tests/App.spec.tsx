@@ -93,7 +93,8 @@ it('keeps opening status visible through a recent-location scan, then confirms c
   render(<App />)
 
   await user.click(await screen.findByRole('button', { name: /leagues.*\/recent\/leagues/i }))
-  expect(screen.getByRole('status')).toHaveTextContent('Opening location…')
+  // Kumo's row spinner is also a status, with the accessible name "Loading".
+  expect(screen.getByRole('status', { name: '' })).toHaveTextContent('Opening location…')
   expect(screen.queryByText('Opened location')).not.toBeInTheDocument()
 
   await act(async () => {

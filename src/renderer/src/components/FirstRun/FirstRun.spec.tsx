@@ -1,9 +1,25 @@
-import { act, screen, waitFor } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import { FirstRun } from './index'
 import { installMockApi } from '../../tests/mock-api'
 import { renderWithProviders } from '../../tests/render-helpers'
+
+it('explains OneDrive setup with semantic headings and standard-size recent paths', async () => {
+  installMockApi({ recentRoots: vi.fn().mockResolvedValue(['/old/leagues']) })
+  renderWithProviders(<FirstRun onChosen={vi.fn()} />)
+
+  expect(screen.getByRole('heading', { level: 1, name: 'Bowling league documents' })).toHaveClass(
+    'text-xl'
+  )
+  expect(screen.getByText(/Pick the leagues folder inside your OneDrive/)).toHaveTextContent(
+    'Pick the leagues folder inside your OneDrive, or create a new one — the app creates the shared, templates and archive folders for you.'
+  )
+  expect(
+    await screen.findByRole('heading', { level: 2, name: 'Recent locations' })
+  ).toBeInTheDocument()
+  expect(screen.getByText('/old/leagues')).not.toHaveClass('text-sm')
+})
 
 it('choosing an existing folder calls chooseRoot and onChosen on success', async () => {
   const api = installMockApi({ chooseRoot: vi.fn().mockResolvedValue('/root') })
@@ -69,14 +85,53 @@ it('opens a recent location and waits for the resulting scan', async () => {
   await waitFor(() => expect(screen.getByRole('button', { name: /open location/i })).toBeEnabled())
 })
 
+it('shows loading only on the recent location being opened', async () => {
+  let finishSwitch!: (path: string | null) => void
+  installMockApi({
+    recentRoots: vi.fn().mockResolvedValue(['/old/leagues', '/other/leagues']),
+    setRoot: vi.fn(() => new Promise<string | null>((resolve) => (finishSwitch = resolve)))
+  })
+  const user = userEvent.setup()
+  renderWithProviders(<FirstRun onChosen={vi.fn()} />)
+  const chosen = await screen.findByRole('button', { name: /leagues.*\/old\/leagues/i })
+  const other = screen.getByRole('button', { name: /leagues.*\/other\/leagues/i })
+
+  await user.click(chosen)
+  expect(within(chosen).getByLabelText('Loading')).toBeInTheDocument()
+  expect(within(other).queryByLabelText('Loading')).not.toBeInTheDocument()
+  expect(chosen).toBeDisabled()
+  expect(other).toBeDisabled()
+
+  await act(async () => finishSwitch('/old/leagues'))
+})
+
+it('clears recent-location loading after a failed switch', async () => {
+  installMockApi({
+    recentRoots: vi.fn().mockResolvedValue(['/old/leagues']),
+    setRoot: vi.fn().mockRejectedValue(new Error('Location unavailable'))
+  })
+  const user = userEvent.setup()
+  renderWithProviders(<FirstRun onChosen={vi.fn()} />)
+  const recent = await screen.findByRole('button', { name: /leagues.*\/old\/leagues/i })
+
+  await user.click(recent)
+
+  expect(await screen.findByText('Location unavailable')).toBeInTheDocument()
+  expect(within(recent).queryByLabelText('Loading')).not.toBeInTheDocument()
+  expect(recent).toBeEnabled()
+})
+
 it('reports a missing recent location as a toast and removes it', async () => {
   const recentRoots = vi.fn().mockResolvedValueOnce(['/gone/leagues']).mockResolvedValueOnce([])
   installMockApi({ recentRoots, setRoot: vi.fn().mockResolvedValue(null) })
   const user = userEvent.setup()
   renderWithProviders(<FirstRun onChosen={vi.fn()} />)
 
-  await user.click(await screen.findByRole('button', { name: /leagues.*\/gone\/leagues/i }))
-  expect(await screen.findByText('That folder is no longer available')).toBeInTheDocument()
+  const recent = await screen.findByRole('button', { name: /leagues.*\/gone\/leagues/i })
+  await user.click(recent)
+  expect(
+    await screen.findByText('“leagues” is no longer available at /gone/leagues')
+  ).toBeInTheDocument()
   await waitFor(() => expect(screen.queryByText('/gone/leagues')).not.toBeInTheDocument())
 })
 

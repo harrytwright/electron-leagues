@@ -8,6 +8,7 @@ import type { Mode, Props } from './interface'
 
 export function FirstRun({ onChosen }: Props): React.JSX.Element {
   const [mode, setMode] = useState<Mode | null>(null)
+  const [openedPath, setOpenedPath] = useState<string | null>(null)
   const [recents, setRecents] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
   const loads = useRef(0)
@@ -48,15 +49,27 @@ export function FirstRun({ onChosen }: Props): React.JSX.Element {
     }
   }
 
+  const openRecent = async (path: string): Promise<void> => {
+    if (locationOperation.busy) return
+    setError(null)
+    setOpenedPath(path)
+    try {
+      await locationOperation.switchTo(path)
+    } finally {
+      setOpenedPath(null)
+    }
+  }
+
   return (
     <div className="flex h-full items-center justify-center bg-kumo-base px-6 py-5">
       <section className="grid max-h-full w-full max-w-lg gap-4 overflow-hidden rounded-lg bg-kumo-elevated px-5 py-4 ring ring-kumo-line">
         <div className="grid gap-1.5 text-left">
-          <Text as="h1" variant="heading">
+          <Text as="h1" variant="heading" size="lg">
             Bowling league documents
           </Text>
           <Text variant="secondary">
-            Open your leagues folder, create a new location, or continue from a recent location.
+            Pick the leagues folder inside your OneDrive, or create a new one — the app creates the
+            shared, templates and archive folders for you.
           </Text>
         </div>
         <div className="flex gap-3">
@@ -78,7 +91,7 @@ export function FirstRun({ onChosen }: Props): React.JSX.Element {
         </div>
         {recents.length > 0 ? (
           <div className="grid min-h-0 gap-1.5 overflow-hidden border-t border-kumo-line pt-3">
-            <Text as="h2" variant="heading3">
+            <Text as="h2" variant="heading">
               Recent locations
             </Text>
             <div className="grid gap-1 overflow-auto">
@@ -86,17 +99,17 @@ export function FirstRun({ onChosen }: Props): React.JSX.Element {
                 <Button
                   key={path}
                   variant="ghost"
-                  className="h-auto justify-start px-3 py-2 text-left"
+                  className="h-auto items-start justify-start px-3 py-2 text-left"
+                  loading={openedPath === path}
                   disabled={locationOperation.busy}
-                  onClick={() => {
-                    setError(null)
-                    void locationOperation.switchTo(path)
-                  }}
+                  onClick={() => void openRecent(path)}
                 >
-                  <FolderIcon aria-hidden className="shrink-0" />
+                  <span className="flex h-lh items-center">
+                    <FolderIcon aria-hidden className="shrink-0" />
+                  </span>
                   <span className="grid min-w-0 gap-0.5">
                     <span className="truncate">{pathBasename(path)}</span>
-                    <span className="truncate text-sm text-kumo-subtle">{path}</span>
+                    <span className="truncate text-kumo-subtle">{path}</span>
                   </span>
                 </Button>
               ))}
@@ -104,9 +117,11 @@ export function FirstRun({ onChosen }: Props): React.JSX.Element {
           </div>
         ) : null}
         {error ? (
-          <Text role="alert" variant="error" DANGEROUS_className="overflow-auto">
-            {error}
-          </Text>
+          <div className="overflow-auto">
+            <Text role="alert" variant="error">
+              {error}
+            </Text>
+          </div>
         ) : null}
       </section>
     </div>

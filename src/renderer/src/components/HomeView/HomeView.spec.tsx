@@ -40,7 +40,7 @@ it('starts on one full-height Shared documents browser and lazily opens Template
   expect(screen.getByRole('heading', { level: 1, name: 'Home' })).toBeInTheDocument()
   expect(screen.queryByText('/root')).not.toBeInTheDocument()
   expect(await screen.findByRole('treegrid', { name: 'Shared documents' })).toBeInTheDocument()
-  expect(screen.getByRole('row', { name: /^Opening times.docx/ })).toBeInTheDocument()
+  expect(await screen.findByRole('row', { name: /^Opening times.docx/ })).toBeInTheDocument()
   expect(api.listDir).toHaveBeenCalledExactlyOnceWith('/root/_shared')
   expect(onCurrentDirChange).toHaveBeenLastCalledWith('/root/_shared')
 

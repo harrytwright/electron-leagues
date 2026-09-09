@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { useKumoToastManager } from '@cloudflare/kumo'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
+import { pathBasename } from '@renderer/lib/path-basename'
 import { useOperationFeedback } from './use-operation-feedback'
 
 type ChooseRootMode = 'select' | 'init'
@@ -70,7 +71,7 @@ export function useLocationOperation({
     await run('Opening location', async () => {
       const switched = await window.api.setRoot(path)
       if (switched !== null) return true
-      const message = 'That folder is no longer available'
+      const message = `“${pathBasename(path)}” is no longer available at ${path}`
       void refreshMissingRecents()
       throw new Error(message)
     })
