@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { DropdownMenu, Text } from '@cloudflare/kumo'
 import { GaugeIcon } from '@phosphor-icons/react'
 import { loadDiagnosticsEnabled, saveDiagnosticsEnabled } from '@renderer/lib/local-store'
+import { pathTail } from '@renderer/lib/path-basename'
 import { useOperationFeedback } from '@renderer/hooks/use-operation-feedback'
 import { IconButton } from '../IconButton'
 import { DiagnosticsMetrics } from './components/DiagnosticsMetrics'
@@ -25,30 +26,32 @@ export function StatusBar({ path }: Props): React.JSX.Element {
     >
       <div className="min-w-0 flex-1">
         <Text truncate title={path}>
-          {path}
+          {pathTail(path)}
         </Text>
       </div>
-      <span role="status" aria-live="polite" className="max-w-64 min-w-0 truncate">
+      <div role="status" aria-live="polite" className="max-w-64 min-w-0 truncate">
         {activity?.state === 'pending' ? <Text variant="secondary">{activity.label}…</Text> : null}
-      </span>
-      <DiagnosticsMetrics enabled={diagnostics} />
-      <DropdownMenu>
-        <DropdownMenu.Trigger
-          render={
-            <IconButton
-              variant="ghost"
-              size="sm"
-              icon={<GaugeIcon aria-hidden />}
-              aria-label="Status options"
-            />
-          }
-        />
-        <DropdownMenu.Content align="end">
-          <DropdownMenu.CheckboxItem checked={diagnostics} onCheckedChange={toggleDiagnostics}>
-            Show diagnostics
-          </DropdownMenu.CheckboxItem>
-        </DropdownMenu.Content>
-      </DropdownMenu>
+      </div>
+      <DiagnosticsMetrics enabled={import.meta.env.DEV && diagnostics} />
+      {import.meta.env.DEV ? (
+        <DropdownMenu>
+          <DropdownMenu.Trigger
+            render={
+              <IconButton
+                variant="ghost"
+                size="sm"
+                icon={<GaugeIcon aria-hidden />}
+                aria-label="Status options"
+              />
+            }
+          />
+          <DropdownMenu.Content align="end">
+            <DropdownMenu.CheckboxItem checked={diagnostics} onCheckedChange={toggleDiagnostics}>
+              Show diagnostics
+            </DropdownMenu.CheckboxItem>
+          </DropdownMenu.Content>
+        </DropdownMenu>
+      ) : null}
     </footer>
   )
 }

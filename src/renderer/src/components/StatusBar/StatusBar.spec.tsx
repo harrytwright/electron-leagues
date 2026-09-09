@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 import { OperationFeedbackProvider } from '../OperationFeedbackProvider'
@@ -8,6 +8,7 @@ import { useOperationFeedback } from '@renderer/hooks/use-operation-feedback'
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.unstubAllEnvs()
   Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
 })
 
@@ -34,15 +35,35 @@ function renderStatus(): ReturnType<typeof render> {
 async function enableDiagnostics(): Promise<void> {
   const user = userEvent.setup()
   await user.click(screen.getByRole('button', { name: 'Status options' }))
-  await user.click(await screen.findByRole('menuitemcheckbox', { name: 'Show diagnostics' }))
+  const menu = await screen.findByRole('menu')
+  await user.click(within(menu).getByRole('menuitemcheckbox', { name: 'Show diagnostics' }))
 }
 
-it('keeps the complete path visible and leaves diagnostics off by default', () => {
+it('shows the last three POSIX segments while retaining the complete path title', () => {
   const api = installMockApi()
   renderStatus()
   const path = '/root/monday/Mixed triples/2025-26/Week 1'
-  expect(screen.getByTitle(path)).toHaveTextContent(path)
+  expect(screen.getByTitle(path)).toHaveTextContent('…/Mixed triples/2025-26/Week 1')
   expect(api.getRendererMetrics).not.toHaveBeenCalled()
+})
+
+it('uses Windows separators and leaves short paths intact', () => {
+  installMockApi()
+  const view = render(
+    <OperationFeedbackProvider>
+      <StatusBar path={'C:\\Leagues\\monday\\Pairs\\2025-26'} />
+    </OperationFeedbackProvider>
+  )
+  expect(screen.getByTitle('C:\\Leagues\\monday\\Pairs\\2025-26')).toHaveTextContent(
+    '…\\monday\\Pairs\\2025-26'
+  )
+
+  view.rerender(
+    <OperationFeedbackProvider>
+      <StatusBar path="/root/monday" />
+    </OperationFeedbackProvider>
+  )
+  expect(screen.getByTitle('/root/monday')).toHaveTextContent('/root/monday')
 })
 
 it('updates an existing live region when the first operation starts', async () => {
@@ -54,6 +75,7 @@ it('updates an existing live region when the first operation starts', async () =
     </OperationFeedbackProvider>
   )
   const region = screen.getByRole('status')
+  expect(region.tagName).toBe('DIV')
   expect(region).toBeEmptyDOMElement()
   await userEvent.setup().click(screen.getByRole('button', { name: 'Start operation' }))
   expect(screen.getByRole('status')).toBe(region)
@@ -80,10 +102,22 @@ it('enables diagnostics from a checked status menu and persists the preference',
   expect(await screen.findByText('Heap 42 MB')).toBeInTheDocument()
   expect(localStorage.getItem('leagues:diagnostics:v1')).toBe('{"enabled":true}')
   await userEvent.setup().click(screen.getByRole('button', { name: 'Status options' }))
-  expect(await screen.findByRole('menuitemcheckbox', { name: 'Show diagnostics' })).toHaveAttribute(
+  const menu = await screen.findByRole('menu')
+  expect(within(menu).getByRole('menuitemcheckbox', { name: 'Show diagnostics' })).toHaveAttribute(
     'aria-checked',
     'true'
   )
+})
+
+it('hides diagnostics and does not poll in production even when the preference is stored', () => {
+  vi.stubEnv('DEV', false)
+  localStorage.setItem('leagues:diagnostics:v1', '{"enabled":true}')
+  const api = installMockApi()
+  renderStatus()
+
+  expect(screen.queryByRole('button', { name: 'Status options' })).not.toBeInTheDocument()
+  expect(screen.queryByText('Heap 42 MB')).not.toBeInTheDocument()
+  expect(api.getRendererMetrics).not.toHaveBeenCalled()
 })
 
 it('polls only while enabled and visible, and cleans up', async () => {
