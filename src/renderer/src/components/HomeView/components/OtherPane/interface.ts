@@ -4,4 +4,5 @@ export interface Props {
   entries: FileEntry[]
   root: string
   onChanged: () => void | Promise<void>
+  onCurrentDirChange: (path: string) => void
 }

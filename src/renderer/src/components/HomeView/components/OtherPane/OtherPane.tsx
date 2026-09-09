@@ -1,24 +1,69 @@
+import { useCallback, useRef } from 'react'
 import { CrumbTrail } from '@renderer/components/CrumbTrail'
 import { DirectoryBrowser } from '@renderer/components/DirectoryBrowser'
+import { useCrumbs } from '@renderer/hooks/use-crumbs'
+import { useDirListing } from '@renderer/hooks/use-dir-listing'
 import type { Props } from './interface'
 
-export function OtherPane({ entries, root, onChanged }: Props): React.JSX.Element {
+export function OtherPane({
+  entries,
+  root,
+  onChanged,
+  onCurrentDirChange
+}: Props): React.JSX.Element {
+  const trail = useCrumbs(root, onCurrentDirChange)
+  const listing = useDirListing(trail.currentDir)
+  const pendingFocusDir = useRef<string | null>(null)
+  const rootPaths = new Set(entries.map((entry) => entry.path))
+  const visibleEntries = trail.atBase
+    ? listing.entries?.filter((entry) => rootPaths.has(entry.path))
+    : listing.entries
+  const visibleListing = { ...listing, entries: visibleEntries ?? null }
+
+  const consumeFocusRequest = useCallback((currentDir: string): boolean => {
+    if (pendingFocusDir.current !== currentDir) return false
+    pendingFocusDir.current = null
+    return true
+  }, [])
+  const enter = (row: Parameters<typeof trail.enter>[0], focusFirstRow: boolean): void => {
+    pendingFocusDir.current = focusFirstRow ? row.path : null
+    trail.enter(row)
+  }
+  const jumpTo = (depth: number): void => {
+    pendingFocusDir.current = depth === 0 ? root : trail.crumbs[depth - 1].path
+    trail.jumpTo(depth)
+  }
+  const refresh = (): void => {
+    listing.reload()
+    void onChanged()
+  }
+
   return (
     <div role="tabpanel" aria-label="Other items" className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-10 shrink-0 items-center border-b border-kumo-line px-4 py-1">
-        <CrumbTrail names={['Other items']} onNavigate={() => {}} />
+        <CrumbTrail
+          names={['Other items', ...trail.crumbs.map((crumb) => crumb.name)]}
+          onNavigate={jumpTo}
+        />
       </div>
       <DirectoryBrowser
-        currentDir={root}
-        name="Other items"
-        heading="Other items"
-        rows={entries.map((entry) => ({ ...entry, key: entry.path }))}
-        metadataColumn="contents"
+        currentDir={trail.currentDir}
+        name={trail.crumbs.at(-1)?.name ?? 'Other items'}
+        heading="Files"
+        rows={(visibleEntries ?? []).map((entry) => ({ ...entry, key: entry.path }))}
+        metadataColumn="modified"
         readOnly={false}
-        onRefresh={() => void onChanged()}
-        onNavigate={(row) => void window.api.revealFile(row.path)}
+        listing={visibleListing}
+        onRefresh={refresh}
+        onNavigate={enter}
+        consumeFocusRequest={consumeFocusRequest}
+        onBack={
+          trail.atBase ? undefined : { label: 'Back to Other items', action: () => jumpTo(0) }
+        }
         emptyTitle="No other items"
-        emptyDescription={`Only items directly inside ${root} appear here.`}
+        emptyDescription={
+          trail.atBase ? `Only items directly inside ${root} appear here.` : 'This folder is empty.'
+        }
       />
     </div>
   )

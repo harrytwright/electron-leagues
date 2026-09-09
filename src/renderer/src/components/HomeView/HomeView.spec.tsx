@@ -1,10 +1,11 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import { HomeView } from './index'
 import { makeDirEntry, makeTree } from '../../tests/fixtures'
 import { installMockApi } from '../../tests/mock-api'
 import { renderWithProviders } from '../../tests/render-helpers'
+import { revealLabel } from '../../lib/reveal-label'
 
 function renderHome(
   tree = makeTree(),
@@ -82,24 +83,92 @@ it('focuses the first child row after opening a Home folder with Enter', async (
   expect(document.activeElement).toBe(child)
 })
 
-it('only offers Other items when needed, opening files and revealing folders', async () => {
-  const api = installMockApi()
+it('lists only scanned Other items at the root and navigates their folders in app', async () => {
+  const otherFolder = makeDirEntry({
+    name: 'Random stuff',
+    kind: 'folder',
+    path: '/root/Random stuff',
+    mtime: 1_750_000_000_000
+  })
+  const nestedFile = makeDirEntry({
+    name: 'notes.txt',
+    path: '/root/Random stuff/notes.txt',
+    mtime: 1_750_000_000_000
+  })
+  const api = installMockApi({
+    listDir: vi.fn((dir: string) =>
+      Promise.resolve(
+        dir === '/root'
+          ? [
+              otherFolder,
+              makeDirEntry({ name: '_shared', kind: 'folder', path: '/root/_shared' }),
+              makeDirEntry({ name: 'monday', kind: 'folder', path: '/root/monday' })
+            ]
+          : [nestedFile]
+      )
+    )
+  })
+  const onCurrentDirChange = vi.fn()
   const user = userEvent.setup()
   renderHome(
     makeTree({
       unrecognisedRootEntries: [
-        { name: 'Random stuff', kind: 'folder', path: '/root/Random stuff' },
-        { name: 'notes.txt', kind: 'file', path: '/root/notes.txt' }
+        { name: otherFolder.name, kind: otherFolder.kind, path: otherFolder.path }
       ]
-    })
+    }),
+    onCurrentDirChange
   )
 
   await user.click(screen.getByRole('tab', { name: 'Other items' }))
-  await user.dblClick(screen.getByRole('row', { name: /^Random stuff/ }))
-  await user.dblClick(screen.getByRole('row', { name: /^notes.txt/ }))
+  expect(await screen.findByRole('columnheader', { name: 'Modified' })).toBeInTheDocument()
+  expect(screen.getByRole('row', { name: /^Random stuff/ })).toBeInTheDocument()
+  expect(screen.getByText('15 Jun 2025')).toBeInTheDocument()
+  expect(screen.queryByRole('row', { name: /^_shared/ })).not.toBeInTheDocument()
+  expect(screen.queryByRole('row', { name: /^monday/ })).not.toBeInTheDocument()
+  expect(api.listDir).toHaveBeenLastCalledWith('/root')
 
-  expect(api.revealFile).toHaveBeenCalledWith('/root/Random stuff')
-  expect(api.openFile).toHaveBeenCalledWith('/root/notes.txt')
+  await user.dblClick(screen.getByRole('row', { name: /^Random stuff/ }))
+  expect(await screen.findByRole('row', { name: /^notes.txt/ })).toBeInTheDocument()
+  expect(onCurrentDirChange).toHaveBeenLastCalledWith(otherFolder.path)
+  expect(api.revealFile).not.toHaveBeenCalled()
+
+  await user.dblClick(screen.getByRole('row', { name: /^notes.txt/ }))
+  expect(api.openFile).toHaveBeenCalledWith(nestedFile.path)
+  expect(api.revealFile).not.toHaveBeenCalled()
+
+  await user.click(screen.getByRole('button', { name: 'Actions for notes.txt' }))
+  const menu = await screen.findByRole('menu')
+  await user.click(within(menu).getByRole('menuitem', { name: revealLabel() }))
+  expect(api.revealFile).toHaveBeenCalledWith(nestedFile.path)
+
+  await user.click(screen.getAllByRole('link', { name: 'Other items' })[0])
+  expect(await screen.findByRole('row', { name: /^Random stuff/ })).toBeInTheDocument()
+  expect(screen.queryByRole('row', { name: /^_shared/ })).not.toBeInTheDocument()
+  expect(onCurrentDirChange).toHaveBeenLastCalledWith('/root')
+})
+
+it('focuses the first child after opening an Other items folder with Enter', async () => {
+  const folder = makeDirEntry({ name: 'Extras', kind: 'folder', path: '/root/Extras' })
+  installMockApi({
+    listDir: vi.fn((dir: string) =>
+      Promise.resolve(
+        dir === '/root'
+          ? [folder]
+          : [makeDirEntry({ name: 'Details.pdf', path: `${folder.path}/Details.pdf` })]
+      )
+    )
+  })
+  const onCurrentDirChange = vi.fn()
+  const user = userEvent.setup()
+  renderHome(makeTree({ unrecognisedRootEntries: [folder] }), onCurrentDirChange)
+
+  await user.click(screen.getByRole('tab', { name: 'Other items' }))
+  await user.click(await screen.findByRole('row', { name: /^Extras/ }))
+  await user.keyboard('{Enter}')
+
+  const child = await screen.findByRole('row', { name: /^Details.pdf/ })
+  expect(document.activeElement).toBe(child)
+  expect(onCurrentDirChange).toHaveBeenLastCalledWith(folder.path)
 })
 
 it('resets navigation, filter, and selection when tabs switch', async () => {

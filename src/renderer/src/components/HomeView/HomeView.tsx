@@ -90,7 +90,12 @@ export function HomeView({
           onCurrentDirChange={onCurrentDirChange}
         />
       ) : (
-        <OtherPane entries={tree.unrecognisedRootEntries} root={tree.root} onChanged={onChanged} />
+        <OtherPane
+          entries={tree.unrecognisedRootEntries}
+          root={tree.root}
+          onChanged={onChanged}
+          onCurrentDirChange={onCurrentDirChange}
+        />
       )}
 
       <NewLeagueDialog

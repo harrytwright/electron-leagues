@@ -79,7 +79,7 @@ export function FolderPane({
           onRefresh={() => void onChanged()}
           onNavigate={() => {}}
           emptyTitle={`No ${label.toLocaleLowerCase()} folder`}
-          emptyDescription="The app couldn’t repair this reserved folder. Refresh to try again."
+          emptyDescription="Use Repair location… in the location menu to restore this folder."
         />
       )}
     </div>
