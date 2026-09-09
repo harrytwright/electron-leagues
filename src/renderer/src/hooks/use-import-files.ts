@@ -56,14 +56,21 @@ export function useImportFiles(
         copied.length === usable.length
           ? `Imported ${copied.length} file${copied.length === 1 ? '' : 's'}`
           : `Imported ${copied.length} of ${usable.length} files`
-      if (lifecycle.current.generation === generation) await onImported?.()
       feedback.finish(operationId, 'success', message)
+      add({ title: message, variant: 'success' })
+      if (lifecycle.current.generation === generation) {
+        try {
+          await onImported?.()
+        } catch (caught) {
+          if (lifecycle.current.generation === generation) {
+            add({ title: ipcErrorMessage(caught), variant: 'error' })
+          }
+        }
+      }
     } catch (caught) {
       const message = ipcErrorMessage(caught)
       feedback.finish(operationId, 'error', message)
-      if (lifecycle.current.generation === generation) {
-        add({ title: message, variant: 'error' })
-      }
+      add({ title: message, variant: 'error' })
     } finally {
       running.current = false
       if (lifecycle.current.mounted) setImporting(false)

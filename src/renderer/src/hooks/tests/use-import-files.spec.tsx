@@ -1,4 +1,4 @@
-import { act, renderHook, screen, waitFor } from '@testing-library/react'
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { ToastProvider } from '@cloudflare/kumo'
 import { OperationFeedbackProvider } from '../../components/OperationFeedbackProvider'
 import { expect, it, vi } from 'vitest'
@@ -50,8 +50,37 @@ it('uses singular copy for one file and reports partial imports honestly', async
   const { result } = renderImporter('/dest')
 
   await act(() => result.current.pickFiles())
+  expect(await screen.findByRole('dialog', { name: 'Imported 1 file' })).toBeInTheDocument()
 
   await act(() => result.current.pickFiles())
+  expect(await screen.findByRole('dialog', { name: 'Imported 1 of 2 files' })).toBeInTheDocument()
+})
+
+it('reports copy success before refresh settles, then reports refresh failure separately', async () => {
+  let finishRefresh!: () => void
+  const onImported = vi.fn(
+    () =>
+      new Promise<void>(
+        (_resolve, reject) => (finishRefresh = () => reject(new Error('Scan failed')))
+      )
+  )
+  installMockApi({ importFiles: vi.fn().mockResolvedValue(['/dest/a.pdf']) })
+  const { result } = renderImporter('/dest', onImported)
+
+  let importing!: Promise<void>
+  act(() => {
+    importing = result.current.importPaths(['/tmp/a.pdf'])
+  })
+  expect(await screen.findByRole('dialog', { name: 'Imported 1 file' })).toBeInTheDocument()
+  expect(result.current.importing).toBe(true)
+
+  await act(async () => {
+    finishRefresh()
+    await importing
+  })
+  expect(await screen.findByRole('dialog', { name: 'Scan failed' })).toBeInTheDocument()
+  expect(screen.getByRole('dialog', { name: 'Imported 1 file' })).toBeInTheDocument()
+  expect(result.current.importing).toBe(false)
 })
 
 it('does nothing when the picker is cancelled or there is no destination', async () => {
@@ -136,6 +165,69 @@ it('ignores a picker result after the destination changes', async () => {
   })
   expect(api.importFiles).not.toHaveBeenCalled()
   expect(await screen.findByText('The folder changed. No files were imported.')).toBeInTheDocument()
+})
+
+it('reports a completed import after the destination changes without refreshing the stale view', async () => {
+  let finishImport!: (copied: string[]) => void
+  installMockApi({
+    importFiles: vi.fn(() => new Promise<string[]>((resolve) => (finishImport = resolve)))
+  })
+  const onImported = vi.fn()
+  const { result, rerender } = renderHook(({ dest }) => useImportFiles(dest, onImported), {
+    initialProps: { dest: '/first' },
+    wrapper: ({ children }) => (
+      <ToastProvider>
+        <OperationFeedbackProvider>
+          {children}
+          <FeedbackStatus />
+        </OperationFeedbackProvider>
+      </ToastProvider>
+    )
+  })
+  let importing!: Promise<void>
+  act(() => {
+    importing = result.current.importPaths(['/tmp/a.pdf'])
+  })
+  rerender({ dest: '/second' })
+
+  await act(async () => {
+    finishImport(['/first/a.pdf'])
+    await importing
+  })
+  expect(await screen.findByRole('dialog', { name: 'Imported 1 file' })).toBeInTheDocument()
+  expect(onImported).not.toHaveBeenCalled()
+})
+
+it('reports a failed import after its hook unmounts without refreshing stale content', async () => {
+  let failImport!: () => void
+  installMockApi({
+    importFiles: vi.fn(
+      () =>
+        new Promise<string[]>(
+          (_resolve, reject) => (failImport = () => reject(new Error('Import failed')))
+        )
+    )
+  })
+  const onImported = vi.fn()
+  function ImportProbe(): React.JSX.Element {
+    const importer = useImportFiles('/dest', onImported)
+    return <button onClick={() => void importer.importPaths(['/tmp/a.pdf'])}>Start import</button>
+  }
+  const shell = (show: boolean): React.JSX.Element => (
+    <ToastProvider>
+      <OperationFeedbackProvider>
+        {show ? <ImportProbe /> : null}
+        <FeedbackStatus />
+      </OperationFeedbackProvider>
+    </ToastProvider>
+  )
+  const view = render(shell(true))
+  screen.getByRole('button', { name: 'Start import' }).click()
+  view.rerender(shell(false))
+
+  await act(async () => failImport())
+  expect(await screen.findByRole('dialog', { name: 'Import failed' })).toBeInTheDocument()
+  expect(onImported).not.toHaveBeenCalled()
 })
 
 it('reports a refresh callback rejection and releases the busy state', async () => {

@@ -60,7 +60,7 @@ it('updates an existing live region when the first operation starts', async () =
   expect(region).toHaveTextContent('Importing…')
 })
 
-it('keeps errors visible while leaving their announcement to the toast', async () => {
+it('clears completed operations from the persistent live region', async () => {
   installMockApi()
   render(
     <OperationFeedbackProvider>
@@ -69,8 +69,8 @@ it('keeps errors visible while leaving their announcement to the toast', async (
     </OperationFeedbackProvider>
   )
   await userEvent.setup().click(screen.getByRole('button', { name: 'Fail operation' }))
-  expect(screen.getByRole('status')).toHaveTextContent('Import failed')
-  expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'off')
+  expect(screen.getByRole('status')).toBeEmptyDOMElement()
+  expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite')
 })
 
 it('enables diagnostics from a checked status menu and persists the preference', async () => {

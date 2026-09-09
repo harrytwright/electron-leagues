@@ -34,8 +34,7 @@ export function FirstRun({ onChosen }: Props): React.JSX.Element {
   const locationOperation = useLocationOperation({
     root: '',
     onChanged: onChosen,
-    onMissingRecent: loadRecents,
-    onError: setError
+    onMissingRecent: loadRecents
   })
 
   const choose = async (mode: Mode): Promise<void> => {

@@ -307,6 +307,7 @@ it('syncs missing templates only from a live season root and refreshes both view
   })
   await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
   expect(api.listDir).toHaveBeenCalledTimes(2)
+  expect(await screen.findByText('Added 1 template')).toBeInTheDocument()
 })
 
 it('disables template sync while pending and reports errors', async () => {
@@ -467,6 +468,7 @@ it('offers to zip archived seasons, once at a time, and reports the outcome', as
 
   await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
   expect(api.zipArchive).toHaveBeenCalledTimes(1)
+  expect(await screen.findByText('Zipped 2023-24')).toBeInTheDocument()
 
   menu = await openRowMenu(user, '2022-23.zip')
   expect(within(menu).queryByRole('menuitem', { name: /zip/i })).not.toBeInTheDocument()

@@ -31,8 +31,40 @@ it('shows loading, then FirstRun when scan returns null', async () => {
   render(<App />)
 
   expect(screen.getByText(/loading…/i)).toBeInTheDocument()
+  expect(screen.getByText(/loading…/i).parentElement).toHaveAttribute('aria-live', 'polite')
   expect(await screen.findByRole('button', { name: /open location/i })).toBeInTheDocument()
   expect(screen.queryByText(/loading…/i)).not.toBeInTheDocument()
+})
+
+it('shows a scan error without confirming an opened location', async () => {
+  installMockApi({
+    scan: vi.fn().mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('Scan failed')),
+    chooseRoot: vi.fn().mockResolvedValue('/chosen/leagues')
+  })
+  const user = userEvent.setup()
+  render(<App />)
+
+  await user.click(await screen.findByRole('button', { name: /open location/i }))
+  expect(await screen.findByText('Couldn’t read the leagues folder')).toBeInTheDocument()
+  expect(screen.getAllByText('Scan failed').length).toBeGreaterThan(0)
+  expect(screen.queryByText('Opened location')).not.toBeInTheDocument()
+  expect(screen.getByRole('status')).toBeEmptyDOMElement()
+})
+
+it('shows a scan error without confirming a recent location', async () => {
+  installMockApi({
+    scan: vi.fn().mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('Scan failed')),
+    recentRoots: vi.fn().mockResolvedValue(['/recent/leagues']),
+    setRoot: vi.fn().mockResolvedValue('/recent/leagues')
+  })
+  const user = userEvent.setup()
+  render(<App />)
+
+  await user.click(await screen.findByRole('button', { name: /leagues.*\/recent\/leagues/i }))
+  expect(await screen.findByText('Couldn’t read the leagues folder')).toBeInTheDocument()
+  expect(screen.getAllByText('Scan failed').length).toBeGreaterThan(0)
+  expect(screen.queryByText('Opened location')).not.toBeInTheDocument()
+  expect(screen.getByRole('status')).toBeEmptyDOMElement()
 })
 
 it('opens or creates a location from application commands during FirstRun', async () => {
@@ -44,6 +76,37 @@ it('opens or creates a location from application commands during FirstRun', asyn
   await waitFor(() => expect(api.chooseRoot).toHaveBeenCalledExactlyOnceWith('select'))
   act(() => emitAppCommand({ command: 'new-location', repeat: false, composing: false }))
   await waitFor(() => expect(api.chooseRoot).toHaveBeenLastCalledWith('init'))
+})
+
+it('keeps opening status visible through a recent-location scan, then confirms completion', async () => {
+  let finishScan!: (tree: LeaguesTree) => void
+  const scan = vi
+    .fn()
+    .mockResolvedValueOnce(null)
+    .mockImplementationOnce(() => new Promise<LeaguesTree>((resolve) => (finishScan = resolve)))
+  installMockApi({
+    scan,
+    recentRoots: vi.fn().mockResolvedValue(['/recent/leagues']),
+    setRoot: vi.fn().mockResolvedValue('/recent/leagues')
+  })
+  const user = userEvent.setup()
+  render(<App />)
+
+  await user.click(await screen.findByRole('button', { name: /leagues.*\/recent\/leagues/i }))
+  expect(screen.getByRole('status')).toHaveTextContent('Opening location…')
+  expect(screen.queryByText('Opened location')).not.toBeInTheDocument()
+
+  await act(async () => {
+    finishScan(
+      makeTree({
+        root: '/recent/leagues',
+        templatesPath: '/recent/leagues/_templates',
+        sharedPath: '/recent/leagues/_shared'
+      })
+    )
+  })
+  expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
+  expect(await screen.findByText('Opened location')).toBeInTheDocument()
 })
 
 it('shows Home on Shared documents and reports that directory in the status bar', async () => {

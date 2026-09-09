@@ -69,18 +69,18 @@ it('opens a recent location and waits for the resulting scan', async () => {
   await waitFor(() => expect(screen.getByRole('button', { name: /open location/i })).toBeEnabled())
 })
 
-it('reports and removes a missing recent location inline', async () => {
+it('reports a missing recent location as a toast and removes it', async () => {
   const recentRoots = vi.fn().mockResolvedValueOnce(['/gone/leagues']).mockResolvedValueOnce([])
   installMockApi({ recentRoots, setRoot: vi.fn().mockResolvedValue(null) })
   const user = userEvent.setup()
   renderWithProviders(<FirstRun onChosen={vi.fn()} />)
 
   await user.click(await screen.findByRole('button', { name: /leagues.*\/gone\/leagues/i }))
-  expect(await screen.findByRole('alert')).toHaveTextContent('no longer available')
+  expect(await screen.findByText('That folder is no longer available')).toBeInTheDocument()
   await waitFor(() => expect(screen.queryByText('/gone/leagues')).not.toBeInTheDocument())
 })
 
-it('shows recent-list and picker failures inline while cancellation stays quiet', async () => {
+it('shows recent-list failures inline and picker failures as toasts', async () => {
   installMockApi({ recentRoots: vi.fn().mockRejectedValue(new Error('Recents unavailable')) })
   const view = renderWithProviders(<FirstRun onChosen={vi.fn()} />)
   expect(await screen.findByRole('alert')).toHaveTextContent('Recents unavailable')
@@ -91,7 +91,7 @@ it('shows recent-list and picker failures inline while cancellation stays quiet'
   })
   view.rerender(<FirstRun onChosen={vi.fn()} />)
   await userEvent.setup().click(screen.getByRole('button', { name: /open location/i }))
-  expect(await screen.findByRole('alert')).toHaveTextContent('Picker unavailable')
+  expect(await screen.findByText('Picker unavailable')).toBeInTheDocument()
 })
 
 it('guards rapid recent activation synchronously', async () => {

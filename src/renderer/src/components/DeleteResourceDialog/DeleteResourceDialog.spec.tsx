@@ -1,14 +1,22 @@
-import { screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
+import { ToastProvider } from '@cloudflare/kumo'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import { DeleteResourceDialog, type DeleteTarget } from './index'
 import { installMockApi } from '../../tests/mock-api'
 import { renderWithProviders } from '../../tests/render-helpers'
+import { OperationFeedbackProvider } from '../OperationFeedbackProvider'
+import { useOperationFeedback } from '../../hooks/use-operation-feedback'
 
 const TARGET: DeleteTarget = {
   kind: 'season',
   name: '2024-25',
   path: '/root/monday/League/2024-25'
+}
+
+function FeedbackStatus(): React.JSX.Element {
+  const { activity } = useOperationFeedback()
+  return <span role="status">{activity?.state === 'pending' ? activity.label : null}</span>
 }
 
 it('enables deletion only once the exact name is typed', async () => {
@@ -94,7 +102,9 @@ it('keeps the dialog open and reports the error when trashing fails', async () =
   await user.type(screen.getByLabelText('Type 2024-25 to confirm'), '2024-25')
   await user.click(screen.getByRole('button', { name: 'Delete season' }))
 
-  expect(await screen.findByRole('alert')).toHaveTextContent('That folder no longer exists')
+  expect(
+    await screen.findByRole('dialog', { name: 'That folder no longer exists' })
+  ).toBeInTheDocument()
   expect(onDeleted).not.toHaveBeenCalled()
   expect(onOpenChange).not.toHaveBeenCalled()
 })
@@ -102,18 +112,118 @@ it('keeps the dialog open and reports the error when trashing fails', async () =
 it('starts clean each time it opens', async () => {
   installMockApi()
   const user = userEvent.setup()
-  const view = renderWithProviders(
-    <DeleteResourceDialog target={TARGET} open onOpenChange={vi.fn()} onDeleted={vi.fn()} />
+  const view = render(
+    <ToastProvider>
+      <OperationFeedbackProvider>
+        <DeleteResourceDialog target={TARGET} open onOpenChange={vi.fn()} onDeleted={vi.fn()} />
+        <FeedbackStatus />
+      </OperationFeedbackProvider>
+    </ToastProvider>
   )
 
   await user.type(screen.getByLabelText('Type 2024-25 to confirm'), '2024-25')
   view.rerender(
-    <DeleteResourceDialog target={TARGET} open={false} onOpenChange={vi.fn()} onDeleted={vi.fn()} />
+    <ToastProvider>
+      <OperationFeedbackProvider>
+        <DeleteResourceDialog
+          target={TARGET}
+          open={false}
+          onOpenChange={vi.fn()}
+          onDeleted={vi.fn()}
+        />
+        <FeedbackStatus />
+      </OperationFeedbackProvider>
+    </ToastProvider>
   )
   view.rerender(
-    <DeleteResourceDialog target={TARGET} open onOpenChange={vi.fn()} onDeleted={vi.fn()} />
+    <ToastProvider>
+      <OperationFeedbackProvider>
+        <DeleteResourceDialog target={TARGET} open onOpenChange={vi.fn()} onDeleted={vi.fn()} />
+        <FeedbackStatus />
+      </OperationFeedbackProvider>
+    </ToastProvider>
   )
 
   expect(screen.getByLabelText('Type 2024-25 to confirm')).toHaveValue('')
   expect(screen.getByRole('button', { name: 'Delete season' })).toBeDisabled()
+})
+
+it('keeps deletion pending until trashing settles and finishes after the dialog closes', async () => {
+  let finishTrash!: () => void
+  installMockApi({
+    trashFolder: vi.fn(() => new Promise<void>((resolve) => (finishTrash = resolve)))
+  })
+  const user = userEvent.setup()
+  const onDeleted = vi.fn()
+  const view = render(
+    <ToastProvider>
+      <OperationFeedbackProvider>
+        <DeleteResourceDialog target={TARGET} open onOpenChange={vi.fn()} onDeleted={onDeleted} />
+        <FeedbackStatus />
+      </OperationFeedbackProvider>
+    </ToastProvider>
+  )
+  await user.type(screen.getByLabelText('Type 2024-25 to confirm'), '2024-25')
+  await user.click(screen.getByRole('button', { name: 'Delete season' }))
+  expect(screen.getByText('Deleting 2024-25')).toBeInTheDocument()
+
+  view.rerender(
+    <ToastProvider>
+      <OperationFeedbackProvider>
+        <DeleteResourceDialog
+          target={TARGET}
+          open={false}
+          onOpenChange={vi.fn()}
+          onDeleted={onDeleted}
+        />
+        <FeedbackStatus />
+      </OperationFeedbackProvider>
+    </ToastProvider>
+  )
+  await act(async () => finishTrash())
+  expect(screen.queryByText('Deleting 2024-25')).not.toBeInTheDocument()
+  expect(await screen.findByText(/Moved “2024-25” to the/)).toBeInTheDocument()
+  expect(onDeleted).not.toHaveBeenCalled()
+})
+
+it('reports a failed delete after the dialog closes without applying stale dialog state', async () => {
+  let failTrash!: () => void
+  installMockApi({
+    trashFolder: vi.fn(
+      () =>
+        new Promise<void>(
+          (_resolve, reject) => (failTrash = () => reject(new Error('Delete failed')))
+        )
+    )
+  })
+  const user = userEvent.setup()
+  const onDeleted = vi.fn()
+  const view = render(
+    <ToastProvider>
+      <OperationFeedbackProvider>
+        <DeleteResourceDialog target={TARGET} open onOpenChange={vi.fn()} onDeleted={onDeleted} />
+        <FeedbackStatus />
+      </OperationFeedbackProvider>
+    </ToastProvider>
+  )
+  await user.type(screen.getByLabelText('Type 2024-25 to confirm'), '2024-25')
+  await user.click(screen.getByRole('button', { name: 'Delete season' }))
+  view.rerender(
+    <ToastProvider>
+      <OperationFeedbackProvider>
+        <DeleteResourceDialog
+          target={TARGET}
+          open={false}
+          onOpenChange={vi.fn()}
+          onDeleted={onDeleted}
+        />
+        <FeedbackStatus />
+      </OperationFeedbackProvider>
+    </ToastProvider>
+  )
+
+  await act(async () => failTrash())
+  expect(await screen.findByText('Delete failed')).toBeInTheDocument()
+  expect(screen.queryByText('Deleting 2024-25')).not.toBeInTheDocument()
+  expect(onDeleted).not.toHaveBeenCalled()
 })

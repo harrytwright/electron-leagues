@@ -5,7 +5,6 @@ import type { SeasonNode } from '@shared/tree'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { revealLabel } from '@renderer/lib/reveal-label'
 import { sentenceCase } from '@renderer/lib/sentence-case'
-import { trashLabel } from '@renderer/lib/trash-label'
 import { useCrumbs } from '@renderer/hooks/use-crumbs'
 import { useDirListing } from '@renderer/hooks/use-dir-listing'
 import { useImportFiles } from '@renderer/hooks/use-import-files'
@@ -87,9 +86,15 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
     const operationId = feedback.begin(`Zipping ${name}`)
     try {
       await window.api.zipArchive(league.folderName, [name])
-      feedback.finish(operationId, 'success', `Zipped ${name}`)
+      const message = `Zipped ${name}`
+      feedback.finish(operationId, 'success', message)
+      add({ title: message, variant: 'success' })
       listing.reload()
-      await onChanged()
+      try {
+        await onChanged()
+      } catch (caught) {
+        add({ title: ipcErrorMessage(caught), variant: 'error' })
+      }
     } catch (caught) {
       const message = ipcErrorMessage(caught)
       feedback.finish(operationId, 'error', message)
@@ -114,8 +119,13 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
           ? 'Templates already up to date'
           : `Added ${result.added.length} template${result.added.length === 1 ? '' : 's'}`
       feedback.finish(operationId, 'success', message)
+      add({ title: message, variant: 'success' })
       listing.reload()
-      await onChanged()
+      try {
+        await onChanged()
+      } catch (caught) {
+        add({ title: ipcErrorMessage(caught), variant: 'error' })
+      }
     } catch (caught) {
       const message = ipcErrorMessage(caught)
       feedback.finish(operationId, 'error', message)
@@ -330,9 +340,8 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
         onOpenChange={(open) => {
           if (!open) setDeleting(null)
         }}
-        onDeleted={async (target) => {
+        onDeleted={async () => {
           setDeleting(null)
-          add({ title: `Moved “${target.name}” to the ${trashLabel()}`, variant: 'success' })
           await onChanged()
         }}
       />

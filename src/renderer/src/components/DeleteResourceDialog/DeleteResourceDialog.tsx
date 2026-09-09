@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button, Dialog, Input, Text } from '@cloudflare/kumo'
+import { Button, Dialog, Input, useKumoToastManager } from '@cloudflare/kumo'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { trashLabel } from '@renderer/lib/trash-label'
 import { TaskDialog } from '../TaskDialog'
 import type { Props } from './interface'
+import { useOperationFeedback } from '@renderer/hooks/use-operation-feedback'
 
 /** Names on disk may be NFD (macOS) and display names may carry stray spaces. */
 function comparable(value: string): string {
@@ -22,12 +23,13 @@ export function DeleteResourceDialog({
   onDeleted
 }: Props): React.JSX.Element {
   const [typed, setTyped] = useState('')
-  const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   // Bumped on every close so a delete left pending across close/reopen can
   // never write its stale outcome onto the fresh dialog.
   const submission = useRef(0)
+  const feedback = useOperationFeedback()
+  const { add } = useKumoToastManager()
 
   useEffect(() => {
     if (open) return
@@ -35,7 +37,6 @@ export function DeleteResourceDialog({
     // Reset on close so nothing stale is visible for the reopening frame.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setTyped('')
-    setError(null)
     setBusy(false)
   }, [open])
 
@@ -48,16 +49,24 @@ export function DeleteResourceDialog({
     event.preventDefault()
     if (!target || !confirmed || busy) return
     const ticket = submission.current
+    const operationId = feedback.begin(`Deleting ${target.name}`)
     setBusy(true)
-    setError(null)
     try {
       await window.api.trashFolder(target.path)
+      feedback.finish(operationId, 'success', `Deleted ${target.name}`)
+      add({ title: `Moved “${target.name}” to the ${trash}`, variant: 'success' })
       if (submission.current !== ticket) return
       setBusy(false)
-      await onDeleted(target)
+      try {
+        await onDeleted(target)
+      } catch (caught) {
+        add({ title: ipcErrorMessage(caught), variant: 'error' })
+      }
     } catch (caught) {
+      const message = ipcErrorMessage(caught)
+      feedback.finish(operationId, 'error', message)
+      add({ title: message, variant: 'error' })
       if (submission.current !== ticket) return
-      setError(ipcErrorMessage(caught))
       setBusy(false)
       inputRef.current?.focus()
     }
@@ -94,19 +103,10 @@ export function DeleteResourceDialog({
           autoFocus
           placeholder={name}
           value={typed}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? 'delete-resource-error' : undefined}
           onChange={(event) => {
             setTyped(event.target.value)
-            if (error) setError(null)
           }}
         />
-
-        {error ? (
-          <Text id="delete-resource-error" variant="error" role="alert">
-            {error}
-          </Text>
-        ) : null}
 
         <TaskDialog.Actions>
           <Dialog.Close

@@ -1,6 +1,7 @@
 import { createContext, use, type ReactNode } from 'react'
 
 export type OperationResult = 'success' | 'error'
+export type OperationScope = 'application' | 'location'
 
 export interface OperationActivity {
   id: number
@@ -11,7 +12,7 @@ export interface OperationActivity {
 
 export interface OperationFeedback {
   activity: OperationActivity | null
-  begin: (label: string) => number
+  begin: (label: string, scope?: OperationScope) => number
   finish: (id: number, result: OperationResult, message?: string) => void
 }
 

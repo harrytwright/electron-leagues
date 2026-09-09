@@ -28,20 +28,8 @@ export function StatusBar({ path }: Props): React.JSX.Element {
           {path}
         </Text>
       </div>
-      <span
-        role="status"
-        aria-live={activity?.state === 'error' ? 'off' : 'polite'}
-        className="max-w-64 min-w-0 truncate"
-        title={activity?.message}
-      >
-        {activity ? (
-          <Text variant={activity.state === 'error' ? 'error' : 'secondary'}>
-            {activity.state === 'pending'
-              ? `${activity.label}…`
-              : (activity.message ??
-                `${activity.label} ${activity.state === 'success' ? 'complete' : 'failed'}`)}
-          </Text>
-        ) : null}
+      <span role="status" aria-live="polite" className="max-w-64 min-w-0 truncate">
+        {activity?.state === 'pending' ? <Text variant="secondary">{activity.label}…</Text> : null}
       </span>
       <DiagnosticsMetrics enabled={diagnostics} />
       <DropdownMenu>

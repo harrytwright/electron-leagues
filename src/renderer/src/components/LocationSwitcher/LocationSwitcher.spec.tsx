@@ -89,6 +89,23 @@ it('explains when a remembered location cannot be used and refreshes the list', 
   expect(recentRoots).toHaveBeenCalledTimes(2)
 })
 
+it('reports a missing location even when refreshing recents also fails', async () => {
+  const recentRoots = vi
+    .fn()
+    .mockResolvedValueOnce([CURRENT, USB])
+    .mockRejectedValueOnce(new Error('Recents failed'))
+  installMockApi({ recentRoots, setRoot: vi.fn().mockResolvedValue(null) })
+  const user = userEvent.setup()
+  renderWithProviders(<LocationSwitcher root={CURRENT} onChanged={vi.fn()} />)
+
+  const menu = await openMenu(user)
+  await user.click(await within(menu).findByRole('menuitemradio', { name: /^leagues/ }))
+
+  expect(await screen.findByText('That folder is no longer available')).toBeInTheDocument()
+  await waitFor(() => expect(recentRoots).toHaveBeenCalledTimes(2))
+  expect(screen.queryByText('Recents failed')).not.toBeInTheDocument()
+})
+
 it('creates a new location through the native picker', async () => {
   const api = installMockApi({ chooseRoot: vi.fn().mockResolvedValue('/new/place') })
   const onChanged = vi.fn()
