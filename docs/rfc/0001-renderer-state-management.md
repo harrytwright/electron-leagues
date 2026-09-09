@@ -19,6 +19,10 @@ Router, TanStack DB, TanStack Virtual or a query persister.
 The desktop polish plan set a "no new dependencies" boundary for its own passes. This RFC is the
 deliberate place to lift that boundary, with the reasons written down.
 
+Because #3 stacks the dependency PR on top of the UI work, this document also lists the
+non-state additions that PR should carry: one runtime package (`react-error-boundary`), five
+tooling packages, and the in-house cleanups that are cheaper than any package.
+
 ## Motivation
 
 The renderer has grown a consistent pattern, hand-written three times, for "read something from
@@ -274,6 +278,61 @@ preview shows the first rows under a user-adjustable column mapping.
 Both are added in the members PR, not before, so this RFC's own PR stays a docs change and the
 first code PR stays about Query.
 
+## Beyond state: other dependencies and cleanups
+
+This RFC is the single list of what the dependency PR installs once the UI work in #3 is done,
+so the rest of the survey belongs here too. The bar is the same: a package earns its place only
+where the codebase already repeats something by hand. Most of what repeats is cheaper to fix
+with a small in-house hook than with a dependency, and those cleanups are listed so they are not
+mistaken for missing packages.
+
+### Runtime
+
+| Package                | Version | Why                                                                                                                                                                                                                                                                                                                                                                           |
+| ---------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `react-error-boundary` | ^6.1.5  | The renderer has no error boundary. A render-time throw anywhere below `App` blanks the window with nothing to click. One boundary around `AppContent` with a "Reload" fallback, and one around each `main` pane so a broken browser leaves the sidebar usable. `@sentry/electron/renderer` does not ship a boundary of its own; the boundary's `onError` forwards to Sentry. |
+
+### Tooling
+
+None of these ship in the bundle, and none depend on the state work, so they can land in their
+own small PR whenever convenient.
+
+| Package                               | Version | Why                                                                                                                                                                                                                                                                                             |
+| ------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eslint-plugin-jsx-a11y`              | ^6.10.2 | The last three source commits fixed accessible names, tab order and popup naming by hand after cold review. The plugin catches the mechanical half of that class (missing labels, invalid roles, `tabIndex` misuse) before review.                                                              |
+| `eslint-plugin-testing-library`       | ^7.16.2 | 161 specs call `installMockApi` and the suite has grown to 326 tests. The plugin enforces `findBy` over `waitFor` plus `getBy`, no direct DOM access, and `userEvent` over `fireEvent`, which are the review comments the specs keep receiving.                                                 |
+| `@vitest/eslint-plugin`               | ^1.6.27 | Focused tests (`it.only`), missing `await` on `expect(...).resolves`, and identical titles are the vitest-specific slips the test-library plugin does not cover.                                                                                                                                |
+| `knip`                                | ^6.35.1 | Two rewrites have removed whole component trees (`FileList`, `SharedView`, `ListingPanel`, `app-shortcuts`). knip reports unused files, exports and dependencies in one run, and can gate CI. Its first run will also confirm whether `echarts` and other unmet peers are the only dead weight. |
+| `@ianvs/prettier-plugin-sort-imports` | ^4.7.1  | Import order differs file to file (`react`, Kumo, icons, `@shared`, `@renderer`, relative, in no fixed sequence). The project already delegates formatting to Prettier, so a Prettier plugin keeps that decision in one place with no ESLint rule to maintain.                                  |
+
+### Cleanups that need no dependency
+
+These are the repeated patterns the survey found. Each is a hook or helper of well under fifty
+lines, and pulling a library in for any of them would cost more surface than it saves.
+
+| Pattern                                                                                                                                                                                                                                                                    | Where                                                                                     | Cleanup                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Task-dialog lifecycle: reset every field on open, bump a `submission` ticket, `busy` flag, `error` string, refocus the field on failure, refuse close while busy, and an `eslint-disable` for `set-state-in-effect` on each reset                                          | `NewLeagueDialog`, `NewSeasonDialog`, `DeleteResourceDialog`                              | One `useDialogTask({ open, onOpenChange, run })` hook returning `{ busy, error, submit, handleOpenChange }`. It owns the ticket and the reset, so the three lint disables go with it. With Query in place, `run` is a mutation and the hook shrinks further. TanStack Form stays deferred: the duplication here is lifecycle, not field handling.                                                                                                 |
+| `${n} item${n === 1 ? '' : 's'}`                                                                                                                                                                                                                                           | 8 sites across `LeagueView`, `DirectoryBrowser`, `TreeFileBrowser` and `use-import-files` | `plural(n, 'item')` in `lib/plural.ts` on top of `Intl.PluralRules('en-GB')`. Three lines, and the sign-in sheet work will need the same helper for "bowlers" and "teams".                                                                                                                                                                                                                                                                        |
+| `try { await window.api.x() } catch (caught) { add({ title: ipcErrorMessage(caught), variant: 'error' }) }`                                                                                                                                                                | 15 sites in 12 files                                                                      | Covered by the `MutationCache` in phase 4: `onError` toasts once for every mutation, and the call sites lose their `try`/`catch`. Reads that fail surface through `isError` instead. Not a new package.                                                                                                                                                                                                                                           |
+| IPC channels typed three times: the `handle('season:create', (_e, opts: Omit<…>) => …)` parameter in `main/index.ts`, the method in `preload/index.ts`, and the `vi.fn<RendererApi[…]>` in `tests/mock-api.ts`; input is trusted as typed until the operation validates it | `src/main/index.ts`, `src/preload/index.ts`, `src/renderer/src/tests/mock-api.ts`         | Declare each channel once in `src/shared/ipc.ts` as `{ channel, input: z.tuple([...]), output: type }` using the zod already installed. `handle()` in main parses `input` before the handler runs, preload derives its method types from the same table, and `installMockApi` iterates it so a new channel cannot be forgotten in the mock. Typed-IPC packages exist but add a runtime the project does not need; the table is about forty lines. |
+| Platform `switch` in `reveal-label.ts`, `trash-label.ts` and `app-shortcut-label.ts`                                                                                                                                                                                       | Three files, one `currentPlatform()` call each                                            | One `lib/os-labels.ts` with a `Record<Platform, { reveal, trash, modifier }>`; the spec `os-labels.spec.ts` already treats them as one unit. No package.                                                                                                                                                                                                                                                                                          |
+| Interval plus `visibilitychange` polling, `matchMedia` listener, document-level `dragover`/`drop` refusal                                                                                                                                                                  | `use-renderer-metrics.ts`, `theme.ts`, `App.tsx`                                          | Three effects, each different enough that a generic `useEventListener` would save a dozen lines in total. Leave them.                                                                                                                                                                                                                                                                                                                             |
+
+### Considered and not proposed
+
+| Package                                        | Reason                                                                                                                                                                                                                                                                                  |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `usehooks-ts`, `@react-hookz/web`, `react-use` | The candidate call sites are the three effects above plus localStorage, which the Zustand `persist` middleware already replaces. A hooks grab-bag would be imported in four places and shadow the project's own `hooks/` folder for everything else.                                    |
+| `es-toolkit`, `remeda`, `lodash-es`            | The renderer's collection code is `Map` and `Set` copies, one `filter`, one `sort` with a comparator. Nothing here is a `groupBy` or `debounce` that a utility library would shorten. The members snapshot joins are a few `Map`s and are better read as plain code than as a pipeline. |
+| `ts-pattern`                                   | Exhaustive `switch` on `Selection['kind']`, `SeasonNode['status']` and `Platform` already type-checks through the return type. A pattern library adds a runtime for what the compiler already gives.                                                                                    |
+| `date-fns`, `dayjs`                            | One `Intl.DateTimeFormat` in `format-date.ts`. The sign-in sheet's week numbering may want more; decide then.                                                                                                                                                                           |
+| `pathe`, `path-browserify`                     | `pathBasename` is one regex split because the renderer cannot import `node:path`. A path library would be adopted for one function.                                                                                                                                                     |
+| `async-mutex`, `p-limit`, `p-queue`            | `withTemplateLock` in `operations.ts` is an eighteen-line per-root promise chain with its own concurrency spec. A queue package would replace tested code with configuration.                                                                                                           |
+| `@sentry/react`                                | Only needed for Sentry's own error boundary; `react-error-boundary` plus `Sentry.captureException` in `onError` is smaller and keeps `@sentry/electron/renderer` as the single Sentry entry point.                                                                                      |
+| `@vitest/coverage-v8`                          | Coverage is not part of the review gates today. If it becomes one, add it at the same major as `vitest` (currently 4); the published 5.x line does not match.                                                                                                                           |
+| `typescript-eslint` strict configs             | Not a new package: `@electron-toolkit/eslint-config-ts` already carries `typescript-eslint`. Switching from `recommended` to `strictTypeChecked` is a config change worth trying in its own PR, since the anti-slop rules already push in that direction.                               |
+
 ## Alternatives considered
 
 **Keep the hand-rolled pattern.** Cheapest today. The members snapshot would be the fourth copy,
@@ -322,6 +381,11 @@ the extra subscription is harmless.
    collapsed days and diagnostics; delete `lib/local-store.ts` and the navigation state in
    `App`. Note the restoration-by-derivation behaviour change in the PR description.
 6. **Members (later).** Add Table and Form with the feature.
+
+The tooling packages, the error boundary and the no-dependency cleanups are independent of
+phases 1 to 5. The dependency PR that follows #3 installs them alongside phase 1; the cleanups
+are best done as they are touched, with the dialog hook and the shared IPC table first because
+each removes three copies at once.
 
 Test impact per phase is confined to the specs of the hooks touched; `installMockApi` and
 `emitTreeChanged` stay the seam because the single subscriber still registers through
