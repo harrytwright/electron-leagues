@@ -37,22 +37,35 @@ itself is never recreated if it has moved or become unavailable.
 
 ## Using the app
 
-The window title bar contains **Home** and the location switcher, which changes between leagues
-folders ("locations"), creates a new one, or reveals the current one. Home is a single-pane browser
-with Shared documents, Templates, and (when needed) Other items tabs; changing tabs starts again at
-that tab's root. The current folder appears in the status bar. The sidebar holds the Leagues list
-grouped under collapsible days.
+The startup panel opens existing leagues folders (“locations”), creates new ones, or returns you
+to a recent location. After startup, **Home** in the title bar returns you to shared documents and
+templates. Use the location switcher beside it to change, create, or reveal locations.
+
+Home is a single-pane browser with Shared documents, Templates, and (when needed) Other items tabs;
+changing tabs starts again at that tab's root. The sidebar holds the Leagues list grouped under
+collapsible days.
+
 A league opens as a file browser: seasons at the top (newest first, with their status), then any
 other files and the Archive folder. The league, archive and season panes share a desktop-style
-file browser: click to select, double-click or press Enter to open, and use the arrow keys to move
-between rows. Breadcrumbs lead back. The league overview includes season status badges and item
-counts, with a filter for the current folder. Within a season, disclosure arrows expand folders
+file browser: click to select and double-click to open. Breadcrumbs lead back. The league overview
+includes season status badges and item counts, with a filter for the current folder. Within a
+season, disclosure arrows expand folders
 in place and column headings sort each folder's contents. The season filter searches loaded
-folders and keeps matching files' parents visible. Each row's `…` menu reveals it in the file manager,
-zips archived seasons, or deletes a league or season — deletion asks you to type the name and
-moves the folder (including files the app doesn't manage) to the OS trash. Drop files onto any
-folder view to copy them in. Your last-opened league and collapsed days are remembered per
-location.
+folders and keeps matching files' parents visible. Drop files into league roots, Shared documents,
+Templates, or live season views to copy them in. Your last-opened league and collapsed days are
+remembered per location.
+
+Right-click a row to open the same actions shown in its `…` menu: browse folders, open documents in
+their default app, or reveal items in Finder or Explorer. Deleting a league or season asks you to
+type its name and moves the whole folder, including unmanaged files, to the OS trash. Archived
+seasons can also be zipped from these menus.
+
+On macOS, use ⇧⌘O to open a location, ⌘R to refresh, and ⌘F to focus the filter; on Windows, use
+Ctrl+Shift+O, Ctrl+R, and Ctrl+F. In file lists, press Enter to open the selected item and use the
+arrow keys to move between rows.
+
+The status bar shows the current path and any pending activity. Completion toasts report whether
+an action succeeded or failed.
 
 At the root of any live season, **Sync with templates** adds only template filenames that are
 missing. It never creates numbered duplicates and is unavailable in archives or subfolders.
