@@ -19,7 +19,7 @@ export function FolderPane({
 }: Props): React.JSX.Element {
   const trail = useCrumbs(baseDir, onCurrentDirChange)
   const listing = useDirListing(present ? trail.currentDir : null)
-  const tree = useTreeFolders()
+  const tree = useTreeFolders(trail.currentDir)
   const [sort, setSort] = useState<Sort>({ column: 'name', direction: 'ascending' })
   const pendingFocusDir = useRef<string | null>(null)
   const importer = useImportFiles(present ? trail.currentDir : undefined, async () => {

@@ -18,8 +18,8 @@ export function FileBrowserFrame({
   readOnly,
   query,
   filterLabel,
+  filterRef,
   onQueryChange,
-  onFilterTab,
   onRefresh,
   onDropFiles,
   actions,
@@ -29,7 +29,6 @@ export function FileBrowserFrame({
 }: Props): React.JSX.Element {
   const [dragging, setDragging] = useState(false)
   const dragDepth = useRef(0)
-  const filterRef = useRef<HTMLInputElement>(null)
   const canDrop = !readOnly && onDropFiles !== undefined
 
   useAppCommandHandler('refresh', onRefresh)
@@ -97,10 +96,6 @@ export function FileBrowserFrame({
               placeholder={`${filterLabel}…`}
               value={query}
               onValueChange={onQueryChange}
-              onKeyDown={(event) => {
-                if (event.key !== 'Tab' || event.shiftKey) return
-                if (onFilterTab()) event.preventDefault()
-              }}
               className="h-7 rounded-md pr-7 pl-7 text-base"
             />
             {query ? (

@@ -8,7 +8,7 @@ import { FileActionsButton } from '../FileBrowser/components/FileActionsButton'
 import { FileModified } from '../FileBrowser/components/FileModified'
 import { useFileActions } from '@renderer/hooks/use-file-actions'
 import { useFileSelection } from '@renderer/hooks/use-file-selection'
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Table } from '@cloudflare/kumo'
 import { FileBrowserFrame } from '../FileBrowser/components/FileBrowserFrame'
 import { FileEntryIcon } from '../FileBrowser/components/FileEntryIcon'
@@ -41,6 +41,11 @@ export function DirectoryBrowser({
   const query = queryState.dir === currentDir ? queryState.value : ''
   const setQuery = (value: string): void => setQueryState({ dir: currentDir, value })
   const instructions = useId()
+  // Explicit row names exclude the action button's label from selection announcements.
+  const rowNames = useId()
+  const filterRef = useRef<HTMLInputElement>(null)
+  // rowMenu.target has already been cleared when the close effect restores focus.
+  const menuTarget = useRef<string | null>(null)
   const { openFile, revealFile } = useFileActions()
   const filter = query.trim().toLocaleLowerCase()
   const visible = rows.filter((row) => row.name.toLocaleLowerCase().includes(filter))
@@ -82,6 +87,7 @@ export function DirectoryBrowser({
   ): void => {
     event.preventDefault()
     selection.focus(row.path)
+    menuTarget.current = row.path
     const bounds = event.currentTarget.getBoundingClientRect()
     const pointer = 'clientX' in event && event.clientX > 0
     rowMenu.openAt(
@@ -99,11 +105,8 @@ export function DirectoryBrowser({
       readOnly={readOnly}
       query={query}
       filterLabel="Filter this folder"
+      filterRef={filterRef}
       onQueryChange={setQuery}
-      onFilterTab={() => {
-        selection.focus(selectedRow?.path ?? visible[0]?.path)
-        return visible.length > 0
-      }}
       onRefresh={onRefresh}
       onDropFiles={onDropFiles}
       selection={selectedRow?.name}
@@ -158,54 +161,60 @@ export function DirectoryBrowser({
               )}
             </BrowserMessageRow>
           ) : (
-            visible.map((row, index) => (
-              <Table.Row
-                key={row.key}
-                {...selection.rowProps(row.path)}
-                className={FILE_ROW_CLASS}
-                onDoubleClick={() => void open(row)}
-                onContextMenu={(event) => openContextMenu(event, row)}
-                onKeyDown={(event) => {
-                  if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
-                    openContextMenu(event, row)
-                    return
-                  }
-                  selection.onKeyDown(event, index, () => void open(row, true))
-                }}
-              >
-                <Table.Cell>
-                  <div className="flex min-w-0 items-center gap-2 pl-8">
-                    <span className="shrink-0">
-                      <FileEntryIcon entry={row} />
-                    </span>
-                    <span title={row.name} className="truncate font-medium">
-                      {row.name}
-                    </span>
-                    {row.badge ? <> {row.badge}</> : null}
-                  </div>
-                </Table.Cell>
-                <Table.Cell className="whitespace-nowrap text-kumo-subtle">
-                  {metadataColumn === 'contents' ? (
-                    (row.contents ?? '—')
-                  ) : (
-                    <FileModified mtime={row.mtime} />
-                  )}
-                </Table.Cell>
-                <Table.Cell className="truncate text-kumo-subtle">
-                  {row.typeLabel ?? fileType(row)}
-                </Table.Cell>
-                <FileActionsButton
-                  name={row.name}
-                  menuId={rowMenu.id}
-                  expanded={rowMenu.target === row.path}
-                  onClick={(event) => {
-                    selection.focus(row.path)
-                    const bounds = event.currentTarget.getBoundingClientRect()
-                    rowMenu.openAt(row.path, { left: bounds.right, top: bounds.bottom })
+            visible.map((row, index) => {
+              const nameId = `${rowNames}-${index}-name`
+              const badgeId = row.badge ? `${rowNames}-${index}-badge` : undefined
+              return (
+                <Table.Row
+                  key={row.key}
+                  {...selection.rowProps(row.path)}
+                  aria-labelledby={[nameId, badgeId].filter(Boolean).join(' ')}
+                  className={FILE_ROW_CLASS}
+                  onDoubleClick={() => void open(row)}
+                  onContextMenu={(event) => openContextMenu(event, row)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+                      openContextMenu(event, row)
+                      return
+                    }
+                    selection.onKeyDown(event, index, () => void open(row, true))
                   }}
-                />
-              </Table.Row>
-            ))
+                >
+                  <Table.Cell>
+                    <div className="flex min-w-0 items-center gap-2 pl-8">
+                      <span className="shrink-0">
+                        <FileEntryIcon entry={row} />
+                      </span>
+                      <span id={nameId} title={row.name} className="truncate font-medium">
+                        {row.name}
+                      </span>
+                      {row.badge ? <span id={badgeId}>{row.badge}</span> : null}
+                    </div>
+                  </Table.Cell>
+                  <Table.Cell className="whitespace-nowrap text-kumo-subtle">
+                    {metadataColumn === 'contents' ? (
+                      (row.contents ?? '—')
+                    ) : (
+                      <FileModified mtime={row.mtime} />
+                    )}
+                  </Table.Cell>
+                  <Table.Cell className="truncate text-kumo-subtle">
+                    {row.typeLabel ?? fileType(row)}
+                  </Table.Cell>
+                  <FileActionsButton
+                    name={row.name}
+                    menuId={rowMenu.id}
+                    expanded={rowMenu.target === row.path}
+                    onClick={(event) => {
+                      selection.focus(row.path)
+                      menuTarget.current = row.path
+                      const bounds = event.currentTarget.getBoundingClientRect()
+                      rowMenu.openAt(row.path, { left: bounds.right, top: bounds.bottom })
+                    }}
+                  />
+                </Table.Row>
+              )
+            })
           )}
         </Table.Body>
       </Table>
@@ -215,12 +224,12 @@ export function DirectoryBrowser({
         open={rowMenu.target !== null && visible.some((row) => row.path === rowMenu.target)}
         anchor={rowMenu.anchor}
         actions={actions(visible.find((row) => row.path === rowMenu.target))}
-        onOpenChange={(open, reason) => {
-          const target = rowMenu.target
-          rowMenu.onOpenChange(open)
-          if (!open && reason === 'escape-key') selection.focus(target ?? undefined)
+        onOpenChange={rowMenu.onOpenChange}
+        onRestoreFocus={() => {
+          if (selection.focus(menuTarget.current ?? undefined)) return
+          if (selection.focusFirstRow()) return
+          filterRef.current?.focus()
         }}
-        onRestoreFocus={() => selection.focus(rowMenu.target ?? undefined)}
       />
     </FileBrowserFrame>
   )

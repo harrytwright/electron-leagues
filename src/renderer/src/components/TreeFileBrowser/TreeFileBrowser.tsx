@@ -8,7 +8,7 @@ import { FileActionsButton } from '../FileBrowser/components/FileActionsButton'
 import { FileModified } from '../FileBrowser/components/FileModified'
 import { useFileActions } from '@renderer/hooks/use-file-actions'
 import { useFileSelection } from '@renderer/hooks/use-file-selection'
-import { Fragment, useEffect, useId, useState } from 'react'
+import { Fragment, useEffect, useId, useRef, useState } from 'react'
 import { Button, cn, Loader, Table } from '@cloudflare/kumo'
 import { ArrowDownIcon } from '@phosphor-icons/react/dist/csr/ArrowDown'
 import { ArrowUpIcon } from '@phosphor-icons/react/dist/csr/ArrowUp'
@@ -44,6 +44,11 @@ export function TreeFileBrowser({
   const query = queryState.dir === currentDir ? queryState.value : ''
   const setQuery = (value: string): void => setQueryState({ dir: currentDir, value })
   const instructions = useId()
+  // Explicit row names exclude the action button's label from selection announcements.
+  const rowNames = useId()
+  const filterRef = useRef<HTMLInputElement>(null)
+  // rowMenu.target has already been cleared when the close effect restores focus.
+  const menuTarget = useRef<string | null>(null)
   const { openFile, revealFile } = useFileActions()
   const filter = query.trim().toLocaleLowerCase()
   const rows = fileRows(listing.entries ?? [], tree.branches, tree.expanded, sort, filter)
@@ -88,6 +93,7 @@ export function TreeFileBrowser({
   ): void => {
     event.preventDefault()
     selection.focus(row.entry.path)
+    menuTarget.current = row.entry.path
     const bounds = event.currentTarget.getBoundingClientRect()
     const pointer = 'clientX' in event && event.clientX > 0
     rowMenu.openAt(
@@ -150,11 +156,8 @@ export function TreeFileBrowser({
       readOnly={readOnly}
       query={query}
       filterLabel="Filter loaded files"
+      filterRef={filterRef}
       onQueryChange={setQuery}
-      onFilterTab={() => {
-        selection.focus(selectedRow?.entry.path ?? rows[0]?.entry.path)
-        return rows.length > 0
-      }}
       onRefresh={refresh}
       onDropFiles={onDropFiles}
       selection={selectedRow?.entry.name}
@@ -244,6 +247,7 @@ export function TreeFileBrowser({
           ) : (
             rows.map((row, index) => {
               const { entry, ancestors, expanded } = row
+              const nameId = `${rowNames}-${index}-name`
               const branch = tree.branches.get(entry.path)
               const branchMessage =
                 expanded &&
@@ -254,6 +258,7 @@ export function TreeFileBrowser({
                   <Table.Row
                     {...selection.rowProps(entry.path)}
                     aria-level={ancestors.length + 1}
+                    aria-labelledby={nameId}
                     aria-posinset={row.position}
                     aria-setsize={row.siblings}
                     aria-expanded={entry.kind === 'folder' ? expanded : undefined}
@@ -304,6 +309,7 @@ export function TreeFileBrowser({
                           <FileEntryIcon entry={row.entry} expanded={row.expanded} />
                         </span>
                         <span
+                          id={nameId}
                           title={entry.name}
                           className={cn('truncate', entry.kind === 'folder' && 'font-medium')}
                         >
@@ -324,6 +330,7 @@ export function TreeFileBrowser({
                       expanded={rowMenu.target === entry.path}
                       onClick={(event) => {
                         selection.focus(entry.path)
+                        menuTarget.current = entry.path
                         const bounds = event.currentTarget.getBoundingClientRect()
                         rowMenu.openAt(entry.path, { left: bounds.right, top: bounds.bottom })
                       }}
@@ -373,12 +380,12 @@ export function TreeFileBrowser({
         open={rowMenu.target !== null && rows.some((row) => row.entry.path === rowMenu.target)}
         anchor={rowMenu.anchor}
         actions={actions(rows.find((row) => row.entry.path === rowMenu.target))}
-        onOpenChange={(open, reason) => {
-          const target = rowMenu.target
-          rowMenu.onOpenChange(open)
-          if (!open && reason === 'escape-key') selection.focus(target ?? undefined)
+        onOpenChange={rowMenu.onOpenChange}
+        onRestoreFocus={() => {
+          if (selection.focus(menuTarget.current ?? undefined)) return
+          if (selection.focusFirstRow()) return
+          filterRef.current?.focus()
         }}
-        onRestoreFocus={() => selection.focus(rowMenu.target ?? undefined)}
       />
     </FileBrowserFrame>
   )

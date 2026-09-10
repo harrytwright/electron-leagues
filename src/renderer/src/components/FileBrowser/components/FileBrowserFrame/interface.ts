@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import type { ReactNode, RefObject } from 'react'
 
 export interface Props {
   name: string
@@ -6,8 +6,8 @@ export interface Props {
   readOnly: boolean
   query: string
   filterLabel: string
+  filterRef: RefObject<HTMLInputElement | null>
   onQueryChange: (value: string) => void
-  onFilterTab: () => boolean
   onRefresh: () => void
   onDropFiles?: (paths: string[]) => void | Promise<void>
   actions?: ReactNode

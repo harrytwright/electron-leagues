@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import { CrumbTrail } from '@renderer/components/CrumbTrail'
 import { DirectoryBrowser } from '@renderer/components/DirectoryBrowser'
 import { useCrumbs } from '@renderer/hooks/use-crumbs'
@@ -14,10 +14,11 @@ export function OtherPane({
   const trail = useCrumbs(root, onCurrentDirChange)
   const listing = useDirListing(trail.currentDir)
   const pendingFocusDir = useRef<string | null>(null)
-  const rootPaths = new Set(entries.map((entry) => entry.path))
-  const visibleEntries = trail.atBase
-    ? listing.entries?.filter((entry) => rootPaths.has(entry.path))
-    : listing.entries
+  const visibleEntries = useMemo(() => {
+    if (!trail.atBase) return listing.entries
+    const rootPaths = new Set(entries.map((entry) => entry.path))
+    return listing.entries?.filter((entry) => rootPaths.has(entry.path))
+  }, [entries, listing.entries, trail.atBase])
   const visibleListing = { ...listing, entries: visibleEntries ?? null }
 
   const consumeFocusRequest = useCallback((currentDir: string): boolean => {
@@ -52,7 +53,8 @@ export function OtherPane({
         heading="Files"
         rows={(visibleEntries ?? []).map((entry) => ({ ...entry, key: entry.path }))}
         metadataColumn="modified"
-        readOnly={false}
+        // Unmanaged root items are browse-only; importing here would bypass the app's folder model.
+        readOnly
         listing={visibleListing}
         onRefresh={refresh}
         onNavigate={enter}

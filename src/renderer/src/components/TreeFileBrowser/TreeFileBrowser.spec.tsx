@@ -22,7 +22,7 @@ const results = makeDirEntry({ name: 'Results.xlsx', path: `${week1.path}/Result
 const rules = makeDirEntry({ name: 'Rules.pdf', path: `${season}/Rules.pdf` })
 
 function TreeBrowserHarness(overrides: Partial<Props>): React.JSX.Element {
-  const tree = useTreeFolders()
+  const tree = useTreeFolders(overrides.currentDir ?? season)
   const [sort, setSort] = useState<Sort>({ column: 'name', direction: 'ascending' })
   return (
     <TreeFileBrowser
@@ -45,24 +45,30 @@ function renderFiles(overrides: Partial<Props> = {}): ReturnType<typeof renderWi
 }
 
 function row(name: string): HTMLElement {
-  return screen.getByRole('row', { name: new RegExp(`^${name}`) })
+  return screen.getByRole('row', { name })
 }
 
-it('loads folders only when expanded, retaining the hierarchy and cached children', async () => {
+it('refreshes collapsed caches on reopening, not on watcher events', async () => {
   const api = installMockApi({ listDir: vi.fn().mockResolvedValue([week1]) })
   const user = userEvent.setup()
   renderFiles()
   expect(api.listDir).not.toHaveBeenCalled()
 
   await user.click(screen.getByRole('button', { name: 'Expand Weekly results' }))
-  expect(await screen.findByRole('row', { name: /^Week 1/ })).toHaveAttribute('aria-level', '2')
+  expect(await screen.findByRole('row', { name: 'Week 1' })).toHaveAttribute('aria-level', '2')
   expect(row('Weekly results')).toHaveAttribute('aria-expanded', 'true')
   expect(row('Rules.pdf')).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Collapse Weekly results' }))
-  expect(screen.queryByRole('row', { name: /^Week 1/ })).not.toBeInTheDocument()
-  await user.click(screen.getByRole('button', { name: 'Expand Weekly results' }))
-  expect(row('Week 1')).toBeInTheDocument()
+  expect(screen.queryByRole('row', { name: 'Week 1' })).not.toBeInTheDocument()
+  act(emitTreeChanged)
   expect(api.listDir).toHaveBeenCalledExactlyOnceWith(weeks.path)
+  vi.mocked(api.listDir).mockResolvedValue([
+    { ...week1, name: 'Week 2', path: `${weeks.path}/Week 2` }
+  ])
+  await user.click(screen.getByRole('button', { name: 'Expand Weekly results' }))
+  expect(await screen.findByRole('row', { name: 'Week 2' })).toBeInTheDocument()
+  expect(screen.queryByRole('row', { name: 'Week 1' })).not.toBeInTheDocument()
+  expect(api.listDir).toHaveBeenCalledTimes(2)
 })
 
 it('selects on click, opens files on double-click, and reports OS open errors', async () => {
@@ -86,8 +92,12 @@ it('names the actions menu on the menu element', async () => {
   const document = makeDirEntry({ name: 'Rules.docx', path: `${season}/Rules.docx` })
   renderFiles({ listing: { entries: [document], error: null, reload: vi.fn() } })
 
-  await user.click(screen.getByRole('button', { name: 'Actions for Rules.docx' }))
-  expect(await screen.findByRole('menu', { name: 'Actions for Rules.docx' })).toBeVisible()
+  const trigger = screen.getByRole('button', { name: 'Actions for Rules.docx' })
+  expect(row('Rules.docx')).toHaveAccessibleName('Rules.docx')
+  await user.click(trigger)
+  const menu = await screen.findByRole('menu', { name: 'Actions for Rules.docx' })
+  expect(menu).toBeVisible()
+  expect(trigger).toHaveAttribute('aria-controls', menu.id)
 })
 
 it('supports arrow-key navigation and opens nested folders with their full breadcrumb trail', async () => {
@@ -98,7 +108,7 @@ it('supports arrow-key navigation and opens nested folders with their full bread
 
   await user.click(row('Weekly results'))
   await user.keyboard('{ArrowRight}')
-  await screen.findByRole('row', { name: /^Week 1/ })
+  await screen.findByRole('row', { name: 'Week 1' })
   await user.keyboard('{ArrowRight}')
   expect(row('Week 1')).toHaveFocus()
   await user.keyboard('{ArrowLeft}')
@@ -117,7 +127,7 @@ it('filters loaded descendants while keeping their parents and restores the coll
   renderFiles()
   await user.click(screen.getByRole('button', { name: 'Expand Weekly results' }))
   await user.click(await screen.findByRole('button', { name: 'Expand Week 1' }))
-  await screen.findByRole('row', { name: /^Results\.xlsx/ })
+  await screen.findByRole('row', { name: 'Results.xlsx' })
   await user.click(screen.getByRole('button', { name: 'Collapse all' }))
 
   await user.type(screen.getByRole('textbox', { name: 'Filter loaded files' }), 'results.xlsx')
@@ -126,11 +136,11 @@ it('filters loaded descendants while keeping their parents and restores the coll
   expect(row('Weekly results')).toHaveAttribute('aria-setsize', '1')
   expect(row('Weekly results')).toBeInTheDocument()
   expect(row('Week 1')).toBeInTheDocument()
-  expect(screen.queryByRole('row', { name: /^Rules\.pdf/ })).not.toBeInTheDocument()
+  expect(screen.queryByRole('row', { name: 'Rules.pdf' })).not.toBeInTheDocument()
   expect(api.listDir).toHaveBeenCalledTimes(2)
   await user.click(screen.getByRole('button', { name: 'Clear filter' }))
   expect(row('Weekly results')).toHaveAttribute('aria-expanded', 'false')
-  expect(screen.queryByRole('row', { name: /^Week 1/ })).not.toBeInTheDocument()
+  expect(screen.queryByRole('row', { name: 'Week 1' })).not.toBeInTheDocument()
 })
 
 it('does not expand a folder with ArrowRight while filtering', async () => {
@@ -145,13 +155,45 @@ it('does not expand a folder with ArrowRight while filtering', async () => {
   expect(row('Weekly results')).toHaveAttribute('aria-expanded', 'false')
 })
 
+it('uses the natural pane, sort, and roving-row tab order in both directions', async () => {
+  installMockApi({ listDir: vi.fn().mockResolvedValue([week1]) })
+  const user = userEvent.setup()
+  renderFiles()
+  await user.click(screen.getByRole('button', { name: 'Expand Weekly results' }))
+  await screen.findByRole('row', { name: 'Week 1' })
+
+  const filter = screen.getByRole('textbox', { name: 'Filter loaded files' })
+  filter.focus()
+  const order = [
+    screen.getByRole('button', { name: 'Collapse all' }),
+    screen.getByRole('button', { name: 'Refresh files' }),
+    screen.getByRole('button', { name: 'Name' }),
+    screen.getByRole('button', { name: 'Modified' }),
+    screen.getByRole('button', { name: 'Kind' }),
+    row('Weekly results')
+  ]
+  for (const element of order) {
+    await user.tab()
+    expect(element).toHaveFocus()
+  }
+  await user.tab()
+  expect(screen.getByRole('treegrid').contains(document.activeElement)).toBe(false)
+
+  for (const element of order.toReversed()) {
+    await user.tab({ shift: true })
+    expect(element).toHaveFocus()
+  }
+  await user.tab({ shift: true })
+  expect(filter).toHaveFocus()
+})
+
 it('sorts siblings naturally with folders first and keeps children under their parent', async () => {
   const week10 = makeDirEntry({ name: 'Week 10', kind: 'folder', path: `${weeks.path}/Week 10` })
   installMockApi({ listDir: vi.fn().mockResolvedValue([week10, week1]) })
   const user = userEvent.setup()
   renderFiles()
   await user.click(screen.getByRole('button', { name: 'Expand Weekly results' }))
-  await screen.findByRole('row', { name: /^Week 10/ })
+  await screen.findByRole('row', { name: 'Week 10' })
 
   const names = (): Array<string | null> =>
     within(screen.getByRole('treegrid'))
@@ -207,10 +249,32 @@ it('refreshes expanded folders on disk changes and ignores older responses', asy
   renderFiles()
   await user.click(screen.getByRole('button', { name: 'Expand Weekly results' }))
   act(emitTreeChanged)
-  await screen.findByRole('row', { name: /^Week 1/ })
+  await screen.findByRole('row', { name: 'Week 1' })
   await act(async () => finishOld([]))
   expect(row('Week 1')).toBeInTheDocument()
   expect(api.listDir).toHaveBeenCalledTimes(2)
+})
+
+it('prunes abandoned branches before watcher refreshes', async () => {
+  const api = installMockApi({ listDir: vi.fn().mockResolvedValue([week1]) })
+  const user = userEvent.setup()
+  const view = renderFiles()
+  await user.click(screen.getByRole('button', { name: 'Expand Weekly results' }))
+  await screen.findByRole('row', { name: 'Week 1' })
+
+  view.rerender(
+    <TreeBrowserHarness
+      currentDir={`${season}/Admin`}
+      name="Admin"
+      listing={{ entries: [], error: null, reload: vi.fn() }}
+    />
+  )
+  act(emitTreeChanged)
+  expect(api.listDir).toHaveBeenCalledExactlyOnceWith(weeks.path)
+
+  view.rerender(<TreeBrowserHarness />)
+  expect(row('Weekly results')).toHaveAttribute('aria-expanded', 'false')
+  expect(screen.queryByRole('row', { name: 'Week 1' })).not.toBeInTheDocument()
 })
 
 it('imports dropped files into the visible folder and rejects drops in read-only seasons', async () => {

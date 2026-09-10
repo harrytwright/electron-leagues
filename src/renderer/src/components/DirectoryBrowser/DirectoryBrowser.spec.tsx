@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import { Dialog } from '@cloudflare/kumo'
@@ -6,8 +6,9 @@ import { useState } from 'react'
 import { DirectoryBrowser } from './index'
 import type { BrowserRow, Props } from './interface'
 import { revealLabel } from '../../lib/reveal-label'
-import { installMockApi } from '../../tests/mock-api'
+import { emitTreeChanged, installMockApi } from '../../tests/mock-api'
 import { renderWithProviders } from '../../tests/render-helpers'
+import { useDirListing } from '../../hooks/use-dir-listing'
 
 function row(name: string, kind: BrowserRow['kind'] = 'file', mtime?: number): BrowserRow {
   return { key: name, name, kind, path: `/documents/${name}`, mtime }
@@ -31,7 +32,25 @@ function renderBrowser(rows: BrowserRow[], props: Partial<Props> = {}): void {
 }
 
 function browserRow(name: string): HTMLElement {
-  return screen.getByRole('row', { name: new RegExp(`^${name}`) })
+  return screen.getByRole('row', { name })
+}
+
+function WatcherBrowserHarness(): React.JSX.Element {
+  const listing = useDirListing('/documents')
+  return (
+    <DirectoryBrowser
+      currentDir="/documents"
+      name="Documents"
+      heading="Files"
+      rows={(listing.entries ?? []).map((entry) => ({ ...entry, key: entry.path }))}
+      metadataColumn="modified"
+      readOnly={false}
+      listing={listing}
+      onRefresh={listing.reload}
+      onNavigate={vi.fn()}
+      emptyTitle="No documents yet"
+    />
+  )
 }
 
 function FocusBrowserHarness(): React.JSX.Element {
@@ -100,18 +119,29 @@ it('moves row focus with arrows and Home/End, leaving menu key events alone', as
   expect(api.openFile).not.toHaveBeenCalled()
 })
 
-it('tabs from the filter into the roving row and then out of the grid', async () => {
+it('uses the natural toolbar and roving-row tab order in both directions', async () => {
   installMockApi()
   const user = userEvent.setup()
   renderBrowser([row('a.xlsx'), row('b.xlsx')])
   const filter = screen.getByRole('textbox', { name: 'Filter this folder' })
 
-  await user.click(browserRow('b.xlsx'))
-  filter.focus()
+  await user.type(filter, 'a')
   await user.tab()
-  expect(browserRow('b.xlsx')).toHaveFocus()
+  expect(screen.getByRole('button', { name: 'Clear filter' })).toHaveFocus()
+  await user.tab()
+  expect(screen.getByRole('button', { name: 'Refresh files' })).toHaveFocus()
+  await user.tab()
+  expect(browserRow('a.xlsx')).toHaveFocus()
   await user.tab()
   expect(screen.getByRole('grid').contains(document.activeElement)).toBe(false)
+  await user.tab({ shift: true })
+  expect(browserRow('a.xlsx')).toHaveFocus()
+  await user.tab({ shift: true })
+  expect(screen.getByRole('button', { name: 'Refresh files' })).toHaveFocus()
+  await user.tab({ shift: true })
+  expect(screen.getByRole('button', { name: 'Clear filter' })).toHaveFocus()
+  await user.tab({ shift: true })
+  expect(filter).toHaveFocus()
 })
 
 it('shows modified dates and a dash for synthetic rows', () => {
@@ -202,8 +232,12 @@ it('names the actions menu on the menu element', async () => {
   const user = userEvent.setup()
   renderBrowser([row('Rules.docx')])
 
-  await user.click(screen.getByRole('button', { name: 'Actions for Rules.docx' }))
-  expect(await screen.findByRole('menu', { name: 'Actions for Rules.docx' })).toBeVisible()
+  const trigger = screen.getByRole('button', { name: 'Actions for Rules.docx' })
+  expect(browserRow('Rules.docx')).toHaveAccessibleName('Rules.docx')
+  await user.click(trigger)
+  const menu = await screen.findByRole('menu', { name: 'Actions for Rules.docx' })
+  expect(menu).toBeVisible()
+  expect(trigger).toHaveAttribute('aria-controls', menu.id)
 })
 
 it('restores ordinary actions while preserving outside and dialog focus', async () => {
@@ -260,15 +294,54 @@ it('keeps filter focus when it removes the menu row', async () => {
   const filter = screen.getByRole('textbox', { name: 'Filter this folder' })
   filter.focus()
   fireEvent.change(filter, { target: { value: 'missing' } })
-  expect(screen.queryByRole('row', { name: /^a\.xlsx/ })).not.toBeInTheDocument()
+  expect(screen.queryByRole('row', { name: 'a.xlsx' })).not.toBeInTheDocument()
   expect(filter).toHaveFocus()
   expect(document.activeElement).not.toHaveAttribute('aria-hidden', 'true')
+})
+
+it('recovers within the browser when a watcher removes the menu row', async () => {
+  const first = row('a.xlsx')
+  const second = row('b.xlsx')
+  installMockApi({
+    listDir: vi.fn().mockResolvedValueOnce([first, second]).mockResolvedValue([second])
+  })
+  const user = userEvent.setup()
+  renderWithProviders(<WatcherBrowserHarness />)
+
+  await user.click(await screen.findByRole('button', { name: 'Actions for a.xlsx' }))
+  expect(await screen.findByRole('menu')).toBeVisible()
+  act(emitTreeChanged)
+
+  await waitFor(() => expect(screen.queryByRole('row', { name: 'a.xlsx' })).not.toBeInTheDocument())
+  await waitFor(() => expect(browserRow('b.xlsx')).toHaveFocus())
+  expect(screen.getByRole('grid').contains(document.activeElement)).toBe(true)
+  expect(document.activeElement).not.toBe(document.body)
+})
+
+it('falls back to the browser filter when a watcher removes the last menu row', async () => {
+  const only = row('only.xlsx')
+  installMockApi({
+    listDir: vi.fn().mockResolvedValueOnce([only]).mockResolvedValue([])
+  })
+  const user = userEvent.setup()
+  renderWithProviders(<WatcherBrowserHarness />)
+
+  await user.click(await screen.findByRole('button', { name: 'Actions for only.xlsx' }))
+  expect(await screen.findByRole('menu')).toBeVisible()
+  act(emitTreeChanged)
+
+  await waitFor(() =>
+    expect(screen.queryByRole('row', { name: 'only.xlsx' })).not.toBeInTheDocument()
+  )
+  await waitFor(() =>
+    expect(screen.getByRole('textbox', { name: 'Filter this folder' })).toHaveFocus()
+  )
 })
 
 it('keeps badges beside the name', () => {
   installMockApi()
   renderBrowser([{ ...row('Season', 'folder'), badge: <span>Active</span> }])
-  expect(browserRow('Season')).toHaveAccessibleName(/Season\s*Active.*Folder/)
+  expect(screen.getByRole('row', { name: 'Season Active' })).toHaveAccessibleName('Season Active')
 })
 
 it('filters and clears without changing the supplied scan order', async () => {

@@ -6,6 +6,6 @@ export interface Props {
   open: boolean
   anchor: { left: number; top: number }
   actions: RowMenuItem[]
-  onOpenChange: (open: boolean, reason: string) => void
+  onOpenChange: (open: boolean) => void
   onRestoreFocus: () => void
 }

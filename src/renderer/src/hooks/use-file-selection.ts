@@ -2,8 +2,8 @@ import { useRef, useState, type ComponentPropsWithRef, type KeyboardEvent } from
 
 interface Selection {
   selected: string | null
-  focus: (path: string | undefined) => void
-  focusFirstRow: () => void
+  focus: (path: string | undefined) => boolean
+  focusFirstRow: () => boolean
   rowProps: (path: string) => ComponentPropsWithRef<'tr'>
   onKeyDown: (event: KeyboardEvent<HTMLTableRowElement>, index: number, open: () => void) => void
 }
@@ -18,8 +18,10 @@ export function useFileSelection(currentDir: string, paths: readonly string[]): 
   const elements = useRef(new Map<string, HTMLTableRowElement>())
   const selected = state.dir === currentDir ? state.selected : null
   const focusPath = selected !== null && paths.includes(selected) ? selected : paths[0]
-  const focus = (path: string | undefined): void => {
-    if (path !== undefined) elements.current.get(path)?.focus()
+  const focus = (path: string | undefined): boolean => {
+    const element = path === undefined ? undefined : elements.current.get(path)
+    element?.focus()
+    return element !== undefined
   }
   return {
     selected,

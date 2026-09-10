@@ -1,11 +1,11 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import type { DirEntry, LeagueNode, SeasonNode } from '@shared/tree'
 import { LeagueView } from './index'
 import { revealLabel } from '../../lib/reveal-label'
 import { makeDirEntry, makeLeague } from '../../tests/fixtures'
-import { installMockApi } from '../../tests/mock-api'
+import { emitTreeChanged, installMockApi } from '../../tests/mock-api'
 import { renderWithProviders } from '../../tests/render-helpers'
 
 const LEAGUE_PATH = '/root/monday/Mixed triples'
@@ -141,22 +141,21 @@ it('selects league rows with one click and opens the keyboard-selected season wi
   expect(document.activeElement).toBe(child)
 })
 
-it('keeps expanded tree folders when navigating into a sibling and back', async () => {
+it('prunes expanded tree folders after navigating into a sibling', async () => {
   const seasonPath = `${LEAGUE_PATH}/2025-26`
   const expandedPath = `${seasonPath}/Weekly results`
   const siblingPath = `${seasonPath}/Admin`
-  installMockApi({
-    listDir: vi.fn(
-      listingFor({
-        [seasonPath]: [
-          makeDirEntry({ name: 'Weekly results', kind: 'folder', path: expandedPath }),
-          makeDirEntry({ name: 'Admin', kind: 'folder', path: siblingPath })
-        ],
-        [expandedPath]: [makeDirEntry({ name: 'Week 1', path: `${expandedPath}/Week 1.xlsx` })],
-        [siblingPath]: []
-      })
-    )
-  })
+  const listDir = vi.fn(
+    listingFor({
+      [seasonPath]: [
+        makeDirEntry({ name: 'Weekly results', kind: 'folder', path: expandedPath }),
+        makeDirEntry({ name: 'Admin', kind: 'folder', path: siblingPath })
+      ],
+      [expandedPath]: [makeDirEntry({ name: 'Week 1', path: `${expandedPath}/Week 1.xlsx` })],
+      [siblingPath]: []
+    })
+  )
+  installMockApi({ listDir })
   const user = userEvent.setup()
   renderLeague()
 
@@ -165,13 +164,15 @@ it('keeps expanded tree folders when navigating into a sibling and back', async 
   expect(await screen.findByRole('row', { name: /^Week 1/ })).toBeInTheDocument()
   await user.dblClick(screen.getByRole('row', { name: /^Admin/ }))
   await screen.findByText('This folder is empty')
+  act(emitTreeChanged)
+  expect(listDir.mock.calls.filter(([path]) => path === expandedPath)).toHaveLength(1)
   await user.click(screen.getAllByRole('link', { name: '2025-26' })[0])
 
-  expect(await screen.findByRole('row', { name: /^Week 1/ })).toBeInTheDocument()
-  expect(screen.getByRole('row', { name: /^Weekly results/ })).toHaveAttribute(
+  expect(await screen.findByRole('row', { name: /^Weekly results/ })).toHaveAttribute(
     'aria-expanded',
-    'true'
+    'false'
   )
+  expect(screen.queryByRole('row', { name: /^Week 1/ })).not.toBeInTheDocument()
 })
 
 it('filters the league overview without reading folders and restores the season order', async () => {

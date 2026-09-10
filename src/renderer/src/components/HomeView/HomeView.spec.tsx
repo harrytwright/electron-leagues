@@ -121,6 +121,7 @@ it('lists only scanned Other items at the root and navigates their folders in ap
 
   await user.click(screen.getByRole('tab', { name: 'Other items' }))
   expect(await screen.findByRole('columnheader', { name: 'Modified' })).toBeInTheDocument()
+  expect(screen.getByText('Read-only')).toBeInTheDocument()
   expect(screen.getByRole('row', { name: /^Random stuff/ })).toBeInTheDocument()
   expect(screen.getByText('15 Jun 2025')).toBeInTheDocument()
   expect(screen.queryByRole('row', { name: /^_shared/ })).not.toBeInTheDocument()

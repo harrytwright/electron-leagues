@@ -37,7 +37,7 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
   const [zipping, setZipping] = useState<string | null>(null)
   const [syncingTemplates, setSyncingTemplates] = useState(false)
   const [treeSort, setTreeSort] = useState<Sort>({ column: 'name', direction: 'ascending' })
-  const tree = useTreeFolders()
+  const tree = useTreeFolders(trail.currentDir)
   const pendingFocusDir = useRef<string | null>(null)
   const { add } = useKumoToastManager()
   const feedback = useOperationFeedback()
