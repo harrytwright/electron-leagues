@@ -1,7 +1,7 @@
-import { realpath, stat } from 'node:fs/promises'
-import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { lstat, realpath, stat } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { parseSeasonName } from '../../shared/season'
-import { isWeekday } from '../../shared/weekday'
+import { isWeekday, type Weekday } from '../../shared/weekday'
 import { isMissing, toUserFacing, UserFacingError } from './fs-errors'
 
 function relativeInside(root: string, target: string): string | null {
@@ -21,14 +21,69 @@ export function isInsideRoot(root: string, target: string): boolean {
  * a symlink planted inside the root cannot point the app at something outside
  * it. Returns the resolved (not real) path for use with fs / shell APIs.
  */
-export async function assertInsideRoot(root: string, target: string): Promise<string> {
+interface ContainmentOptions {
+  allowMissingLeaf?: boolean
+}
+
+async function resolveExistingPrefix(target: string): Promise<string> {
+  try {
+    return await realpath(target)
+  } catch (err) {
+    if (!isMissing(err)) throw err
+    const leaf = await lstat(target).catch((leafError) => {
+      if (isMissing(leafError)) return null
+      throw leafError
+    })
+    // ENOENT can describe a dangling link, not just a new output; following it
+    // later during a write would bypass an otherwise safe parent check.
+    if (leaf?.isSymbolicLink()) {
+      throw new UserFacingError('An output path can’t be a symbolic link')
+    }
+    const parent = dirname(target)
+    if (parent === target) throw err
+    return join(await resolveExistingPrefix(parent), basename(target))
+  }
+}
+
+export async function assertInsideRoot(
+  root: string,
+  target: string,
+  options: ContainmentOptions = {}
+): Promise<string> {
   const resolved = resolve(target)
   const realRoot = await realpath(root)
-  const realTarget = await realpath(resolved)
+  if (options.allowMissingLeaf) {
+    const leaf = await lstat(resolved).catch((err) => {
+      if (isMissing(err)) return null
+      throw err
+    })
+    // Even an in-root link could redirect a zip write onto an unrelated user document.
+    if (leaf?.isSymbolicLink()) throw new UserFacingError('An output path can’t be a symbolic link')
+  }
+  // Resolve the existing prefix rather than creating parents just to validate a future output.
+  const realTarget = options.allowMissingLeaf
+    ? await resolveExistingPrefix(resolved)
+    : await realpath(resolved)
   if (!isInsideRoot(realRoot, realTarget)) {
     throw new UserFacingError('Path is outside the leagues folder')
   }
   return resolved
+}
+
+/** Validate a not-yet-created season through whichever parent already exists. */
+export async function resolveNewLiveSeasonRoot(
+  root: string,
+  day: Weekday,
+  leagueFolder: string,
+  seasonName: string
+): Promise<string> {
+  assertLeagueFolderName(leagueFolder)
+  const target = resolve(root, day, leagueFolder, seasonName)
+  try {
+    return await assertInsideRoot(root, target, { allowMissingLeaf: true })
+  } catch (err) {
+    throw toUserFacing(err)
+  }
 }
 
 /** Reject path syntax where an exact league folder name is required. */

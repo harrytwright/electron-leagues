@@ -26,7 +26,10 @@ export function toUserFacing(err: unknown): Error {
   if (err instanceof UserFacingError) return err
   if (isMissing(err)) return new UserFacingError('That folder no longer exists')
   if (isPermissionDenied(err)) {
-    return new UserFacingError('That folder can’t be read (permission denied)')
+    return new UserFacingError('That folder can’t be read or changed (permission denied)')
+  }
+  if (errorCode(err) === 'ENOSPC') {
+    return new UserFacingError('There isn’t enough free space to complete that operation')
   }
   return err instanceof Error ? err : new Error(String(err))
 }

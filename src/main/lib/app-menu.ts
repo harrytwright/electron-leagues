@@ -16,11 +16,6 @@ const editMenu: MenuItemConstructorOptions = {
   ]
 }
 
-const windowMenu: MenuItemConstructorOptions = {
-  role: 'windowMenu',
-  submenu: [{ role: 'minimize' }, { role: 'zoom' }, { role: 'close' }]
-}
-
 function commandItem(
   label: string,
   command: AppCommand,
@@ -63,6 +58,11 @@ export function buildAppMenuTemplate(
         label: 'Toggle developer tools',
         role: 'toggleDevTools',
         accelerator: platform === 'darwin' ? 'Alt+Command+I' : 'F12'
+      },
+      {
+        label: 'Toggle developer tools',
+        role: 'toggleDevTools',
+        accelerator: 'CmdOrCtrl+Shift+I'
       }
     )
   }
@@ -70,10 +70,14 @@ export function buildAppMenuTemplate(
     {
       label: 'File',
       submenu: [
+        // Plain Cmd/Ctrl+O remains available for opening the selected browser row.
         commandItem('Open location…', 'open-location', onCommand, 'CmdOrCtrl+Shift+O'),
         commandItem('New location…', 'new-location', onCommand),
         { type: 'separator' },
-        commandItem('Refresh', 'refresh', onCommand, 'CmdOrCtrl+R')
+        commandItem('Refresh', 'refresh', onCommand, 'CmdOrCtrl+R'),
+        ...(platform === 'darwin'
+          ? []
+          : ([{ type: 'separator' }, { role: 'quit' }] satisfies MenuItemConstructorOptions[]))
       ]
     },
     editMenu,
@@ -81,7 +85,13 @@ export function buildAppMenuTemplate(
       label: 'View',
       submenu: viewSubmenu
     },
-    windowMenu
+    {
+      role: 'windowMenu',
+      submenu:
+        platform === 'darwin'
+          ? [{ role: 'minimize' }, { role: 'zoom' }, { role: 'close' }]
+          : [{ role: 'minimize' }, { role: 'close' }]
+    }
   )
   return template
 }

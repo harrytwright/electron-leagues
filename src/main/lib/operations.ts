@@ -13,14 +13,19 @@ import {
   stat,
   writeFile
 } from 'node:fs/promises'
-import { basename, extname, join } from 'node:path'
+import { basename, dirname, extname, join } from 'node:path'
 import { healMeta, parseLeagueMetaInput } from '../../shared/meta'
 import { compareSeasonNames, parseSeasonName, type SeasonName } from '../../shared/season'
 import { sanitiseFolderName } from '../../shared/sanitise'
-import { isWeekday, type Weekday } from '../../shared/weekday'
-import { isWorkflowId } from '../../shared/workflows'
+import type { Weekday } from '../../shared/weekday'
+import type { SeasonCreateRequest } from '../../shared/season-create'
 import { toUserFacing, UserFacingError } from './fs-errors'
-import { assertLeagueFolderName, resolveLiveSeasonRoot } from './paths'
+import {
+  assertInsideRoot,
+  assertLeagueFolderName,
+  resolveNewLiveSeasonRoot,
+  resolveLiveSeasonRoot
+} from './paths'
 import {
   executeCopyPlan,
   FILE_RULES,
@@ -80,8 +85,9 @@ export async function repairReservedLocations(
       repairReservedLocationsUnlocked(root, templatesSource)
     )
   } catch (err) {
-    const mapped = toUserFacing(err)
-    throw mapped instanceof UserFacingError ? mapped : new UserFacingError(mapped.message)
+    // Unexpected repair faults remain reportable bugs rather than being
+    // disguised as expected user mistakes.
+    throw toUserFacing(err)
   }
 }
 
@@ -92,8 +98,9 @@ async function repairReservedLocationsUnlocked(
   try {
     return await repairReservedLocationsUnchecked(root, templatesSource)
   } catch (err) {
-    const mapped = toUserFacing(err)
-    throw mapped instanceof UserFacingError ? mapped : new UserFacingError(mapped.message)
+    // Keep the unlocked boundary safe for callers already holding the lock,
+    // while preserving unexpected errors for Sentry.
+    throw toUserFacing(err)
   }
 }
 
@@ -216,13 +223,8 @@ async function moveDir(from: string, to: string): Promise<void> {
   }
 }
 
-export interface CreateSeasonOptions {
+export interface CreateSeasonOptions extends SeasonCreateRequest {
   root: string
-  day: string
-  leagueFolder: string
-  seasonName: string
-  source: string
-  archiveOldest: boolean
 }
 
 export interface CreateSeasonResult {
@@ -231,19 +233,31 @@ export interface CreateSeasonResult {
 }
 
 export async function createSeason(opts: CreateSeasonOptions): Promise<CreateSeasonResult> {
-  return withTemplateLock(opts.root, () => createSeasonUnlocked(opts))
-}
-
-async function createSeasonUnlocked(opts: CreateSeasonOptions): Promise<CreateSeasonResult> {
-  if (!isWorkflowId(opts.source)) throw new UserFacingError('Unknown season workflow')
-  if (!isWeekday(opts.day)) throw new UserFacingError('Invalid league day')
   assertLeagueFolderName(opts.leagueFolder)
   const season = parseSeasonName(opts.seasonName)
-  if (!season) throw new Error(`"${opts.seasonName}" is not a valid season name`)
+  if (!season || season.name !== opts.seasonName) {
+    throw new UserFacingError('Invalid season name')
+  }
+  return withTemplateLock(opts.root, async () => {
+    // Resolve after waiting for earlier operations, not against a potentially stale pre-queue path.
+    const seasonPath = await resolveNewLiveSeasonRoot(
+      opts.root,
+      opts.day,
+      opts.leagueFolder,
+      season.name
+    )
+    return createSeasonUnlocked(opts, seasonPath, season)
+  })
+}
+
+async function createSeasonUnlocked(
+  opts: CreateSeasonOptions,
+  seasonPath: string,
+  season: SeasonName
+): Promise<CreateSeasonResult> {
   await repairReservedLocationsUnlocked(opts.root)
 
-  const leaguePath = join(opts.root, opts.day, opts.leagueFolder)
-  const seasonPath = join(leaguePath, season.name)
+  const leaguePath = dirname(seasonPath)
   if (await exists(seasonPath)) throw new Error(`Season "${season.name}" already exists`)
 
   const before = await liveSeasonsOf(leaguePath)
@@ -294,7 +308,7 @@ async function createSeasonUnlocked(opts: CreateSeasonOptions): Promise<CreateSe
 
 export interface SyncSeasonOptions {
   root: string
-  day: string
+  day: Weekday
   leagueFolder: string
   seasonName: string
 }
@@ -321,22 +335,39 @@ export async function zipArchivedSeasons(
   leagueFolder: string,
   seasonNames: string[]
 ): Promise<string[]> {
+  assertLeagueFolderName(leagueFolder)
+  const seasons = seasonNames.map((name) => {
+    const season = parseSeasonName(name)
+    if (!season || season.name !== name) throw new UserFacingError('Invalid season name')
+    return season
+  })
+  if (seasons.length === 0) return []
   const archiveDir = join(root, '_archives', leagueFolder)
+  await assertInsideRoot(root, archiveDir, { allowMissingLeaf: true })
+  // Validate the entire batch first so a later invalid selection cannot leave earlier zip writes behind.
+  const plans = await Promise.all(
+    seasons.map(async (season) => {
+      const seasonDir = join(archiveDir, season.name)
+      if (!(await exists(seasonDir))) {
+        throw new UserFacingError(`"${season.name}" has no archive folder for ${leagueFolder}`)
+      }
+      await assertInsideRoot(root, seasonDir)
+      const zipPath = await assertInsideRoot(root, join(archiveDir, `${season.name}.zip`), {
+        allowMissingLeaf: true
+      })
+      return { season, seasonDir, zipPath }
+    })
+  )
   const zips: string[] = []
 
-  for (const name of seasonNames) {
-    const seasonDir = join(archiveDir, name)
-    if (!(await exists(seasonDir))) {
-      throw new Error(`"${name}" has no archive folder for ${leagueFolder}`)
-    }
-    const zipPath = join(archiveDir, `${name}.zip`)
+  for (const { season, seasonDir, zipPath } of plans) {
     await new Promise<void>((resolvePromise, reject) => {
       const output = createWriteStream(zipPath)
       const zip = new ZipArchive({ zlib: { level: 9 } })
       output.on('close', () => resolvePromise())
       zip.on('error', reject)
       zip.pipe(output)
-      zip.directory(seasonDir, name)
+      zip.directory(seasonDir, season.name)
       void zip.finalize()
     })
     zips.push(zipPath)

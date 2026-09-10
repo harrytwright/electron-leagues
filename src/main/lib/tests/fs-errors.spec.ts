@@ -22,6 +22,10 @@ describe('toUserFacing', () => {
     expect(toUserFacing(fsError('ENOENT'))).toBeInstanceOf(UserFacingError)
     expect(toUserFacing(fsError('ENOENT')).message).toBe('That folder no longer exists')
     expect(toUserFacing(fsError('EPERM')).message).toMatch(/permission denied/)
+    expect(toUserFacing(fsError('EACCES')).message).toMatch(/read or changed/)
+    expect(toUserFacing(fsError('ENOSPC'))).toEqual(
+      new UserFacingError('There isn’t enough free space to complete that operation')
+    )
   })
 
   test('passes other errors through unchanged', () => {

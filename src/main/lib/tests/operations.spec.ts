@@ -2,7 +2,7 @@ import AdmZip from 'adm-zip'
 import { mkdtemp, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import {
   createLeague,
   createSeason,
@@ -14,6 +14,9 @@ import {
   zipArchivedSeasons
 } from '../operations'
 import { UserFacingError } from '../fs-errors'
+import { parseSeasonCreateRequest } from '../season-create-request'
+import { FILE_RULES } from '../template-workflows'
+import { resolveNewLiveSeasonRoot } from '../paths'
 
 let root: string
 let outside: string
@@ -43,6 +46,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await rm(root, { recursive: true, force: true })
   await rm(outside, { recursive: true, force: true })
 })
@@ -95,10 +99,18 @@ describe('initialiseRoot', () => {
 
   test('never recreates a missing selected root', async () => {
     await rm(root, { recursive: true })
-    await expect(repairReservedLocations(root, outside)).rejects.toThrow(
-      'That folder no longer exists'
-    )
+    const repair = repairReservedLocations(root, outside)
+    await expect(repair).rejects.toBeInstanceOf(UserFacingError)
+    await expect(repair).rejects.toThrow('That folder no longer exists')
     expect(await exists(root)).toBe(false)
+  })
+
+  test('preserves an unexpected error raised inside repair', async () => {
+    await makeTree(outside, { 'Rules.docx': 'rules', 'Sign-In Sheet.docx': 'sign-in' })
+    const fault = new TypeError('broken rule')
+    vi.spyOn(FILE_RULES, 'fill-missing').mockRejectedValueOnce(fault)
+
+    await expect(repairReservedLocations(root, outside)).rejects.toBe(fault)
   })
 
   test('rejects reserved symlinks and conflicting required-template entries', async () => {
@@ -137,32 +149,51 @@ describe('createLeague', () => {
 })
 
 describe('createSeason', () => {
-  test('rejects an unknown workflow without creating anything', async () => {
-    await expect(
-      createSeason({
-        root,
+  test('rejects an unknown workflow at the IPC boundary', () => {
+    expect(() =>
+      parseSeasonCreateRequest({
         day: 'monday',
         leagueFolder: 'Pairs',
         seasonName: '2026-27',
         source: 'unknown',
         archiveOldest: false
       })
-    ).rejects.toEqual(new UserFacingError('Unknown season workflow'))
-
-    expect(await readdir(root)).toEqual([])
+    ).toThrow(new UserFacingError('Unknown season workflow'))
   })
 
-  test('rejects a day that escapes the root', async () => {
-    await expect(
-      createSeason({
-        root,
+  test('rejects a day that escapes the root at the IPC boundary', () => {
+    expect(() =>
+      parseSeasonCreateRequest({
         day: '..',
         leagueFolder: 'Pairs',
         seasonName: '2026-27',
         source: 'empty',
         archiveOldest: false
       })
-    ).rejects.toEqual(new UserFacingError('Invalid league day'))
+    ).toThrow(new UserFacingError('Invalid league day'))
+  })
+
+  test.each([
+    null,
+    {},
+    {
+      day: 'monday',
+      leagueFolder: 42,
+      seasonName: '2026-27',
+      source: 'empty',
+      archiveOldest: false
+    },
+    {
+      day: 'monday',
+      leagueFolder: 'Pairs',
+      seasonName: '2026-27',
+      source: 'empty',
+      archiveOldest: 'yes'
+    }
+  ])('rejects an invalid IPC request', (input) => {
+    expect(() => parseSeasonCreateRequest(input)).toThrow(
+      new UserFacingError('Invalid season request')
+    )
   })
 
   test('rejects a league folder that escapes its weekday', async () => {
@@ -178,7 +209,7 @@ describe('createSeason', () => {
     ).rejects.toEqual(new UserFacingError('Invalid league folder'))
   })
 
-  test('does not restore a deleted bundled template as a side effect', async () => {
+  test('library season creation does not seed a deleted bundled template', async () => {
     await makeTree(outside, { 'Rules.docx': 'bundled', 'Sign-In Sheet.docx': 'bundled' })
     await initialiseRoot(root, outside)
     await rm(join(root, '_templates/Rules.docx'))
@@ -333,6 +364,51 @@ describe('createSeason', () => {
     ).rejects.toThrow(/season name/i)
   })
 
+  test('rejects a non-canonical season name before taking the template lock', async () => {
+    await rm(root, { recursive: true })
+    await expect(
+      createSeason({
+        root,
+        day: 'monday',
+        leagueFolder: 'Mens Triples',
+        seasonName: ' 2025-26 ',
+        source: 'templates',
+        archiveOldest: true
+      })
+    ).rejects.toEqual(new UserFacingError('Invalid season name'))
+    expect(await exists(root)).toBe(false)
+  })
+
+  test('rejects a league symlink outside the root without creating a season', async () => {
+    await makeTree(root, { monday: null })
+    await symlink(outside, join(root, 'monday/Mens Triples'))
+
+    await expect(
+      createSeason({
+        root,
+        day: 'monday',
+        leagueFolder: 'Mens Triples',
+        seasonName: '2025-26',
+        source: 'empty',
+        archiveOldest: false
+      })
+    ).rejects.toThrow(/outside the leagues folder/)
+    expect(await exists(join(outside, '2025-26'))).toBe(false)
+    expect(await readdir(root)).toEqual(['monday'])
+  })
+
+  test('validates missing season parents without creating them', async () => {
+    await expect(resolveNewLiveSeasonRoot(root, 'monday', 'Pairs', '2025-26')).resolves.toBe(
+      join(root, 'monday/Pairs/2025-26')
+    )
+    expect(await readdir(root)).toEqual([])
+    await symlink(outside, join(root, 'monday'))
+    await expect(resolveNewLiveSeasonRoot(root, 'monday', 'Pairs', '2025-26')).rejects.toThrow(
+      /outside the leagues folder/
+    )
+    expect(await readdir(outside)).toEqual([])
+  })
+
   test('rejects a season that already exists', async () => {
     await makeTree(root, { 'monday/Mens Triples/2025-26': null })
     await expect(
@@ -424,6 +500,67 @@ describe('zipArchivedSeasons', () => {
     await expect(zipArchivedSeasons(root, 'Mens Triples', ['2020-21'])).rejects.toThrow(
       /no archive/i
     )
+  })
+
+  test('does nothing for an empty archive selection', async () => {
+    await expect(zipArchivedSeasons(root, 'Mens Triples', [])).resolves.toEqual([])
+    expect(await readdir(root)).toEqual([])
+  })
+
+  test('rejects path traversal before writing an archive', async () => {
+    await makeTree(root, { '_archives/Mens Triples': null })
+
+    await expect(zipArchivedSeasons(root, '../x', ['2025-26'])).rejects.toEqual(
+      new UserFacingError('Invalid league folder')
+    )
+    await expect(zipArchivedSeasons(root, 'Mens Triples', ['../../evil'])).rejects.toEqual(
+      new UserFacingError('Invalid season name')
+    )
+    expect(await readdir(join(root, '_archives/Mens Triples'))).toEqual([])
+  })
+
+  test('rejects a dangling symlink at the zip output path', async () => {
+    await makeTree(root, { '_archives/Mens Triples/2025-26': null })
+    const zipPath = join(root, '_archives/Mens Triples/2025-26.zip')
+    await symlink(join(outside, 'missing.zip'), zipPath)
+
+    await expect(zipArchivedSeasons(root, 'Mens Triples', ['2025-26'])).rejects.toThrow(
+      /symbolic link/
+    )
+    expect(await exists(join(outside, 'missing.zip'))).toBe(false)
+  })
+
+  test('validates the entire selection before writing its first zip', async () => {
+    await makeTree(root, { '_archives/Mens Triples/2025-26': null })
+    await expect(
+      zipArchivedSeasons(root, 'Mens Triples', ['2025-26', '../../evil'])
+    ).rejects.toThrow(/season name/)
+    expect(await readdir(join(root, '_archives/Mens Triples'))).toEqual(['2025-26'])
+  })
+
+  test('rejects a zip symlink to an existing user document inside the root', async () => {
+    await makeTree(root, {
+      '_archives/Mens Triples/2025-26': null,
+      '_templates/Rules.docx': 'user rules'
+    })
+    await symlink(
+      join(root, '_templates/Rules.docx'),
+      join(root, '_archives/Mens Triples/2025-26.zip')
+    )
+    await expect(zipArchivedSeasons(root, 'Mens Triples', ['2025-26'])).rejects.toThrow(
+      /symbolic link/
+    )
+    expect(await readFile(join(root, '_templates/Rules.docx'), 'utf8')).toBe('user rules')
+  })
+
+  test('rejects an archive directory symlink outside the root before writing', async () => {
+    await makeTree(root, { _archives: null })
+    await makeTree(outside, { '2025-26': null })
+    await symlink(outside, join(root, '_archives/Mens Triples'))
+    await expect(zipArchivedSeasons(root, 'Mens Triples', ['2025-26'])).rejects.toBeInstanceOf(
+      UserFacingError
+    )
+    expect(await readdir(outside)).toEqual(['2025-26'])
   })
 })
 

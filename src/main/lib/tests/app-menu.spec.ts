@@ -34,6 +34,8 @@ describe('buildAppMenuTemplate', () => {
     expect(items(windows).filter((item) => item.accelerator === 'CmdOrCtrl+R')).toEqual([
       expect.objectContaining({ label: 'Refresh' })
     ])
+    expect(items(windows).some((item) => item.role === 'quit')).toBe(true)
+    expect(items(windows).some((item) => item.role === 'zoom')).toBe(false)
     expect(items(mac).filter((item) => item.accelerator === 'CmdOrCtrl+R')).toEqual([
       expect.objectContaining({ label: 'Refresh' })
     ])
@@ -50,14 +52,14 @@ describe('buildAppMenuTemplate', () => {
   )
 
   it('offers platform-native developer tools only in development', () => {
-    const mac = items(buildAppMenuTemplate('darwin', true, vi.fn())).find(
+    const mac = items(buildAppMenuTemplate('darwin', true, vi.fn())).filter(
       (item) => item.role === 'toggleDevTools'
     )
-    const windows = items(buildAppMenuTemplate('win32', true, vi.fn())).find(
+    const windows = items(buildAppMenuTemplate('win32', true, vi.fn())).filter(
       (item) => item.role === 'toggleDevTools'
     )
-    expect(mac?.accelerator).toBe('Alt+Command+I')
-    expect(windows?.accelerator).toBe('F12')
+    expect(mac.map((item) => item.accelerator)).toEqual(['Alt+Command+I', 'CmdOrCtrl+Shift+I'])
+    expect(windows.map((item) => item.accelerator)).toEqual(['F12', 'CmdOrCtrl+Shift+I'])
   })
 
   it('forwards native menu clicks as application commands', () => {

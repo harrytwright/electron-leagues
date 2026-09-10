@@ -7,6 +7,7 @@ import { stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import icon from '../../resources/icon.png?asset'
 import type { Weekday } from '../shared/weekday'
+import { parseSeasonCreateRequest } from './lib/season-create-request'
 import { buildAppMenuTemplate, buildEditableContextMenuTemplate } from './lib/app-menu'
 import { capture, initAnalytics, shutdownAnalytics } from './lib/analytics'
 import { oneDriveStatus } from './lib/onedrive'
@@ -248,7 +249,9 @@ function registerIpc(): void {
     return path
   })
 
-  handle('season:create', async (_e, opts: Omit<CreateSeasonOptions, 'root'>) => {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
+  handle('season:create', async (_e, input: unknown) => {
+    const opts = parseSeasonCreateRequest(input)
     const result = await createSeason({
       ...opts,
       root: requireRoot()

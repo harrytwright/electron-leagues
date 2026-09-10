@@ -2,19 +2,13 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { DirEntry, LeaguesTree } from '../shared/tree'
 import type { Weekday } from '../shared/weekday'
-import type { WorkflowId } from '../shared/workflows'
+import type { SeasonCreateRequest } from '../shared/season-create'
 import type { AppCommandEvent } from '../shared/app-command'
 import { getRendererMetrics } from './renderer-metrics'
 
 export type { RendererMetrics } from './renderer-metrics'
 
-export interface SeasonCreateRequest {
-  day: Weekday
-  leagueFolder: string
-  seasonName: string
-  source: WorkflowId
-  archiveOldest: boolean
-}
+export type { SeasonCreateRequest } from '../shared/season-create'
 
 const api = {
   getRendererMetrics,
