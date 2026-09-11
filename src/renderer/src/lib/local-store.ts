@@ -57,4 +57,5 @@ export function loadDiagnosticsEnabled(): boolean {
 
 export function saveDiagnosticsEnabled(enabled: boolean): void {
   write(DIAGNOSTICS_KEY, { enabled })
+  window.dispatchEvent(new Event('leagues:diagnostics-changed'))
 }

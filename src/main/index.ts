@@ -8,7 +8,11 @@ import { join, resolve } from 'node:path'
 import icon from '../../resources/icon.png?asset'
 import type { Weekday } from '../shared/weekday'
 import { parseSeasonCreateRequest } from './lib/season-create-request'
-import { buildAppMenuTemplate, buildEditableContextMenuTemplate } from './lib/app-menu'
+import {
+  buildAppMenuTemplate,
+  buildEditableContextMenuTemplate,
+  DIAGNOSTICS_MENU_ID
+} from './lib/app-menu'
 import { capture, initAnalytics, shutdownAnalytics } from './lib/analytics'
 import { oneDriveStatus } from './lib/onedrive'
 import {
@@ -170,6 +174,12 @@ function handle<Args extends unknown[], Result>(
 }
 
 function registerIpc(): void {
+  ipcMain.on('diagnostics:changed', (event, enabled) => {
+    if (event.sender !== mainWindow?.webContents || (enabled !== true && enabled !== false)) return
+    // Mirror the renderer's persisted preference instead of introducing an electron-store owner.
+    const item = Menu.getApplicationMenu()?.getMenuItemById(DIAGNOSTICS_MENU_ID)
+    if (item) item.checked = enabled
+  })
   // The renderer's Sentry SDK inherits its config from the main process,
   // so only PostHog needs anything over IPC.
   handle('analytics:config', () => ({

@@ -30,7 +30,12 @@ function seasonBadgeVariant(status: SeasonNode['status']): 'success' | 'info' {
   }
 }
 
-export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): React.JSX.Element {
+export function LeagueView({
+  league,
+  onChanged,
+  onRefresh,
+  onCurrentDirChange
+}: Props): React.JSX.Element {
   const trail = useCrumbs(league.path, onCurrentDirChange)
   const [newSeason, setNewSeason] = useState(false)
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null)
@@ -87,19 +92,22 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
     try {
       await window.api.zipArchive(league.folderName, [name])
       const message = `Zipped ${name}`
-      feedback.finish(operationId, 'success', message)
-      add({ title: message, variant: 'success' })
       listing.reload()
       try {
         await onChanged()
       } catch (caught) {
-        add({ title: ipcErrorMessage(caught), variant: 'error' })
+        add({
+          title: `${message}, but the league could not be refreshed: ${ipcErrorMessage(caught)}`,
+          variant: 'error'
+        })
+        return
       }
+      add({ title: message, variant: 'success' })
     } catch (caught) {
-      const message = ipcErrorMessage(caught)
-      feedback.finish(operationId, 'error', message)
-      add({ title: message, variant: 'error' })
+      add({ title: ipcErrorMessage(caught), variant: 'error' })
     } finally {
+      // Completion follows refresh so a successful write is never reported as a plain failure.
+      feedback.finish(operationId)
       setZipping(null)
     }
   }
@@ -118,19 +126,22 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
         result.added.length === 0
           ? 'Templates already up to date'
           : `Added ${result.added.length} template${result.added.length === 1 ? '' : 's'}`
-      feedback.finish(operationId, 'success', message)
-      add({ title: message, variant: 'success' })
       listing.reload()
       try {
         await onChanged()
       } catch (caught) {
-        add({ title: ipcErrorMessage(caught), variant: 'error' })
+        add({
+          title: `${message}, but the league could not be refreshed: ${ipcErrorMessage(caught)}`,
+          variant: 'error'
+        })
+        return
       }
+      add({ title: message, variant: 'success' })
     } catch (caught) {
-      const message = ipcErrorMessage(caught)
-      feedback.finish(operationId, 'error', message)
-      add({ title: message, variant: 'error' })
+      add({ title: ipcErrorMessage(caught), variant: 'error' })
     } finally {
+      // Completion follows refresh so a successful write is never reported as a plain failure.
+      feedback.finish(operationId)
       setSyncingTemplates(false)
     }
   }
@@ -311,7 +322,7 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
             metadataColumn={trail.atBase ? 'contents' : 'modified'}
             readOnly={inArchive}
             onRefresh={() => {
-              if (trail.atBase) void onChanged()
+              if (trail.atBase) void onRefresh()
               else listing.reload()
             }}
             onNavigate={enter}
@@ -330,7 +341,7 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
         onOpenChange={setNewSeason}
         onCreated={() => {
           setNewSeason(false)
-          void onChanged()
+          void onRefresh()
         }}
       />
 
@@ -341,7 +352,6 @@ export function LeagueView({ league, onChanged, onCurrentDirChange }: Props): Re
           if (!open) setDeleting(null)
         }}
         onDeleted={async () => {
-          setDeleting(null)
           await onChanged()
         }}
       />

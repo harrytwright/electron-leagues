@@ -8,7 +8,7 @@ import type { Props } from './interface'
 export function OtherPane({
   entries,
   root,
-  onChanged,
+  onRefresh,
   onCurrentDirChange
 }: Props): React.JSX.Element {
   const trail = useCrumbs(root, onCurrentDirChange)
@@ -36,7 +36,7 @@ export function OtherPane({
   }
   const refresh = (): void => {
     listing.reload()
-    void onChanged()
+    void onRefresh()
   }
 
   return (

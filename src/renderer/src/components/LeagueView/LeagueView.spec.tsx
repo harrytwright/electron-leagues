@@ -52,7 +52,12 @@ function renderLeague(
 ): ReturnType<typeof vi.fn> {
   const onChanged = vi.fn()
   renderWithProviders(
-    <LeagueView league={league} onChanged={onChanged} onCurrentDirChange={onCurrentDirChange} />
+    <LeagueView
+      league={league}
+      onChanged={onChanged}
+      onRefresh={onChanged}
+      onCurrentDirChange={onCurrentDirChange}
+    />
   )
   return onChanged
 }
@@ -103,13 +108,19 @@ it('shows the archive row for zipped-only archives and hides it when empty', () 
     <LeagueView
       league={makeLeague({ archivedSeasons: [], archiveItemCount: 1 })}
       onChanged={vi.fn()}
+      onRefresh={vi.fn()}
       onCurrentDirChange={vi.fn()}
     />
   )
   expect(screen.getByRole('row', { name: /Archive/ })).toHaveTextContent('1 item')
 
   view.rerender(
-    <LeagueView league={makeLeague()} onChanged={vi.fn()} onCurrentDirChange={vi.fn()} />
+    <LeagueView
+      league={makeLeague()}
+      onChanged={vi.fn()}
+      onRefresh={vi.fn()}
+      onCurrentDirChange={vi.fn()}
+    />
   )
   expect(screen.queryByRole('row', { name: /^Archive/ })).not.toBeInTheDocument()
 })
@@ -341,6 +352,52 @@ it('disables template sync while pending and reports errors', async () => {
   expect(onChanged).not.toHaveBeenCalled()
 })
 
+it('keeps template sync pending through refresh and names both outcomes when refresh fails', async () => {
+  let rejectRefresh!: (reason: Error) => void
+  const api = installMockApi({
+    listDir: vi.fn(listingFor({ [`${LEAGUE_PATH}/2025-26`]: [] })),
+    syncSeasonTemplates: vi.fn().mockResolvedValue({
+      added: ['Sign-In Sheet.docx'],
+      skipped: ['Rules.docx']
+    })
+  })
+  const onChanged = vi.fn(
+    () =>
+      new Promise<void>((_resolve, reject) => {
+        rejectRefresh = reject
+      })
+  )
+  const user = userEvent.setup()
+  renderWithProviders(
+    <LeagueView
+      league={fullLeague()}
+      onChanged={onChanged}
+      onRefresh={vi.fn()}
+      onCurrentDirChange={vi.fn()}
+    />
+  )
+
+  await user.dblClick(screen.getByRole('row', { name: '2025-26 Active' }))
+  await screen.findByText('This folder is empty')
+  await user.click(screen.getByRole('button', { name: 'League actions' }))
+  await user.click(await screen.findByRole('menuitem', { name: 'Sync with templates' }))
+  await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
+
+  await user.click(screen.getByRole('button', { name: 'League actions' }))
+  expect(await screen.findByRole('menuitem', { name: 'Syncing templates…' })).toHaveAttribute(
+    'aria-disabled',
+    'true'
+  )
+
+  rejectRefresh(new Error('Scan failed'))
+
+  expect(
+    await screen.findByText('Added 1 template, but the league could not be refreshed: Scan failed')
+  ).toBeInTheDocument()
+  await waitFor(() => expect(screen.queryByText('Syncing templates…')).not.toBeInTheDocument())
+  expect(api.syncSeasonTemplates).toHaveBeenCalledOnce()
+})
+
 it('never offers template sync inside the archive or below a live season root', async () => {
   installMockApi({
     listDir: vi.fn(
@@ -473,6 +530,46 @@ it('offers to zip archived seasons, once at a time, and reports the outcome', as
 
   menu = await openRowMenu(user, '2022-23.zip')
   expect(within(menu).queryByRole('menuitem', { name: /zip/i })).not.toBeInTheDocument()
+})
+
+it('keeps zipping pending through refresh and names both outcomes when refresh fails', async () => {
+  let rejectRefresh!: (reason: Error) => void
+  const api = installMockApi({
+    listDir: vi.fn(listingFor(ARCHIVE_LISTING)),
+    zipArchive: vi.fn().mockResolvedValue([`${ARCHIVE_PATH}/2023-24.zip`])
+  })
+  const onChanged = vi.fn(
+    () =>
+      new Promise<void>((_resolve, reject) => {
+        rejectRefresh = reject
+      })
+  )
+  const user = userEvent.setup()
+  renderWithProviders(
+    <LeagueView
+      league={fullLeague()}
+      onChanged={onChanged}
+      onRefresh={vi.fn()}
+      onCurrentDirChange={vi.fn()}
+    />
+  )
+
+  await user.dblClick(screen.getByRole('row', { name: 'Archive Read-only' }))
+  await screen.findByRole('row', { name: '2023-24' })
+  const menu = await openRowMenu(user, '2023-24')
+  await user.click(within(menu).getByRole('menuitem', { name: 'Zip season' }))
+  await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
+
+  expect(screen.getByRole('row', { name: '2023-24 Zipping…' })).toHaveTextContent('Zipping…')
+  rejectRefresh(new Error('Scan failed'))
+
+  expect(
+    await screen.findByText('Zipped 2023-24, but the league could not be refreshed: Scan failed')
+  ).toBeInTheDocument()
+  await waitFor(() =>
+    expect(screen.getByRole('row', { name: '2023-24' })).not.toHaveTextContent('Zipping…')
+  )
+  expect(api.zipArchive).toHaveBeenCalledOnce()
 })
 
 it('shows an error toast when zipping fails', async () => {

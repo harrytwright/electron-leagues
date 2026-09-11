@@ -1,10 +1,12 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 import { OperationFeedbackProvider } from '../OperationFeedbackProvider'
-import { installMockApi } from '../../tests/mock-api'
+import { emitAppCommand, installMockApi } from '../../tests/mock-api'
 import { StatusBar } from './index'
 import { useOperationFeedback } from '@renderer/hooks/use-operation-feedback'
+import { useAppCommands } from '@renderer/hooks/use-app-commands'
+import { useDiagnosticsCommands } from '@renderer/hooks/use-diagnostics-preference'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -17,16 +19,21 @@ function StartOperation(): React.JSX.Element {
   return (
     <>
       <button onClick={() => begin('Importing')}>Start operation</button>
-      <button onClick={() => finish(begin('Importing'), 'error', 'Import failed')}>
-        Fail operation
-      </button>
+      <button onClick={() => finish(begin('Importing'))}>Fail operation</button>
     </>
   )
+}
+
+function DiagnosticsCommands(): null {
+  useAppCommands()
+  useDiagnosticsCommands()
+  return null
 }
 
 function renderStatus(): ReturnType<typeof render> {
   return render(
     <OperationFeedbackProvider>
+      <DiagnosticsCommands />
       <StatusBar path="/root/monday/Mixed triples/2025-26/Week 1" />
     </OperationFeedbackProvider>
   )
@@ -55,7 +62,7 @@ it('uses Windows separators and leaves short paths intact', () => {
     </OperationFeedbackProvider>
   )
   expect(screen.getByTitle('C:\\Leagues\\monday\\Pairs\\2025-26')).toHaveTextContent(
-    '…\\monday\\Pairs\\2025-26'
+    'C:\\…\\monday\\Pairs\\2025-26'
   )
 
   view.rerender(
@@ -66,7 +73,7 @@ it('uses Windows separators and leaves short paths intact', () => {
   expect(screen.getByTitle('/root/monday')).toHaveTextContent('/root/monday')
 })
 
-it('updates an existing live region when the first operation starts', async () => {
+it('shows pending activity without creating a second live region', async () => {
   installMockApi()
   render(
     <OperationFeedbackProvider>
@@ -74,15 +81,13 @@ it('updates an existing live region when the first operation starts', async () =
       <StartOperation />
     </OperationFeedbackProvider>
   )
-  const region = screen.getByRole('status')
-  expect(region.tagName).toBe('DIV')
-  expect(region).toBeEmptyDOMElement()
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
   await userEvent.setup().click(screen.getByRole('button', { name: 'Start operation' }))
-  expect(screen.getByRole('status')).toBe(region)
-  expect(region).toHaveTextContent('Importing…')
+  expect(screen.getByText('Importing…')).toBeVisible()
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
 })
 
-it('clears completed operations from the persistent live region', async () => {
+it('does not render completion results in the status bar', async () => {
   installMockApi()
   render(
     <OperationFeedbackProvider>
@@ -91,8 +96,8 @@ it('clears completed operations from the persistent live region', async () => {
     </OperationFeedbackProvider>
   )
   await userEvent.setup().click(screen.getByRole('button', { name: 'Fail operation' }))
-  expect(screen.getByRole('status')).toBeEmptyDOMElement()
-  expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite')
+  expect(screen.queryByText('Importing…')).not.toBeInTheDocument()
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
 })
 
 it('enables diagnostics from a checked status menu and persists the preference', async () => {
@@ -109,39 +114,69 @@ it('enables diagnostics from a checked status menu and persists the preference',
   )
 })
 
-it('hides diagnostics and does not poll in production even when the preference is stored', () => {
+it('offers opt-in diagnostics in production and restores the saved preference', async () => {
   vi.stubEnv('DEV', false)
   localStorage.setItem('leagues:diagnostics:v1', '{"enabled":true}')
   const api = installMockApi()
   renderStatus()
 
-  expect(screen.queryByRole('button', { name: 'Status options' })).not.toBeInTheDocument()
-  expect(screen.queryByText('Heap 42 MB')).not.toBeInTheDocument()
-  expect(api.getRendererMetrics).not.toHaveBeenCalled()
+  expect(screen.getByRole('button', { name: 'Status options' })).toBeVisible()
+  expect(await screen.findByText('Heap 42 MB')).toBeVisible()
+  expect(api.getRendererMetrics).toHaveBeenCalled()
+  expect(api.diagnosticsChanged).toHaveBeenLastCalledWith(true)
 })
 
 it('polls only while enabled and visible, and cleans up', async () => {
-  vi.useFakeTimers()
+  vi.useFakeTimers({ shouldAdvanceTime: true })
   const api = installMockApi()
   const clearInterval = vi.spyOn(window, 'clearInterval')
   const view = renderStatus()
   fireEvent.click(screen.getByRole('button', { name: 'Status options' }))
-  fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Show diagnostics' }))
-  expect(api.getRendererMetrics).toHaveBeenCalledOnce()
+  let menu = await screen.findByRole('menu')
+  fireEvent.click(within(menu).getByRole('menuitemcheckbox', { name: 'Show diagnostics' }))
+  fireEvent.keyDown(menu, { key: 'Escape' })
+  await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument())
+  expect(api.getRendererMetrics).toHaveBeenCalled()
+  const initialPolls = vi.mocked(api.getRendererMetrics).mock.calls.length
   act(() => vi.advanceTimersByTime(1000))
-  expect(api.getRendererMetrics).toHaveBeenCalledTimes(2)
+  expect(api.getRendererMetrics).toHaveBeenCalledTimes(initialPolls + 1)
   Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
   act(() => document.dispatchEvent(new Event('visibilitychange')))
   act(() => vi.advanceTimersByTime(2000))
-  expect(api.getRendererMetrics).toHaveBeenCalledTimes(2)
+  expect(api.getRendererMetrics).toHaveBeenCalledTimes(initialPolls + 1)
   Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
   act(() => document.dispatchEvent(new Event('visibilitychange')))
-  expect(api.getRendererMetrics).toHaveBeenCalledTimes(3)
+  expect(api.getRendererMetrics).toHaveBeenCalledTimes(initialPolls + 2)
   fireEvent.click(screen.getByRole('button', { name: 'Status options' }))
-  fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Show diagnostics' }))
+  menu = await screen.findByRole('menu')
+  fireEvent.click(within(menu).getByRole('menuitemcheckbox', { name: 'Show diagnostics' }))
   act(() => vi.advanceTimersByTime(2000))
-  expect(api.getRendererMetrics).toHaveBeenCalledTimes(3)
+  expect(api.getRendererMetrics).toHaveBeenCalledTimes(initialPolls + 2)
   view.unmount()
   expect(clearInterval).toHaveBeenCalled()
   clearInterval.mockRestore()
+})
+
+it('shares diagnostics preference between app commands and the status checkbox', async () => {
+  const api = installMockApi()
+  const user = userEvent.setup()
+  renderStatus()
+  expect(api.diagnosticsChanged).toHaveBeenLastCalledWith(false)
+  act(() => emitAppCommand({ command: 'toggle-diagnostics', repeat: false, composing: false }))
+  expect(await screen.findByText('Heap 42 MB')).toBeVisible()
+  expect(api.diagnosticsChanged).toHaveBeenLastCalledWith(true)
+  await user.click(screen.getByRole('button', { name: 'Status options' }))
+  const menu = await screen.findByRole('menu')
+  const checkbox = within(menu).getByRole('menuitemcheckbox', { name: 'Show diagnostics' })
+  expect(checkbox).toHaveAttribute('aria-checked', 'true')
+  await user.click(checkbox)
+  expect(screen.queryByText('Heap 42 MB')).not.toBeInTheDocument()
+  expect(api.diagnosticsChanged).toHaveBeenLastCalledWith(false)
+  await user.keyboard('{Escape}')
+  await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument())
+  act(() => emitAppCommand({ command: 'toggle-diagnostics', repeat: false, composing: false }))
+  expect(await screen.findByText('Heap 42 MB')).toBeVisible()
+  act(() => emitAppCommand({ command: 'toggle-diagnostics', repeat: false, composing: false }))
+  expect(screen.queryByText('Heap 42 MB')).not.toBeInTheDocument()
+  expect(localStorage.getItem('leagues:diagnostics:v1')).toBe('{"enabled":false}')
 })

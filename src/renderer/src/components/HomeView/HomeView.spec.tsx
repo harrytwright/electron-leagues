@@ -18,6 +18,7 @@ function renderHome(
       tree={tree}
       onSelect={onSelect}
       onChanged={onChanged}
+      onRefresh={onChanged}
       onCurrentDirChange={onCurrentDirChange}
     />
   )

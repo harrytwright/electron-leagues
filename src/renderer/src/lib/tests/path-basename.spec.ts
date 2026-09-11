@@ -13,7 +13,10 @@ test('shows the last three segments using the path separator already in use', ()
   expect(pathTail('/root/monday/Mixed triples/2025-26/Week 1')).toBe(
     '…/Mixed triples/2025-26/Week 1'
   )
-  expect(pathTail('C:\\Leagues\\monday\\Pairs\\2025-26')).toBe('…\\monday\\Pairs\\2025-26')
+  expect(pathTail('C:\\Leagues\\monday\\Pairs\\2025-26')).toBe('C:\\…\\monday\\Pairs\\2025-26')
+  expect(pathTail('\\\\server\\share\\Leagues\\monday\\Pairs\\2025-26')).toBe(
+    '\\\\server\\share\\…\\monday\\Pairs\\2025-26'
+  )
 })
 
 test('leaves short and root paths intact', () => {

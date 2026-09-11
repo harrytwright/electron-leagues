@@ -8,14 +8,17 @@ import { Sidebar } from './components/Sidebar'
 import { StatusBar } from './components/StatusBar'
 import { Toolbar } from './components/Toolbar'
 import { OperationFeedbackProvider } from './components/OperationFeedbackProvider'
+import { LocationOperationProvider } from './components/LocationOperationProvider'
 import { ipcErrorMessage } from './lib/ipc-error'
 import { loadSelection, saveSelection } from './lib/local-store'
 import { findLeague, HOME, restoreSelection, type Selection } from './lib/selection'
 import { useAppCommandHandler, useAppCommands } from './hooks/use-app-commands'
-import { useLocationOperation } from './hooks/use-location-operation'
+import { useLocationOperation, type RefreshResult } from './hooks/use-location-operation'
 import { useOperationFeedback } from './hooks/use-operation-feedback'
+import { useDiagnosticsCommands } from './hooks/use-diagnostics-preference'
 
 type Phase = 'loading' | 'no-root' | 'ready' | 'error'
+type ScanResult = { status: 'error'; message: string } | { status: Exclude<RefreshResult, 'error'> }
 
 interface ScanErrorProps {
   message: string | null
@@ -33,28 +36,24 @@ interface HomeNavigation {
   currentDir: string
 }
 
-function AppCommandHandlers({
-  root,
-  onChanged
-}: {
-  root: string
-  onChanged: () => Promise<void>
-}): null {
-  const locationOperation = useLocationOperation({
-    root,
-    onChanged,
-    onMissingRecent: () => undefined
-  })
-  useAppCommandHandler('open-location', () => void locationOperation.choose('select'))
-  useAppCommandHandler('new-location', () => void locationOperation.choose('init'))
+function AppCommandHandlers({ onChanged }: { onChanged: () => Promise<RefreshResult> }): null {
+  const locationOperation = useLocationOperation()
+  useAppCommandHandler('open-location', () => void locationOperation.choose('select', onChanged))
+  useAppCommandHandler('new-location', () => void locationOperation.choose('init', onChanged))
   return null
 }
 
-function StartupActivity(): React.JSX.Element | null {
+function ApplicationActivity({ visible }: { visible: boolean }): React.JSX.Element {
   const { activity } = useOperationFeedback()
   return (
-    <span role="status" aria-live="polite" className="fixed bottom-4 left-4 text-kumo-subtle">
-      {activity?.state === 'pending' ? `${activity.label}…` : null}
+    // A live region that mounts with its message already present is not reliably announced.
+    <span
+      role="status"
+      aria-label="Application activity"
+      aria-live="polite"
+      className={visible ? 'fixed inset-x-0 bottom-3 text-center text-base' : 'sr-only'}
+    >
+      {activity ? `${activity.label}…` : null}
     </span>
   )
 }
@@ -99,6 +98,7 @@ function ScanError({ message, onRetry, onChooseAnother }: ScanErrorProps): React
 
 function AppContent(): React.JSX.Element {
   useAppCommands()
+  useDiagnosticsCommands()
   const [phase, setPhase] = useState<Phase>('loading')
   const [tree, setTree] = useState<LeaguesTree | null>(null)
   const [scanError, setScanError] = useState<string | null>(null)
@@ -112,11 +112,11 @@ function AppContent(): React.JSX.Element {
   // The location whose remembered selection has already been restored.
   const restoredRoot = useRef<string | null>(null)
 
-  const refresh = useCallback(async (options?: { rejectOnFailure?: boolean }) => {
+  const scanLocation = useCallback(async (): Promise<ScanResult> => {
     const ticket = (scanGeneration.current += 1)
     try {
       const scanned = await window.api.scan()
-      if (scanGeneration.current !== ticket) return
+      if (scanGeneration.current !== ticket) return { status: 'superseded' }
       if (scanned) {
         setTree(scanned)
         setPhase('ready')
@@ -134,15 +134,31 @@ function AppContent(): React.JSX.Element {
         setPhase('no-root')
       }
       setScanError(null)
+      return { status: scanned ? 'ready' : 'no-root' }
     } catch (caught) {
-      if (scanGeneration.current !== ticket) return
+      if (scanGeneration.current !== ticket) return { status: 'superseded' }
       // Without this, a failing scan strands the app on the spinner forever.
       const message = ipcErrorMessage(caught) || 'Unknown error'
       setScanError(message)
       setPhase('error')
-      if (options?.rejectOnFailure) throw new Error(message)
+      return { status: 'error', message }
     }
   }, [])
+
+  const refresh = useCallback(async (): Promise<RefreshResult> => {
+    return (await scanLocation()).status
+  }, [scanLocation])
+
+  const refreshAfterWrite = useCallback(async (): Promise<void> => {
+    // Carry this scan's reason rather than reading mutable state another scan can replace.
+    const result = await scanLocation()
+    if (result.status === 'error') throw new Error(result.message)
+  }, [scanLocation])
+
+  const refreshForReading = useCallback(async (): Promise<void> => {
+    // Ordinary refresh has no write outcome to qualify; ScanError owns its failure feedback.
+    await refresh()
+  }, [refresh])
 
   const forgetAndRestart = useCallback(async () => {
     await window.api.forgetRoot()
@@ -204,18 +220,21 @@ function AppContent(): React.JSX.Element {
   let content: React.JSX.Element
   if (phase === 'loading') {
     content = (
-      <div
-        aria-live="polite"
-        className="flex h-full items-center justify-center gap-2 bg-kumo-base"
-      >
+      <div className="flex h-full items-center justify-center gap-2 bg-kumo-base">
         <Loader />
         <Text>Loading…</Text>
       </div>
     )
   } else if (phase === 'error') {
-    content = <ScanError message={scanError} onRetry={refresh} onChooseAnother={forgetAndRestart} />
+    content = (
+      <ScanError
+        message={scanError}
+        onRetry={refreshForReading}
+        onChooseAnother={forgetAndRestart}
+      />
+    )
   } else if (phase === 'no-root' || !tree) {
-    content = <FirstRun onChosen={() => refresh({ rejectOnFailure: true })} />
+    content = <FirstRun onChosen={refresh} />
   } else {
     const selectedLeague = findLeague(tree, selection)
     const statusPath = selectedLeague
@@ -240,7 +259,7 @@ function AppContent(): React.JSX.Element {
           root={tree.root}
           isHome={selection.kind === 'home'}
           onHome={() => select(HOME)}
-          onLocationChanged={() => refresh({ rejectOnFailure: true })}
+          onLocationChanged={refresh}
         />
         <div className="flex min-h-0 w-full flex-1">
           <Sidebar key={tree.root} tree={tree} selection={selection} onSelect={select} />
@@ -249,7 +268,8 @@ function AppContent(): React.JSX.Element {
               <LeagueView
                 key={selectedLeague.path}
                 league={selectedLeague}
-                onChanged={refresh}
+                onChanged={refreshAfterWrite}
+                onRefresh={refreshForReading}
                 onCurrentDirChange={(currentDir) =>
                   setLeagueNavigation({ ownerPath: selectedLeague.path, currentDir })
                 }
@@ -259,7 +279,8 @@ function AppContent(): React.JSX.Element {
                 key={tree.root}
                 tree={tree}
                 onSelect={select}
-                onChanged={refresh}
+                onChanged={refreshAfterWrite}
+                onRefresh={refreshForReading}
                 onCurrentDirChange={updateHomeCurrentDir}
               />
             )}
@@ -272,12 +293,11 @@ function AppContent(): React.JSX.Element {
 
   return (
     <OperationFeedbackProvider locationKey={tree?.root ?? ''}>
-      <AppCommandHandlers
-        root={tree?.root ?? ''}
-        onChanged={() => refresh({ rejectOnFailure: true })}
-      />
-      {content}
-      {phase === 'ready' ? null : <StartupActivity />}
+      <LocationOperationProvider>
+        <AppCommandHandlers onChanged={refresh} />
+        {content}
+        <ApplicationActivity visible={phase !== 'ready'} />
+      </LocationOperationProvider>
     </OperationFeedbackProvider>
   )
 }

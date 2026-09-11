@@ -62,6 +62,23 @@ describe('buildAppMenuTemplate', () => {
     expect(windows.map((item) => item.accelerator)).toEqual(['F12', 'CmdOrCtrl+Shift+I'])
   })
 
+  it.each([false, true])('offers diagnostics independently of development=%s', (development) => {
+    const onCommand = vi.fn()
+    const template = buildAppMenuTemplate('win32', development, onCommand)
+    const diagnostics = byLabel(template, 'Show diagnostics')
+    expect(diagnostics).toMatchObject({
+      id: 'show-diagnostics',
+      type: 'checkbox',
+      checked: false
+    })
+    // SAFETY: this handler uses only MenuItem.checked; no Electron objects are constructed here.
+    const invoke = diagnostics.click as (item: { checked: boolean }) => void
+    const item = { checked: true }
+    invoke(item)
+    expect(item.checked).toBe(false)
+    expect(onCommand).toHaveBeenCalledExactlyOnceWith('toggle-diagnostics')
+  })
+
   it('forwards native menu clicks as application commands', () => {
     const onCommand = vi.fn()
     const template = buildAppMenuTemplate('linux', false, onCommand)

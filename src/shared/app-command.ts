@@ -1,4 +1,10 @@
-export const APP_COMMANDS = ['open-location', 'new-location', 'refresh', 'focus-filter'] as const
+export const APP_COMMANDS = [
+  'open-location',
+  'new-location',
+  'refresh',
+  'focus-filter',
+  'toggle-diagnostics'
+] as const
 
 export type AppCommand = (typeof APP_COMMANDS)[number]
 

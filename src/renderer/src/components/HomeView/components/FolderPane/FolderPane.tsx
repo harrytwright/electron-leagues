@@ -15,6 +15,7 @@ export function FolderPane({
   label,
   present,
   onChanged,
+  onRefresh,
   onCurrentDirChange
 }: Props): React.JSX.Element {
   const trail = useCrumbs(baseDir, onCurrentDirChange)
@@ -76,7 +77,7 @@ export function FolderPane({
           rows={[]}
           metadataColumn="modified"
           readOnly={false}
-          onRefresh={() => void onChanged()}
+          onRefresh={() => void onRefresh()}
           onNavigate={() => {}}
           emptyTitle={`No ${label.toLocaleLowerCase()} folder`}
           emptyDescription="Use Repair location… in the location menu to restore this folder."

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { Button, Dialog, Input, useKumoToastManager } from '@cloudflare/kumo'
+import { useEffect, useId, useRef, useState } from 'react'
+import { Button, Dialog, Input, Text, useKumoToastManager } from '@cloudflare/kumo'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { trashLabel } from '@renderer/lib/trash-label'
 import { TaskDialog } from '../TaskDialog'
@@ -24,21 +24,43 @@ export function DeleteResourceDialog({
 }: Props): React.JSX.Element {
   const [typed, setTyped] = useState('')
   const [busy, setBusy] = useState(false)
+  const [moved, setMoved] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  // Bumped on every close so a delete left pending across close/reopen can
-  // never write its stale outcome onto the fresh dialog.
+  const errorId = useId()
+  // This protects dialog-local state and focus; an outcome whose dialog has gone
+  // is reported globally so closing it cannot hide the result of a disk write.
   const submission = useRef(0)
+  const pendingErrorToast = useRef<string | null>(null)
   const feedback = useOperationFeedback()
   const { add } = useKumoToastManager()
+  // Kumo may replace this callback as its manager updates; that is not a dialog
+  // lifecycle boundary and must not reset confirmation state.
+  const addToast = useRef(add)
 
   useEffect(() => {
-    if (open) return
-    submission.current += 1
-    // Reset on close so nothing stale is visible for the reopening frame.
+    addToast.current = add
+  }, [add])
+
+  useEffect(() => {
+    // A close or target replacement starts a fresh dialog, even when an earlier
+    // filesystem request is still settling.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setTyped('')
     setBusy(false)
-  }, [open])
+    setMoved(false)
+    setError(null)
+    return () => {
+      submission.current += 1
+      const toast = pendingErrorToast.current
+      if (toast) {
+        // Inline errors belong to the modal while it exists; promote them when a phase
+        // change or close would otherwise erase the only report of the completed work.
+        pendingErrorToast.current = null
+        addToast.current({ title: toast, variant: 'error' })
+      }
+    }
+  }, [open, target?.path])
 
   const name = target?.name ?? ''
   const confirmed = name !== '' && comparable(typed) === comparable(name)
@@ -47,28 +69,46 @@ export function DeleteResourceDialog({
 
   const submit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
-    if (!target || !confirmed || busy) return
+    if (!target || !confirmed || busy || moved) return
     const ticket = submission.current
+    const movedMessage = `Moved “${target.name}” to the ${trash}`
     const operationId = feedback.begin(`Deleting ${target.name}`)
+    pendingErrorToast.current = null
     setBusy(true)
+    setError(null)
     try {
       await window.api.trashFolder(target.path)
-      feedback.finish(operationId, 'success', `Deleted ${target.name}`)
-      add({ title: `Moved “${target.name}” to the ${trash}`, variant: 'success' })
-      if (submission.current !== ticket) return
-      setBusy(false)
+      // The target is already gone after this point, so retrying would turn a
+      // refresh problem into a misleading second delete failure.
+      if (submission.current === ticket) setMoved(true)
       try {
         await onDeleted(target)
       } catch (caught) {
-        add({ title: ipcErrorMessage(caught), variant: 'error' })
+        const message = `${movedMessage}, but the league could not be refreshed: ${ipcErrorMessage(caught)}`
+        if (submission.current === ticket) {
+          pendingErrorToast.current = message
+          setError(message)
+          inputRef.current?.focus()
+        } else {
+          add({ title: message, variant: 'error' })
+        }
+        return
       }
+      if (submission.current === ticket) onOpenChange(false)
+      add({ title: movedMessage, variant: 'success' })
     } catch (caught) {
       const message = ipcErrorMessage(caught)
-      feedback.finish(operationId, 'error', message)
-      add({ title: message, variant: 'error' })
-      if (submission.current !== ticket) return
-      setBusy(false)
-      inputRef.current?.focus()
+      if (submission.current === ticket) {
+        pendingErrorToast.current = `Couldn't delete “${target.name}”: ${message}`
+        setError(message)
+        inputRef.current?.focus()
+      } else {
+        add({ title: `Couldn't delete “${target.name}”: ${message}`, variant: 'error' })
+      }
+    } finally {
+      // Completion follows refresh so a successful move is never reported as a plain failure.
+      feedback.finish(operationId)
+      if (submission.current === ticket) setBusy(false)
     }
   }
 
@@ -103,10 +143,23 @@ export function DeleteResourceDialog({
           autoFocus
           placeholder={name}
           value={typed}
+          // Read-only keeps the completed target immutable without removing the
+          // error's focus destination from the modal tab order.
+          readOnly={moved}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? errorId : undefined}
           onChange={(event) => {
             setTyped(event.target.value)
+            setError(null)
+            pendingErrorToast.current = null
           }}
         />
+
+        {error ? (
+          <Text id={errorId} role="alert" variant="error">
+            {error}
+          </Text>
+        ) : null}
 
         <TaskDialog.Actions>
           <Dialog.Close
@@ -116,8 +169,13 @@ export function DeleteResourceDialog({
               </Button>
             )}
           />
-          <Button type="submit" variant="destructive" loading={busy} disabled={busy || !confirmed}>
-            {busy ? 'Deleting…' : `Delete ${kind}`}
+          <Button
+            type="submit"
+            variant="destructive"
+            loading={busy}
+            disabled={busy || moved || !confirmed}
+          >
+            {busy ? 'Deleting…' : moved ? `Moved to ${trash}` : `Delete ${kind}`}
           </Button>
         </TaskDialog.Actions>
       </TaskDialog.Body>

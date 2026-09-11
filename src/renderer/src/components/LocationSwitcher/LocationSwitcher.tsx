@@ -33,8 +33,8 @@ export function LocationSwitcher({ root, onChanged }: Props): React.JSX.Element 
 
   // A dev override (LEAGUES_ROOT) may not be in the stored list yet.
   const locations = recents.includes(root) ? recents : [root, ...recents]
-  const locationOperation = useLocationOperation({ root, onChanged, onMissingRecent: loadRecents })
-  const openLocation = (): void => void locationOperation.choose('select')
+  const locationOperation = useLocationOperation()
+  const openLocation = (): void => void locationOperation.choose('select', onChanged)
 
   const reveal = async (): Promise<void> => {
     try {
@@ -95,14 +95,20 @@ export function LocationSwitcher({ root, onChanged }: Props): React.JSX.Element 
             value={root}
             onValueChange={(value) => {
               const chosen = locations.find((path) => path === value)
-              if (chosen) void locationOperation.switchTo(chosen)
+              if (chosen) {
+                void locationOperation.switchTo(chosen, {
+                  root,
+                  onChanged,
+                  onMissingRecent: loadRecents
+                })
+              }
             }}
           >
             {locations.map((path) => (
               <DropdownMenu.RadioItem key={path} value={path} disabled={locationOperation.busy}>
                 <span className="grid min-w-0 gap-0.5">
                   <span className="truncate">{pathBasename(path)}</span>
-                  <span className="truncate text-sm text-kumo-subtle">{path}</span>
+                  <span className="truncate text-base text-kumo-subtle">{path}</span>
                 </span>
                 <DropdownMenu.RadioItemIndicator />
               </DropdownMenu.RadioItem>
@@ -121,7 +127,7 @@ export function LocationSwitcher({ root, onChanged }: Props): React.JSX.Element 
         <DropdownMenu.Item
           icon={FolderPlusIcon}
           disabled={locationOperation.busy}
-          onClick={() => void locationOperation.choose('init')}
+          onClick={() => void locationOperation.choose('init', onChanged)}
         >
           New location…
         </DropdownMenu.Item>

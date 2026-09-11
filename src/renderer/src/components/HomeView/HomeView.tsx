@@ -16,6 +16,7 @@ export function HomeView({
   tree,
   onSelect,
   onChanged,
+  onRefresh,
   onCurrentDirChange
 }: Props): React.JSX.Element {
   const [creating, setCreating] = useState(false)
@@ -78,6 +79,7 @@ export function HomeView({
           label="Shared documents"
           present={tree.hasShared}
           onChanged={onChanged}
+          onRefresh={onRefresh}
           onCurrentDirChange={onCurrentDirChange}
         />
       ) : activeTab === 'templates' ? (
@@ -87,13 +89,14 @@ export function HomeView({
           label="Templates"
           present={tree.hasTemplates}
           onChanged={onChanged}
+          onRefresh={onRefresh}
           onCurrentDirChange={onCurrentDirChange}
         />
       ) : (
         <OtherPane
           entries={tree.unrecognisedRootEntries}
           root={tree.root}
-          onChanged={onChanged}
+          onRefresh={onRefresh}
           onCurrentDirChange={onCurrentDirChange}
         />
       )}
@@ -104,7 +107,7 @@ export function HomeView({
         onCreated={(day, folderName) => {
           setCreating(false)
           void (async () => {
-            await onChanged()
+            await onRefresh()
             onSelect({ kind: 'league', day, folderName })
           })()
         }}

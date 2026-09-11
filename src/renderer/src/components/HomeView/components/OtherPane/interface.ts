@@ -3,6 +3,6 @@ import type { FileEntry } from '@shared/tree'
 export interface Props {
   entries: FileEntry[]
   root: string
-  onChanged: () => void | Promise<void>
+  onRefresh: () => void | Promise<void>
   onCurrentDirChange: (path: string) => void
 }

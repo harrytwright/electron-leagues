@@ -3,6 +3,8 @@ import type { AppCommand } from '../../shared/app-command'
 
 type CommandHandler = (command: AppCommand) => void
 
+export const DIAGNOSTICS_MENU_ID = 'show-diagnostics'
+
 const editMenu: MenuItemConstructorOptions = {
   label: 'Edit',
   submenu: [
@@ -49,7 +51,19 @@ export function buildAppMenuTemplate(
     })
   }
   const viewSubmenu: MenuItemConstructorOptions[] = [
-    commandItem('Focus filter', 'focus-filter', onCommand, 'CmdOrCtrl+F')
+    commandItem('Focus filter', 'focus-filter', onCommand, 'CmdOrCtrl+F'),
+    {
+      id: DIAGNOSTICS_MENU_ID,
+      label: 'Show diagnostics',
+      type: 'checkbox',
+      checked: false,
+      click: (item) => {
+        // Undo Electron's optimistic toggle: localStorage owns the preference,
+        // including when a modal prevents the renderer from accepting a command.
+        item.checked = !item.checked
+        onCommand('toggle-diagnostics')
+      }
+    }
   ]
   if (development) {
     viewSubmenu.push(

@@ -2,13 +2,14 @@ import { act, render, renderHook, screen, waitFor } from '@testing-library/react
 import { ToastProvider } from '@cloudflare/kumo'
 import { OperationFeedbackProvider } from '../../components/OperationFeedbackProvider'
 import { expect, it, vi } from 'vitest'
+import { StrictMode } from 'react'
 import { installMockApi } from '../../tests/mock-api'
 import { useImportFiles } from '../use-import-files'
 import { useOperationFeedback } from '../use-operation-feedback'
 
 function FeedbackStatus(): React.JSX.Element | null {
   const { activity } = useOperationFeedback()
-  return activity ? <span role="status">{activity.message ?? activity.label}</span> : null
+  return activity ? <span role="status">{activity.label}</span> : null
 }
 
 function renderImporter(
@@ -35,7 +36,7 @@ it('imports picked files and announces the count', async () => {
   await act(() => result.current.pickFiles())
 
   expect(api.importFiles).toHaveBeenCalledWith('/dest', ['/tmp/a.pdf', '/tmp/b.pdf'])
-  expect(screen.getByRole('status')).toHaveTextContent('Imported 2 files')
+  expect(await screen.findByRole('dialog', { name: 'Imported 2 files' })).toBeInTheDocument()
   expect(onImported).toHaveBeenCalledOnce()
 })
 
@@ -56,7 +57,7 @@ it('uses singular copy for one file and reports partial imports honestly', async
   expect(await screen.findByRole('dialog', { name: 'Imported 1 of 2 files' })).toBeInTheDocument()
 })
 
-it('reports copy success before refresh settles, then reports refresh failure separately', async () => {
+it('stays pending through refresh and reports a successful copy with its refresh failure', async () => {
   let finishRefresh!: () => void
   const onImported = vi.fn(
     () =>
@@ -71,15 +72,21 @@ it('reports copy success before refresh settles, then reports refresh failure se
   act(() => {
     importing = result.current.importPaths(['/tmp/a.pdf'])
   })
-  expect(await screen.findByRole('dialog', { name: 'Imported 1 file' })).toBeInTheDocument()
+  await waitFor(() => expect(onImported).toHaveBeenCalledOnce())
+  expect(screen.getByRole('status')).toHaveTextContent('Importing 1 file')
+  expect(screen.queryByRole('dialog', { name: 'Imported 1 file' })).not.toBeInTheDocument()
   expect(result.current.importing).toBe(true)
 
   await act(async () => {
     finishRefresh()
     await importing
   })
-  expect(await screen.findByRole('dialog', { name: 'Scan failed' })).toBeInTheDocument()
-  expect(screen.getByRole('dialog', { name: 'Imported 1 file' })).toBeInTheDocument()
+  expect(
+    await screen.findByRole('dialog', {
+      name: 'Imported 1 file, but the folder could not be refreshed: Scan failed'
+    })
+  ).toBeInTheDocument()
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
   expect(result.current.importing).toBe(false)
 })
 
@@ -112,7 +119,7 @@ it('shows an error toast when the import or the picker fails', async () => {
   const { result } = renderImporter('/dest', onImported)
 
   await act(() => result.current.pickFiles())
-  expect(await screen.findAllByText('Destination is read-only')).toHaveLength(2)
+  expect(await screen.findByText('Destination is read-only')).toBeInTheDocument()
 
   await act(() => result.current.pickFiles())
   expect(await screen.findByText('No window')).toBeInTheDocument()
@@ -140,15 +147,17 @@ it('imports once while an import is already pending', async () => {
   expect(result.current.importing).toBe(false)
 })
 
-it('ignores a picker result after the destination changes', async () => {
+it('ignores a picker result after the destination changes in StrictMode', async () => {
   let finishPicker!: (paths: string[]) => void
   const api = installMockApi({
     pickFiles: vi.fn(() => new Promise<string[]>((resolve) => (finishPicker = resolve)))
   })
   const wrapper = ({ children }: { children: React.ReactNode }): React.JSX.Element => (
-    <ToastProvider>
-      <OperationFeedbackProvider>{children}</OperationFeedbackProvider>
-    </ToastProvider>
+    <StrictMode>
+      <ToastProvider>
+        <OperationFeedbackProvider>{children}</OperationFeedbackProvider>
+      </ToastProvider>
+    </StrictMode>
   )
   const { result, rerender } = renderHook(({ dest }) => useImportFiles(dest), {
     initialProps: { dest: '/first' },
@@ -243,6 +252,8 @@ it('reports a refresh callback rejection and releases the busy state', async () 
     }
   )
   await act(() => result.current.importPaths(['/tmp/a.pdf']))
-  expect(await screen.findByText('Scan failed')).toBeInTheDocument()
+  expect(
+    await screen.findByText('Imported 1 file, but the folder could not be refreshed: Scan failed')
+  ).toBeInTheDocument()
   expect(result.current.importing).toBe(false)
 })

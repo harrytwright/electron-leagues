@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import type { LeaguesTree } from '@shared/tree'
 import App from '../App'
+import { trashLabel } from '../lib/trash-label'
 import { makeDirEntry, makeLeague, makeTree } from './fixtures'
 import { emitAppCommand, emitTreeChanged, installMockApi } from './mock-api'
 
@@ -31,7 +32,8 @@ it('shows loading, then FirstRun when scan returns null', async () => {
   render(<App />)
 
   expect(screen.getByText(/loading…/i)).toBeInTheDocument()
-  expect(screen.getByText(/loading…/i).parentElement).toHaveAttribute('aria-live', 'polite')
+  expect(screen.getByRole('status', { name: 'Loading' })).toBeInTheDocument()
+  expect(screen.getByRole('status', { name: 'Application activity' })).toHaveClass('fixed')
   expect(await screen.findByRole('button', { name: /open location/i })).toBeInTheDocument()
   expect(screen.queryByText(/loading…/i)).not.toBeInTheDocument()
 })
@@ -46,9 +48,9 @@ it('shows a scan error without confirming an opened location', async () => {
 
   await user.click(await screen.findByRole('button', { name: /open location/i }))
   expect(await screen.findByText('Couldn’t read the leagues folder')).toBeInTheDocument()
-  expect(screen.getAllByText('Scan failed').length).toBeGreaterThan(0)
+  expect(screen.getAllByText('Scan failed')).toHaveLength(1)
   expect(screen.queryByText('Opened location')).not.toBeInTheDocument()
-  expect(screen.getByRole('status')).toBeEmptyDOMElement()
+  expect(screen.getByRole('status', { name: 'Application activity' })).toBeEmptyDOMElement()
 })
 
 it('shows a scan error without confirming a recent location', async () => {
@@ -62,9 +64,9 @@ it('shows a scan error without confirming a recent location', async () => {
 
   await user.click(await screen.findByRole('button', { name: /leagues.*\/recent\/leagues/i }))
   expect(await screen.findByText('Couldn’t read the leagues folder')).toBeInTheDocument()
-  expect(screen.getAllByText('Scan failed').length).toBeGreaterThan(0)
+  expect(screen.getAllByText('Scan failed')).toHaveLength(1)
   expect(screen.queryByText('Opened location')).not.toBeInTheDocument()
-  expect(screen.getByRole('status')).toBeEmptyDOMElement()
+  expect(screen.getByRole('status', { name: 'Application activity' })).toBeEmptyDOMElement()
 })
 
 it('opens or creates a location from application commands during FirstRun', async () => {
@@ -92,9 +94,9 @@ it('keeps opening status visible through a recent-location scan, then confirms c
   const user = userEvent.setup()
   render(<App />)
 
+  const activity = screen.getByRole('status', { name: 'Application activity' })
   await user.click(await screen.findByRole('button', { name: /leagues.*\/recent\/leagues/i }))
-  // Kumo's row spinner is also a status, with the accessible name "Loading".
-  expect(screen.getByRole('status', { name: '' })).toHaveTextContent('Opening location…')
+  expect(activity).toHaveTextContent('Opening location…')
   expect(screen.queryByText('Opened location')).not.toBeInTheDocument()
 
   await act(async () => {
@@ -108,6 +110,59 @@ it('keeps opening status visible through a recent-location scan, then confirms c
   })
   expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
   expect(await screen.findByText('Opened location')).toBeInTheDocument()
+  expect(screen.getByRole('status', { name: 'Application activity' })).toBe(activity)
+  expect(activity).toBeEmptyDOMElement()
+  expect(screen.getAllByRole('status', { name: 'Application activity' })).toHaveLength(1)
+})
+
+it('does not confirm a superseded location scan when the winning watcher scan fails', async () => {
+  let finishLocationScan!: (tree: LeaguesTree) => void
+  const scan = vi
+    .fn()
+    .mockResolvedValueOnce(null)
+    .mockImplementationOnce(
+      () => new Promise<LeaguesTree>((resolve) => (finishLocationScan = resolve))
+    )
+    .mockRejectedValueOnce(new Error('Scan failed'))
+  installMockApi({
+    scan,
+    chooseRoot: vi.fn().mockResolvedValue('/chosen/leagues')
+  })
+  render(<App />)
+  await screen.findByRole('button', { name: /open location/i })
+
+  act(() => emitAppCommand({ command: 'open-location', repeat: false, composing: false }))
+  await waitFor(() => expect(scan).toHaveBeenCalledTimes(2))
+  act(() => emitTreeChanged())
+  expect(
+    await screen.findByRole('heading', { name: 'Couldn’t read the leagues folder' })
+  ).toBeInTheDocument()
+  await act(async () => {
+    finishLocationScan(makeTree({ root: '/chosen/leagues' }))
+  })
+
+  expect(screen.queryByText('Opened location')).not.toBeInTheDocument()
+  expect(screen.getAllByText('Scan failed')).toHaveLength(1)
+  expect(screen.getByRole('status', { name: 'Application activity' })).toBeEmptyDOMElement()
+})
+
+it('shares one location-operation guard between FirstRun rows and app commands', async () => {
+  let finishSwitch!: (path: string | null) => void
+  const chooseRoot = vi.fn().mockResolvedValue('/chosen/leagues')
+  installMockApi({
+    scan: vi.fn().mockResolvedValue(null),
+    recentRoots: vi.fn().mockResolvedValue(['/recent/leagues']),
+    setRoot: vi.fn(() => new Promise<string | null>((resolve) => (finishSwitch = resolve))),
+    chooseRoot
+  })
+  const user = userEvent.setup()
+  render(<App />)
+
+  await user.click(await screen.findByRole('button', { name: /leagues.*\/recent\/leagues/i }))
+  act(() => emitAppCommand({ command: 'open-location', repeat: false, composing: false }))
+  expect(chooseRoot).not.toHaveBeenCalled()
+
+  await act(async () => finishSwitch(null))
 })
 
 it('shows Home on Shared documents and reports that directory in the status bar', async () => {
@@ -282,6 +337,69 @@ it('shows a recoverable error when the scan fails, and retries', async () => {
 
   expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
   expect(scan).toHaveBeenCalledTimes(2)
+})
+
+it('shows one scan error when a league overview refresh fails', async () => {
+  const scan = vi
+    .fn()
+    .mockResolvedValueOnce(treeWithMondayLeagues('/root', 'Pairs'))
+    .mockRejectedValueOnce(new Error('Scan failed'))
+  installMockApi({ scan })
+  const user = userEvent.setup()
+  render(<App />)
+
+  await user.click(await screen.findByRole('button', { name: 'Pairs' }))
+  await user.click(screen.getByRole('button', { name: 'Refresh files' }))
+
+  expect(
+    await screen.findByRole('heading', { name: 'Couldn’t read the leagues folder' })
+  ).toBeInTheDocument()
+  expect(screen.getAllByText('Scan failed')).toHaveLength(1)
+})
+
+it('keeps the completed-delete context when its refresh replaces the dialog with ScanError', async () => {
+  const scan = vi
+    .fn()
+    .mockResolvedValueOnce(treeWithMondayLeagues('/root', 'Pairs'))
+    .mockRejectedValueOnce(new Error('Scan failed'))
+  const api = installMockApi({ scan })
+  const user = userEvent.setup()
+  render(<App />)
+
+  await user.click(await screen.findByRole('button', { name: 'Pairs' }))
+  await user.click(screen.getByRole('button', { name: 'Actions for 2025-26' }))
+  await user.click(await screen.findByRole('menuitem', { name: 'Delete season…' }))
+  const dialog = await screen.findByRole('dialog', { name: 'Delete season “2025-26”' })
+  await user.type(within(dialog).getByLabelText('Type 2025-26 to confirm'), '2025-26')
+  await user.click(within(dialog).getByRole('button', { name: 'Delete season' }))
+
+  expect(api.trashFolder).toHaveBeenCalledWith('/root/monday/Pairs/2025-26')
+  expect(
+    await screen.findByRole('heading', { name: 'Couldn’t read the leagues folder' })
+  ).toBeInTheDocument()
+  expect(
+    await screen.findByText(
+      `Moved “2025-26” to the ${trashLabel()}, but the league could not be refreshed: Scan failed`
+    )
+  ).toBeInTheDocument()
+})
+
+it('shows one scan error when refreshing a missing Home folder fails', async () => {
+  const scan = vi
+    .fn()
+    .mockResolvedValueOnce(makeTree({ hasShared: false }))
+    .mockRejectedValueOnce(new Error('Scan failed'))
+  installMockApi({ scan })
+  const user = userEvent.setup()
+  render(<App />)
+
+  await screen.findByText('No shared documents folder')
+  await user.click(screen.getByRole('button', { name: 'Refresh files' }))
+
+  expect(
+    await screen.findByRole('heading', { name: 'Couldn’t read the leagues folder' })
+  ).toBeInTheDocument()
+  expect(screen.getAllByText('Scan failed')).toHaveLength(1)
 })
 
 it('keeps offering retry when the rescan fails again', async () => {

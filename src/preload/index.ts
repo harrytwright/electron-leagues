@@ -12,6 +12,7 @@ export type { SeasonCreateRequest } from '../shared/season-create'
 
 const api = {
   getRendererMetrics,
+  diagnosticsChanged: (enabled: boolean): void => ipcRenderer.send('diagnostics:changed', enabled),
   getAnalyticsConfig: (): Promise<{ apiKey: string | null; distinctId: string }> =>
     ipcRenderer.invoke('analytics:config'),
   getRoot: (): Promise<string | null> => ipcRenderer.invoke('root:get'),

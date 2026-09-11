@@ -49,6 +49,7 @@ it('drills into folders and back out through the breadcrumbs', async () => {
       onSelect={vi.fn()}
       onCurrentDirChange={vi.fn()}
       onChanged={vi.fn()}
+      onRefresh={vi.fn()}
     />
   )
 
@@ -78,6 +79,7 @@ it('re-lists the current folder when the tree changes on disk', async () => {
       onSelect={vi.fn()}
       onCurrentDirChange={vi.fn()}
       onChanged={vi.fn()}
+      onRefresh={vi.fn()}
     />
   )
 
@@ -98,6 +100,7 @@ it('offers a way back when the folder being viewed can no longer be read', async
       onSelect={vi.fn()}
       onCurrentDirChange={vi.fn()}
       onChanged={vi.fn()}
+      onRefresh={vi.fn()}
     />
   )
 
@@ -129,6 +132,7 @@ it('imports picked files into the folder being viewed', async () => {
       onSelect={vi.fn()}
       onCurrentDirChange={vi.fn()}
       onChanged={onImported}
+      onRefresh={vi.fn()}
     />
   )
 

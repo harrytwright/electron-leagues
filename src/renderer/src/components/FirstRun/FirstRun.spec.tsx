@@ -18,7 +18,7 @@ it('explains OneDrive setup with semantic headings and standard-size recent path
   expect(
     await screen.findByRole('heading', { level: 2, name: 'Recent locations' })
   ).toBeInTheDocument()
-  expect(screen.getByText('/old/leagues')).not.toHaveClass('text-sm')
+  expect(screen.getByText('/old/leagues')).toHaveClass('text-base')
 })
 
 it('choosing an existing folder calls chooseRoot and onChosen on success', async () => {
@@ -74,7 +74,9 @@ it('shows a busy state on the button that was pressed', async () => {
 it('opens a recent location and waits for the resulting scan', async () => {
   const api = installMockApi({ recentRoots: vi.fn().mockResolvedValue(['/old/leagues']) })
   let finishScan!: () => void
-  const onChosen = vi.fn(() => new Promise<void>((resolve) => (finishScan = resolve)))
+  const onChosen = vi.fn(
+    () => new Promise<'ready'>((resolve) => (finishScan = () => resolve('ready')))
+  )
   const user = userEvent.setup()
   renderWithProviders(<FirstRun onChosen={onChosen} />)
 
@@ -155,8 +157,11 @@ it('guards rapid recent activation synchronously', async () => {
   installMockApi({ recentRoots: vi.fn().mockResolvedValue(['/old/leagues']), setRoot })
   renderWithProviders(<FirstRun onChosen={vi.fn()} />)
   const recent = await screen.findByRole('button', { name: /leagues.*\/old\/leagues/i })
-  recent.click()
-  recent.click()
+  act(() => {
+    recent.click()
+    recent.click()
+  })
   expect(setRoot).toHaveBeenCalledOnce()
+  expect(within(recent).getByLabelText('Loading')).toBeInTheDocument()
   await act(async () => finish(null))
 })

@@ -1,9 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   OperationFeedbackContext,
-  type OperationActivity,
-  type OperationFeedbackProviderProps,
-  type OperationResult
+  type OperationFeedbackProviderProps
 } from '@renderer/hooks/use-operation-feedback'
 
 interface PendingOperation {
@@ -12,9 +10,8 @@ interface PendingOperation {
 }
 
 interface FeedbackState {
+  // Completion belongs to toasts; keeping only pending work prevents two result announcements.
   pending: Map<number, PendingOperation>
-  result: OperationActivity | null
-  acceptedResultId: number
 }
 
 export function OperationFeedbackProvider({
@@ -24,9 +21,7 @@ export function OperationFeedbackProvider({
   const nextId = useRef(0)
   const [currentLocation, setCurrentLocation] = useState(locationKey)
   const [state, setState] = useState<FeedbackState>({
-    pending: new Map(),
-    result: null,
-    acceptedResultId: 0
+    pending: new Map()
   })
 
   if (currentLocation !== locationKey) {
@@ -34,27 +29,14 @@ export function OperationFeedbackProvider({
     setState((current) => ({
       pending: new Map(
         [...current.pending].filter(([, operation]) => operation.scope === 'application')
-      ),
-      result: null,
-      acceptedResultId: current.acceptedResultId
+      )
     }))
   }
-
-  useEffect(() => {
-    const id = state.result?.id
-    if (id === undefined) return
-    const timer = setTimeout(() => {
-      setState((current) => (current.result?.id === id ? { ...current, result: null } : current))
-    }, 5000)
-    return () => clearTimeout(timer)
-  }, [state.result?.id])
 
   const begin = useCallback(
     (label: string, scope: 'application' | 'location' = 'location'): number => {
       const id = (nextId.current += 1)
       setState((current) => ({
-        ...current,
-        result: null,
         pending: new Map(current.pending).set(id, { label, scope })
       }))
       return id
@@ -62,27 +44,19 @@ export function OperationFeedbackProvider({
     []
   )
 
-  const finish = useCallback((id: number, result: OperationResult, message?: string): void => {
+  const finish = useCallback((id: number): void => {
     setState((current) => {
-      const operation = current.pending.get(id)
-      if (!operation) return current
+      if (!current.pending.has(id)) return current
       const pending = new Map(current.pending)
       pending.delete(id)
-      if (id < current.acceptedResultId) return { ...current, pending }
-      return {
-        pending,
-        result: { id, label: operation.label, state: result, message },
-        acceptedResultId: id
-      }
+      return { pending }
     })
   }, [])
 
   const activity = useMemo(() => {
     const latestPending = [...state.pending].at(-1)
-    return latestPending
-      ? { id: latestPending[0], label: latestPending[1].label, state: 'pending' as const }
-      : state.result
-  }, [state.pending, state.result])
+    return latestPending ? { id: latestPending[0], label: latestPending[1].label } : null
+  }, [state.pending])
 
   const value = useMemo(() => ({ activity, begin, finish }), [activity, begin, finish])
 

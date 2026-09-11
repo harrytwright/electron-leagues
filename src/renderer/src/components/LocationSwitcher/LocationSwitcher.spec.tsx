@@ -27,10 +27,9 @@ it('shows the current location by folder name and lists recents with the current
   const current = await within(menu).findByRole('menuitemradio', { name: /^LeagueDocs/ })
   expect(current).toHaveAttribute('aria-checked', 'true')
   expect(current).toHaveTextContent(CURRENT)
-  expect(within(menu).getByRole('menuitemradio', { name: /^leagues/ })).toHaveAttribute(
-    'aria-checked',
-    'false'
-  )
+  const usb = within(menu).getByRole('menuitemradio', { name: /^leagues/ })
+  expect(usb).toHaveAttribute('aria-checked', 'false')
+  expect(within(usb).getByText(USB)).toHaveClass('text-base')
 })
 
 it('lists the current location first, checked, even when it is not remembered yet', async () => {
@@ -195,6 +194,7 @@ it('does nothing when the picker is cancelled', async () => {
 
   await waitFor(() => expect(window.api.chooseRoot).toHaveBeenCalled())
   expect(onChanged).not.toHaveBeenCalled()
+  expect(screen.queryByText('Created location')).not.toBeInTheDocument()
 })
 
 it('reveals the current location', async () => {
