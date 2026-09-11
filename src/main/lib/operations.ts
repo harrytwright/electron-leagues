@@ -365,6 +365,11 @@ export async function zipArchivedSeasons(
       const output = createWriteStream(zipPath)
       const zip = new ZipArchive({ zlib: { level: 9 } })
       output.on('close', () => resolvePromise())
+      // Archive errors do not cover destination failures, so handle the stream or the promise can hang.
+      output.on('error', (err) => {
+        zip.destroy()
+        reject(toUserFacing(err))
+      })
       zip.on('error', reject)
       zip.pipe(output)
       zip.directory(seasonDir, season.name)

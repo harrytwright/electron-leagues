@@ -72,7 +72,8 @@ export function DirectoryBrowser({
   const actions = (row: BrowserRow | undefined): RowMenuItem[] =>
     row
       ? [
-          { label: 'Open', onSelect: () => void open(row) },
+          // Menu navigation cannot restore its old row, so the destination owns the focus hand-off.
+          { label: 'Open', onSelect: () => void open(row, true) },
           { label: revealLabel(), onSelect: () => void revealFile(row.path) },
           ...(row.menuItems ?? []).map((item, index) => ({
             ...item,
@@ -224,6 +225,7 @@ export function DirectoryBrowser({
         open={rowMenu.target !== null && visible.some((row) => row.path === rowMenu.target)}
         anchor={rowMenu.anchor}
         actions={actions(visible.find((row) => row.path === rowMenu.target))}
+        focusScope={currentDir}
         onOpenChange={rowMenu.onOpenChange}
         onRestoreFocus={() => {
           if (selection.focus(menuTarget.current ?? undefined)) return

@@ -60,12 +60,16 @@ describe('buildAppMenuTemplate', () => {
     )
     expect(mac.map((item) => item.accelerator)).toEqual(['Alt+Command+I', 'CmdOrCtrl+Shift+I'])
     expect(windows.map((item) => item.accelerator)).toEqual(['F12', 'CmdOrCtrl+Shift+I'])
+    expect(mac.filter((item) => item.visible !== false)).toHaveLength(1)
+    expect(windows.filter((item) => item.visible !== false)).toHaveLength(1)
   })
 
   it.each([false, true])('offers diagnostics independently of development=%s', (development) => {
     const onCommand = vi.fn()
     const template = buildAppMenuTemplate('win32', development, onCommand)
-    const diagnostics = byLabel(template, 'Show diagnostics')
+    const view = byLabel(template, 'View')
+    if (!Array.isArray(view.submenu)) throw new Error('View must contain menu items')
+    const diagnostics = byLabel(view.submenu, 'Show diagnostics')
     expect(diagnostics).toMatchObject({
       id: 'show-diagnostics',
       type: 'checkbox',

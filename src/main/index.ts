@@ -6,8 +6,14 @@ import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import icon from '../../resources/icon.png?asset'
-import type { Weekday } from '../shared/weekday'
 import { parseSeasonCreateRequest } from './lib/season-create-request'
+import {
+  parseArchiveZipRequest,
+  parseImportFilesRequest,
+  parseLeagueCreateRequest,
+  parseRootSetRequest
+} from './lib/operation-requests'
+import { registerDiagnosticsIpc, watchDiagnosticsLoads } from './lib/diagnostics-menu'
 import {
   buildAppMenuTemplate,
   buildEditableContextMenuTemplate,
@@ -173,13 +179,12 @@ function handle<Args extends unknown[], Result>(
   })
 }
 
+function diagnosticsMenuItem(): Electron.MenuItem | undefined {
+  return Menu.getApplicationMenu()?.getMenuItemById(DIAGNOSTICS_MENU_ID) ?? undefined
+}
+
 function registerIpc(): void {
-  ipcMain.on('diagnostics:changed', (event, enabled) => {
-    if (event.sender !== mainWindow?.webContents || (enabled !== true && enabled !== false)) return
-    // Mirror the renderer's persisted preference instead of introducing an electron-store owner.
-    const item = Menu.getApplicationMenu()?.getMenuItemById(DIAGNOSTICS_MENU_ID)
-    if (item) item.checked = enabled
-  })
+  registerDiagnosticsIpc(ipcMain, () => mainWindow?.webContents ?? null, diagnosticsMenuItem)
   // The renderer's Sentry SDK inherits its config from the main process,
   // so only PostHog needs anything over IPC.
   handle('analytics:config', () => ({
@@ -209,8 +214,9 @@ function registerIpc(): void {
     return root
   })
 
-  handle('root:set', async (_e, path: string) => {
-    const root = resolve(path)
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
+  handle('root:set', async (_e, input: unknown) => {
+    const root = resolve(parseRootSetRequest(input))
     const probe = await probeRoot(root)
     if (probe !== 'dir') {
       if (probe === 'missing') {
@@ -253,7 +259,9 @@ function registerIpc(): void {
     }
   })
 
-  handle('league:create', async (_e, day: Weekday, name: string) => {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
+  handle('league:create', async (_e, dayInput: unknown, nameInput: unknown) => {
+    const { day, name } = parseLeagueCreateRequest({ day: dayInput, name: nameInput })
     const path = await createLeague(requireRoot(), day, name)
     capture('league_created', { day })
     return path
@@ -282,7 +290,12 @@ function registerIpc(): void {
     }
   )
 
-  handle('archive:zip', async (_e, leagueFolder: string, seasons: string[]) => {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
+  handle('archive:zip', async (_e, leagueInput: unknown, seasonsInput: unknown) => {
+    const { leagueFolder, seasons } = parseArchiveZipRequest({
+      leagueFolder: leagueInput,
+      seasons: seasonsInput
+    })
     const zips = await zipArchivedSeasons(requireRoot(), leagueFolder, seasons)
     capture('archive_zipped', { count: seasons.length })
     return zips
@@ -313,7 +326,9 @@ function registerIpc(): void {
     shell.showItemInFolder(path)
   })
 
-  handle('file:import', async (_e, dest: string, sources: string[]) => {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
+  handle('file:import', async (_e, destInput: unknown, sourcesInput: unknown) => {
+    const { dest, sources } = parseImportFilesRequest({ dest: destInput, sources: sourcesInput })
     const copied = await importFiles(await assertInsideRoot(requireRoot(), dest), sources)
     capture('files_imported', { count: copied.length })
     return copied
@@ -353,6 +368,11 @@ function createWindow(): void {
   if (process.platform === 'darwin') options.trafficLightPosition = { x: 14, y: 18 }
   if (process.platform === 'linux') options.icon = icon
   mainWindow = new BrowserWindow(options)
+  watchDiagnosticsLoads(
+    mainWindow.webContents,
+    () => mainWindow?.webContents ?? null,
+    diagnosticsMenuItem
+  )
 
   // Keep native surfaces in step when the OS theme changes at runtime.
   const onThemeUpdated = (): void => {

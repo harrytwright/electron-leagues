@@ -37,7 +37,9 @@ export function useTreeFolders(currentDir: string): TreeFolders {
     setBranches((current) => new Map([...current].filter(([path]) => isInside(path, currentDir))))
     setExpanded((current) => new Set([...current].filter((path) => isInside(path, currentDir))))
   }
-  reloadScope.current = { currentDir, expanded }
+  useEffect(() => {
+    reloadScope.current = { currentDir, expanded }
+  })
 
   const load = useCallback(async (path: string): Promise<void> => {
     const ticket = {}

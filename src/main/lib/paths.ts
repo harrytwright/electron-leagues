@@ -80,7 +80,15 @@ export async function resolveNewLiveSeasonRoot(
   assertLeagueFolderName(leagueFolder)
   const target = resolve(root, day, leagueFolder, seasonName)
   try {
-    return await assertInsideRoot(root, target, { allowMissingLeaf: true })
+    const resolved = await assertInsideRoot(root, target, { allowMissingLeaf: true })
+    const realRoot = await realpath(root)
+    const realExistingPrefix = await resolveExistingPrefix(resolved)
+    const expected = join(day, leagueFolder, seasonName)
+    // Containment alone accepts an in-root symlink alias, which could create a season in another league.
+    if (relative(realRoot, realExistingPrefix) !== expected) {
+      throw new UserFacingError('Only the selected live league can contain the new season')
+    }
+    return resolved
   } catch (err) {
     throw toUserFacing(err)
   }

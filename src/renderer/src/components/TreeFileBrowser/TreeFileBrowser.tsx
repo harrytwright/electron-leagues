@@ -82,7 +82,8 @@ export function TreeFileBrowser({
   const actions = (row: FileRow | undefined): RowMenuItem[] =>
     row
       ? [
-          { label: 'Open', onSelect: () => void open(row) },
+          // Menu navigation cannot restore its old row, so the destination owns the focus hand-off.
+          { label: 'Open', onSelect: () => void open(row, true) },
           { label: revealLabel(), onSelect: () => void revealFile(row.entry.path) }
         ]
       : []
@@ -380,6 +381,7 @@ export function TreeFileBrowser({
         open={rowMenu.target !== null && rows.some((row) => row.entry.path === rowMenu.target)}
         anchor={rowMenu.anchor}
         actions={actions(rows.find((row) => row.entry.path === rowMenu.target))}
+        focusScope={currentDir}
         onOpenChange={rowMenu.onOpenChange}
         onRestoreFocus={() => {
           if (selection.focus(menuTarget.current ?? undefined)) return

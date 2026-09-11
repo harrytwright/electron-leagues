@@ -53,6 +53,35 @@ it('shows a scan error without confirming an opened location', async () => {
   expect(screen.getByRole('status', { name: 'Application activity' })).toBeEmptyDOMElement()
 })
 
+it('acknowledges an opened location that does not contain leagues yet', async () => {
+  installMockApi({
+    scan: vi.fn().mockResolvedValue(null),
+    chooseRoot: vi.fn().mockResolvedValue('/chosen/leagues')
+  })
+  const user = userEvent.setup()
+  render(<App />)
+
+  await user.click(await screen.findByRole('button', { name: /open location/i }))
+
+  expect(await screen.findByText('That folder has no leagues yet')).toBeInTheDocument()
+  expect(screen.getByRole('status', { name: 'Application activity' })).toBeEmptyDOMElement()
+})
+
+it('acknowledges a recent location that does not contain leagues yet', async () => {
+  installMockApi({
+    scan: vi.fn().mockResolvedValue(null),
+    recentRoots: vi.fn().mockResolvedValue(['/recent/leagues']),
+    setRoot: vi.fn().mockResolvedValue('/recent/leagues')
+  })
+  const user = userEvent.setup()
+  render(<App />)
+
+  await user.click(await screen.findByRole('button', { name: /leagues.*\/recent\/leagues/i }))
+
+  expect(await screen.findByText('That folder has no leagues yet')).toBeInTheDocument()
+  expect(screen.getByRole('status', { name: 'Application activity' })).toBeEmptyDOMElement()
+})
+
 it('shows a scan error without confirming a recent location', async () => {
   installMockApi({
     scan: vi.fn().mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('Scan failed')),
@@ -379,7 +408,7 @@ it('keeps the completed-delete context when its refresh replaces the dialog with
   ).toBeInTheDocument()
   expect(
     await screen.findByText(
-      `Moved “2025-26” to the ${trashLabel()}, but the league could not be refreshed: Scan failed`
+      `Moved “2025-26” to the ${trashLabel()}, but the folder could not be refreshed: Scan failed`
     )
   ).toBeInTheDocument()
 })

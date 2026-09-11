@@ -33,6 +33,8 @@ export function LocationOperationProvider({
         if (!(await operation())) return
         const result = await onChanged()
         if (result === 'ready') add({ title: completion, variant: 'success' })
+        // A valid but empty location needs acknowledgement instead of silently returning to FirstRun.
+        if (result === 'no-root') add({ title: 'That folder has no leagues yet' })
         // ScanError owns scan failures; a second toast would announce the same error twice.
       } catch (caught) {
         add({ title: ipcErrorMessage(caught), variant: 'error' })

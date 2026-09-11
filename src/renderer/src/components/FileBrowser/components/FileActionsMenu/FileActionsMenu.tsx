@@ -11,11 +11,13 @@ export function FileActionsMenu({
   open,
   anchor,
   actions,
+  focusScope,
   onOpenChange,
   onRestoreFocus
 }: Props): React.JSX.Element {
   const popup = useRef<HTMLDivElement>(null)
   const wasOpen = useRef(false)
+  const openedFocusScope = useRef(focusScope)
   const restoreAfterClose = useCallback((): void => {
     queueMicrotask(() => {
       const active = document.activeElement
@@ -26,9 +28,11 @@ export function FileActionsMenu({
   }, [onRestoreFocus])
 
   useEffect(() => {
-    if (wasOpen.current && !open) restoreAfterClose()
+    if (!wasOpen.current && open) openedFocusScope.current = focusScope
+    // Navigation has its own pending-focus contract; restoring the old row would race it.
+    if (wasOpen.current && !open && openedFocusScope.current === focusScope) restoreAfterClose()
     wasOpen.current = open
-  }, [open, restoreAfterClose])
+  }, [focusScope, open, restoreAfterClose])
 
   return (
     <Menu.Root open={open} onOpenChange={(nextOpen) => onOpenChange(nextOpen)}>

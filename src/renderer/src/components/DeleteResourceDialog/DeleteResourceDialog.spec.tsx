@@ -143,7 +143,7 @@ it('stays pending through refresh and reports both a successful move and refresh
   await act(async () => failRefresh())
   const error = await screen.findByRole('alert')
   expect(error).toHaveTextContent(
-    `Moved “2024-25” to the ${trashLabel()}, but the league could not be refreshed: Scan failed`
+    `Moved “2024-25” to the ${trashLabel()}, but the folder could not be refreshed: Scan failed`
   )
   const input = screen.getByLabelText('Type 2024-25 to confirm')
   expect(input).toHaveFocus()
@@ -286,7 +286,7 @@ it('names a stale failed delete after the dialog closes and reopens for another 
   )
 
   await act(async () => failTrash())
-  expect(await screen.findByText(`Couldn't delete “2024-25”: Delete failed`)).toBeInTheDocument()
+  expect(await screen.findByText(`Couldn’t delete “2024-25”: Delete failed`)).toBeInTheDocument()
   expect(screen.getByRole('dialog', { name: 'Delete season “2025-26”' })).toBeInTheDocument()
   expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   expect(screen.queryByText('Deleting 2024-25')).not.toBeInTheDocument()
@@ -320,6 +320,6 @@ it('reports a failed delete after the dialog component unmounts', async () => {
   view.rerender(shell(false))
 
   await act(async () => failTrash())
-  expect(await screen.findByText(`Couldn't delete “2024-25”: Delete failed`)).toBeInTheDocument()
+  expect(await screen.findByText(`Couldn’t delete “2024-25”: Delete failed`)).toBeInTheDocument()
   expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 })

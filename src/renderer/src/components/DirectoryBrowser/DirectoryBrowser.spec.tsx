@@ -173,6 +173,21 @@ it('composes Open and reveal with custom row actions without opening twice', asy
   expect(onZip).toHaveBeenCalledOnce()
 })
 
+it('hands menu-based folder navigation focus to the destination', async () => {
+  installMockApi()
+  const onNavigate = vi.fn()
+  const user = userEvent.setup()
+  renderBrowser([row('Archive', 'folder')], { onNavigate })
+
+  await user.click(screen.getByRole('button', { name: 'Actions for Archive' }))
+  await user.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Open' }))
+
+  expect(onNavigate).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ path: '/documents/Archive' }),
+    true
+  )
+})
+
 it('shares row actions across pointer and keyboard menus, selecting and restoring focus', async () => {
   installMockApi()
   const unavailable = vi.fn()

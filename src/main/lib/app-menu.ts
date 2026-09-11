@@ -76,6 +76,8 @@ export function buildAppMenuTemplate(
       {
         label: 'Toggle developer tools',
         role: 'toggleDevTools',
+        // Keep the alternative chord without presenting the same action twice in View.
+        visible: false,
         accelerator: 'CmdOrCtrl+Shift+I'
       }
     )

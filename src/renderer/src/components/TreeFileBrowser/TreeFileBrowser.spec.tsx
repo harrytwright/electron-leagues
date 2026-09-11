@@ -10,6 +10,7 @@ import { TreeFileBrowser } from './index'
 import type { Props } from './interface'
 import type { Sort } from './interface'
 import { useTreeFolders } from '../../hooks/use-tree-folders'
+import { useDirListing } from '../../hooks/use-dir-listing'
 
 const season = '/leagues/monday/Triples/2025-26'
 const weeks = makeDirEntry({
@@ -42,6 +43,25 @@ function TreeBrowserHarness(overrides: Partial<Props>): React.JSX.Element {
 
 function renderFiles(overrides: Partial<Props> = {}): ReturnType<typeof renderWithProviders> {
   return renderWithProviders(<TreeBrowserHarness {...overrides} />)
+}
+
+function WatcherTreeBrowserHarness(): React.JSX.Element {
+  const listing = useDirListing(season)
+  const tree = useTreeFolders(season)
+  const [sort, setSort] = useState<Sort>({ column: 'name', direction: 'ascending' })
+  return (
+    <TreeFileBrowser
+      currentDir={season}
+      name="2025-26"
+      listing={listing}
+      tree={tree}
+      sort={sort}
+      onSortChange={setSort}
+      readOnly={false}
+      onNavigate={vi.fn()}
+      onBack={{ label: 'Back to league', action: vi.fn() }}
+    />
+  )
 }
 
 function row(name: string): HTMLElement {
@@ -117,6 +137,18 @@ it('supports arrow-key navigation and opens nested folders with their full bread
   expect(row('Rules.pdf')).toHaveFocus()
   await user.keyboard('{Home}{ArrowDown}{Enter}')
   expect(onNavigate).toHaveBeenCalledWith([weeks, week1], true)
+})
+
+it('hands menu-based folder navigation focus to the destination', async () => {
+  installMockApi()
+  const onNavigate = vi.fn()
+  const user = userEvent.setup()
+  renderFiles({ onNavigate })
+
+  await user.click(screen.getByRole('button', { name: 'Actions for Weekly results' }))
+  await user.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Open' }))
+
+  expect(onNavigate).toHaveBeenCalledExactlyOnceWith([weeks], true)
 })
 
 it('filters loaded descendants while keeping their parents and restores the collapsed state', async () => {
@@ -252,6 +284,26 @@ it('refreshes expanded folders on disk changes and ignores older responses', asy
   await screen.findByRole('row', { name: 'Week 1' })
   await act(async () => finishOld([]))
   expect(row('Week 1')).toBeInTheDocument()
+  expect(api.listDir).toHaveBeenCalledTimes(2)
+})
+
+it('recovers within the tree browser when a watcher removes the menu row', async () => {
+  const api = installMockApi({
+    listDir: vi.fn().mockResolvedValueOnce([rules, weeks]).mockResolvedValue([weeks])
+  })
+  const user = userEvent.setup()
+  renderWithProviders(<WatcherTreeBrowserHarness />)
+
+  await user.click(await screen.findByRole('button', { name: 'Actions for Rules.pdf' }))
+  expect(await screen.findByRole('menu')).toBeVisible()
+  act(emitTreeChanged)
+
+  await waitFor(() =>
+    expect(screen.queryByRole('row', { name: 'Rules.pdf' })).not.toBeInTheDocument()
+  )
+  await waitFor(() => expect(row('Weekly results')).toHaveFocus())
+  expect(screen.getByRole('treegrid').contains(document.activeElement)).toBe(true)
+  expect(document.activeElement).not.toBe(document.body)
   expect(api.listDir).toHaveBeenCalledTimes(2)
 })
 

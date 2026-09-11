@@ -84,7 +84,7 @@ export function DeleteResourceDialog({
       try {
         await onDeleted(target)
       } catch (caught) {
-        const message = `${movedMessage}, but the league could not be refreshed: ${ipcErrorMessage(caught)}`
+        const message = `${movedMessage}, but the folder could not be refreshed: ${ipcErrorMessage(caught)}`
         if (submission.current === ticket) {
           pendingErrorToast.current = message
           setError(message)
@@ -99,11 +99,11 @@ export function DeleteResourceDialog({
     } catch (caught) {
       const message = ipcErrorMessage(caught)
       if (submission.current === ticket) {
-        pendingErrorToast.current = `Couldn't delete “${target.name}”: ${message}`
+        pendingErrorToast.current = `Couldn’t delete “${target.name}”: ${message}`
         setError(message)
         inputRef.current?.focus()
       } else {
-        add({ title: `Couldn't delete “${target.name}”: ${message}`, variant: 'error' })
+        add({ title: `Couldn’t delete “${target.name}”: ${message}`, variant: 'error' })
       }
     } finally {
       // Completion follows refresh so a successful move is never reported as a plain failure.

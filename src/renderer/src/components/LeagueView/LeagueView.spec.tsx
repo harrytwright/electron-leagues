@@ -152,6 +152,27 @@ it('selects league rows with one click and opens the keyboard-selected season wi
   expect(document.activeElement).toBe(child)
 })
 
+it('focuses the first destination row after opening a folder from its menu', async () => {
+  const seasonPath = `${LEAGUE_PATH}/2025-26`
+  const weeksPath = `${seasonPath}/Weekly results`
+  installMockApi({
+    listDir: vi.fn(
+      listingFor({
+        [seasonPath]: [makeDirEntry({ name: 'Weekly results', kind: 'folder', path: weeksPath })],
+        [weeksPath]: [makeDirEntry({ name: 'Week 1.xlsx', path: `${weeksPath}/Week 1.xlsx` })]
+      })
+    )
+  })
+  const user = userEvent.setup()
+  renderLeague()
+
+  await user.dblClick(screen.getByRole('row', { name: /^2025-26/ }))
+  const menu = await openRowMenu(user, 'Weekly results')
+  await user.click(within(menu).getByRole('menuitem', { name: 'Open' }))
+
+  expect(await screen.findByRole('row', { name: 'Week 1.xlsx' })).toHaveFocus()
+})
+
 it('prunes expanded tree folders after navigating into a sibling', async () => {
   const seasonPath = `${LEAGUE_PATH}/2025-26`
   const expandedPath = `${seasonPath}/Weekly results`

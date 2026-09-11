@@ -1,5 +1,15 @@
 import AdmZip from 'adm-zip'
-import { mkdtemp, mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import {
+  chmod,
+  mkdtemp,
+  mkdir,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile
+} from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
@@ -397,6 +407,24 @@ describe('createSeason', () => {
     expect(await readdir(root)).toEqual(['monday'])
   })
 
+  test('rejects an in-root league symlink alias without creating a season', async () => {
+    await makeTree(root, { monday: null, 'tuesday/Trios': null })
+    await symlink(join(root, 'tuesday/Trios'), join(root, 'monday/Pairs'))
+
+    await expect(
+      createSeason({
+        root,
+        day: 'monday',
+        leagueFolder: 'Pairs',
+        seasonName: '2025-26',
+        source: 'empty',
+        archiveOldest: false
+      })
+    ).rejects.toThrow(/selected live league/)
+    expect(await readdir(join(root, 'monday'))).toEqual(['Pairs'])
+    expect(await readdir(join(root, 'tuesday/Trios'))).toEqual([])
+  })
+
   test('validates missing season parents without creating them', async () => {
     await expect(resolveNewLiveSeasonRoot(root, 'monday', 'Pairs', '2025-26')).resolves.toBe(
       join(root, 'monday/Pairs/2025-26')
@@ -562,6 +590,23 @@ describe('zipArchivedSeasons', () => {
     )
     expect(await readdir(outside)).toEqual(['2025-26'])
   })
+
+  test.skipIf(process.getuid?.() === 0)(
+    'settles with a user-facing error when the zip destination is read-only',
+    async () => {
+      const archiveDir = join(root, '_archives/Mens Triples')
+      await makeTree(root, { '_archives/Mens Triples/2025-26/Rules.docx': 'rules' })
+      await chmod(archiveDir, 0o500)
+
+      try {
+        await expect(zipArchivedSeasons(root, 'Mens Triples', ['2025-26'])).rejects.toBeInstanceOf(
+          UserFacingError
+        )
+      } finally {
+        await chmod(archiveDir, 0o700)
+      }
+    }
+  )
 })
 
 describe('importFiles', () => {

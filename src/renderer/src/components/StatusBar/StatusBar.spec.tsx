@@ -39,8 +39,7 @@ function renderStatus(): ReturnType<typeof render> {
   )
 }
 
-async function enableDiagnostics(): Promise<void> {
-  const user = userEvent.setup()
+async function enableDiagnostics(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await user.click(screen.getByRole('button', { name: 'Status options' }))
   const menu = await screen.findByRole('menu')
   await user.click(within(menu).getByRole('menuitemcheckbox', { name: 'Show diagnostics' }))
@@ -102,11 +101,14 @@ it('does not render completion results in the status bar', async () => {
 
 it('enables diagnostics from a checked status menu and persists the preference', async () => {
   installMockApi()
+  const user = userEvent.setup()
   renderStatus()
-  await enableDiagnostics()
+  await enableDiagnostics(user)
   expect(await screen.findByText('Heap 42 MB')).toBeInTheDocument()
   expect(localStorage.getItem('leagues:diagnostics:v1')).toBe('{"enabled":true}')
-  await userEvent.setup().click(screen.getByRole('button', { name: 'Status options' }))
+  await user.keyboard('{Escape}')
+  await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument())
+  await user.click(screen.getByRole('button', { name: 'Status options' }))
   const menu = await screen.findByRole('menu')
   expect(within(menu).getByRole('menuitemcheckbox', { name: 'Show diagnostics' })).toHaveAttribute(
     'aria-checked',
