@@ -45,12 +45,12 @@ Each is correct and each is tested, but the cost shows up in the code around the
 - **Refresh callbacks are drilled.** `refresh` travels `App → LeagueView → NewSeasonDialog`,
   `App → HomeView → NewLeagueDialog`, and `Toolbar → LocationSwitcher` as `onChanged` props, purely
   so a leaf can ask the root to re-fetch. The application menu adds two more entry points: the
-  `refresh` command reaches each pane's `onRefresh` through `FileBrowserFrame`, and `App` mounts a
-  second `useLocationOperation` for the `open-location` / `new-location` commands, whose
-  `onChanged` is again `refresh`.
-- **Single-flight guards are per instance.** `useLocationOperation` keeps its own `running` ref,
-  so with one instance in `App` and one in `LocationSwitcher` the "only one location operation at
-  a time" rule holds per caller rather than app-wide.
+  `refresh` command reaches each pane's `onRefresh` through `FileBrowserFrame`, and `App`
+  registers the `open-location` / `new-location` commands, whose `onChanged` is again `refresh`.
+- **Race guards have multiplied, but only some are cached reads.** Nine ticket or generation
+  counters now exist: in `App`, `use-dir-listing`, `use-tree-folders`, `use-import-files`,
+  `LocationSwitcher`, `FirstRun` and all three dialogs. Four guard reads from main and are
+  Query's job. The other five guard imperative user actions against unmount and stay.
 - **Navigation state is reported upward for one consumer.** `LeagueView` and `HomeView` call
   `onCurrentDirChange` so that `App` can hold `leagueNavigation` / `homeNavigation` with
   owner-path guards, all so `StatusBar` can print the current folder.
@@ -63,6 +63,10 @@ Each is correct and each is tested, but the cost shows up in the code around the
 - **Feedback plumbing is hand-rolled too.** `OperationFeedbackProvider` keeps a pending map and
   each async flow calls `begin` / `finish` itself.
 
+Main has the same shape at a larger scale: its hand-rolled error channel is used roughly 56
+times against 33 rejection handlers, and a review pass over it found duplication worth its own
+row below, plus defects that are being raised separately from this RFC.
+
 None of this is wrong. It is the point at which a library that does exactly this job, well
 tested, pays for itself, and the members database is about to add a fourth copy of the pattern
 plus a data grid and an import wizard.
@@ -70,7 +74,8 @@ plus a data grid and an import wizard.
 ## Goals
 
 1. One subscription to `tree:changed`; one place where "the disk changed" becomes "refetch".
-2. No hand-written generation counters or ticket maps in renderer hooks.
+2. No hand-written generation counters in the hooks that read from main. The guards around
+   imperative submissions remain; they are not a caching concern.
 3. Mutations invalidate by key instead of by drilled callback.
 4. Cross-pane state (selection, current folder, collapsed days) is readable by selector and
    persisted per location without a custom localStorage layer.
@@ -84,13 +89,15 @@ plus a data grid and an import wizard.
   That state is deliberately reset when the folder changes, either by `key` or by the guarded
   keyed-state pattern `useFileSelection(currentDir, …)` now uses, and should stay local. The tree
   sort that `LeagueView` lifted in `5ab115e` is owner state, not app state, and stays where it is.
-- Turning the one-shot focus request (`pendingFocusDir` and `consumeFocusRequest` in
-  `LeagueView`) into store state. It is an imperative signal consumed once by the next mount and
-  a ref is the right tool for it.
+- Turning the one-shot focus request (`pendingFocusDir` and `consumeFocusRequest`) into store
+  state. It is an imperative signal consumed once by the next mount, and a ref is the right tool.
+  The ref is right; its placement is not, and the cleanup table below folds the three copies into
+  `useCrumbs`, which already owns the base directory they each re-derive.
 - Moving UI memory into `electron-store` in main. Worth a separate discussion (see open
   questions); this RFC keeps it in the renderer.
 - Rewriting `DirectoryBrowser` / `TreeFileBrowser` onto TanStack Table. Possible later; not
-  required by anything here.
+  required by anything here. That is not the same as leaving them alone: they share roughly a
+  hundred duplicated lines today, and the cleanup table treats that as its own work.
 
 ## Proposal
 
@@ -194,18 +201,17 @@ difference.
 
 **What replaces what**
 
-| Today                                                    | With Query                                                                                                                                                                                         |
-| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `phase` state machine in `App`                           | Derived: `isPending` → loading, `isError` → error, `data === null` → no-root, else ready                                                                                                           |
-| `scanGeneration`, `generation`, `requests` race guards   | Query deduplicates in-flight fetches per key and drops results for a key no longer observed. `use-dir-listing.spec.ts`'s "slow earlier folder" case is a Query invariant.                          |
-| "Keep old rows during re-list, never across folders"     | Query's default: same key refetch keeps `data` with `isFetching`; a new key starts with no data. No `placeholderData` needed.                                                                      |
-| `useDirListing(dir)`                                     | Same signature, implemented as `useQuery({ ...dirListingQuery(dir), enabled: dir !== null })`. Components do not change in that phase.                                                             |
-| `useTreeFolders().branches`                              | `useQueries` over the expanded paths; `branches` becomes a derived `Map`. `LeagueView` still owns the hook and passes the same `TreeFolders` shape down, so `TreeFileBrowser` is untouched.        |
-| `refresh` app command → `onRefresh` → `listing.reload()` | `queryClient.invalidateQueries()`, the same call the watcher makes. A pane-scoped variant (`['dir', currentDir]`) is available if a full refresh ever proves too broad.                            |
-| `useLocationOperation`'s `busy` state and `running` ref  | `useMutation({ mutationKey: ['location'] })` for choose and switch, with `useIsMutating({ mutationKey: ['location'] })` as one app-wide guard shared by `App` and `LocationSwitcher`.              |
-| `onChanged` / `refresh` props                            | `useMutation` with `onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tree'] })`. `await`ing the invalidation preserves today's "dialog closes after the new season is visible" timing. |
-| `begin` / `finish` calls in each flow                    | A `MutationCache` with `onMutate` / `onSuccess` / `onError` reading `mutation.meta.label`, feeding the existing `OperationFeedbackContext`.                                                        |
-| `forgetAndRestart`                                       | `queryClient.setQueryData(treeQuery.queryKey, null)` plus `removeQueries` for `['dir']`.                                                                                                           |
+| Today                                                    | With Query                                                                                                                                                                                                      |
+| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `phase` state machine in `App`                           | Derived: `isPending` → loading, `isError` → error, `data === null` → no-root, else ready                                                                                                                        |
+| `scanGeneration`, `generation`, `requests` race guards   | Query deduplicates in-flight fetches per key and drops results for a key no longer observed. `use-dir-listing.spec.ts`'s "slow earlier folder" case is a Query invariant. Applies to the four read guards only. |
+| "Keep old rows during re-list, never across folders"     | Query's default: same key refetch keeps `data` with `isFetching`; a new key starts with no data. No `placeholderData` needed.                                                                                   |
+| `useDirListing(dir)`                                     | Same signature, implemented as `useQuery({ ...dirListingQuery(dir), enabled: dir !== null })`. Components do not change in that phase.                                                                          |
+| `useTreeFolders().branches`                              | `useQueries` over the expanded paths; `branches` becomes a derived `Map`. `LeagueView` still owns the hook and passes the same `TreeFolders` shape down, so `TreeFileBrowser` is untouched.                     |
+| `refresh` app command → `onRefresh` → `listing.reload()` | `queryClient.invalidateQueries()`, the same call the watcher makes. A pane-scoped variant (`['dir', currentDir]`) is available if a full refresh ever proves too broad.                                         |
+| `onChanged` / `refresh` props                            | `useMutation` with `onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tree'] })`. `await`ing the invalidation preserves today's "dialog closes after the new season is visible" timing.              |
+| `begin` / `finish` calls in each flow                    | A `MutationCache` with `onMutate` / `onSuccess` / `onError` reading `mutation.meta.label`, feeding the existing `OperationFeedbackContext`.                                                                     |
+| `forgetAndRestart`                                       | `queryClient.setQueryData(treeQuery.queryKey, null)` plus `removeQueries` for `['dir']`.                                                                                                                        |
 
 Structural sharing is a quiet win: `LeaguesTree` is plain JSON from IPC, so an unchanged league
 keeps its object identity across scans and memoised children stop re-rendering on every
@@ -214,8 +220,10 @@ watcher tick.
 ### Zustand: the workspace store
 
 The state that genuinely spans panes is small: the chosen location, the selection, the folder
-being viewed (for the status bar), the collapsed sidebar days, and the diagnostics preference.
-Today it lives in `App` and is either drilled down or reported up.
+being viewed (for the status bar) and the collapsed sidebar days. Today it lives in `App` and is
+either drilled down or reported up. The diagnostics preference is deliberately excluded: it is
+already an external store read through `useSyncExternalStore` in `use-diagnostics-preference.ts`,
+with its own change event and a mirror into main. Moving it would be a lateral rewrite.
 
 ```ts
 interface WorkspaceState {
@@ -223,7 +231,6 @@ interface WorkspaceState {
   selection: Selection
   currentDir: string | null
   collapsedDays: ReadonlySet<Weekday>
-  diagnostics: boolean
   setRoot: (root: string | null) => void // hydrates selection and collapsedDays for that root
   select: (next: Selection) => void
   setCurrentDir: (dir: string) => void
@@ -232,15 +239,18 @@ interface WorkspaceState {
 ```
 
 - **Persistence** uses the `persist` middleware with `partialize` so only
-  `{ locations: Record<root, { selection, collapsedDays }>, diagnostics }` is written, under one
+  `{ locations: Record<root, { selection, collapsedDays }> }` is written, under one
   versioned key. A custom `merge` validates the stored shape with the zod schemas that already
   exist in `lib/selection.ts` and `lib/local-store.ts`, keeping today's guarantee that corrupt or
   missing storage can never break the app. `lib/local-store.ts` then goes away.
 - **Restoration becomes derivation.** Instead of `restoreSelection` writing `HOME` into state
   when a league is missing from one scan, the render reads `findLeague(tree, selection) ?? HOME`.
-  The stored selection survives a sync-lag scan, which is what the comment in `App.tsx` asks for,
-  and the league re-selects itself when it reappears. That is a small behaviour change and is
-  called out in the migration phase.
+  The stored selection survives a sync-lag scan, and the league re-selects itself when it
+  reappears. This is a bug fix, not merely a behaviour change. Today the recovery never happens:
+  a scan that transiently loses a league writes `HOME` into state, and because the stored value
+  is only written when the user selects, every later scan re-derives from `HOME` and the league
+  stays deselected even once it returns. The comment in `App.tsx` describes an intent the code
+  does not currently deliver.
 - **Selectors, not props.** `StatusBar` reads `currentDir` directly; `Sidebar` reads
   `collapsedDays`; `Toolbar` reads `selection.kind`. `App` stops holding `leagueNavigation` and
   `homeNavigation` and their owner guards.
@@ -312,14 +322,20 @@ own small PR whenever convenient.
 These are the repeated patterns the survey found. Each is a hook or helper of well under fifty
 lines, and pulling a library in for any of them would cost more surface than it saves.
 
-| Pattern                                                                                                                                                                                                                                                                    | Where                                                                                     | Cleanup                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Task-dialog lifecycle: reset every field on open, bump a `submission` ticket, `busy` flag, `error` string, refocus the field on failure, refuse close while busy, and an `eslint-disable` for `set-state-in-effect` on each reset                                          | `NewLeagueDialog`, `NewSeasonDialog`, `DeleteResourceDialog`                              | One `useDialogTask({ open, onOpenChange, run })` hook returning `{ busy, error, submit, handleOpenChange }`. It owns the ticket and the reset, so the three lint disables go with it. With Query in place, `run` is a mutation and the hook shrinks further. TanStack Form stays deferred: the duplication here is lifecycle, not field handling.                                                                                                 |
-| `${n} item${n === 1 ? '' : 's'}`                                                                                                                                                                                                                                           | 8 sites across `LeagueView`, `DirectoryBrowser`, `TreeFileBrowser` and `use-import-files` | `plural(n, 'item')` in `lib/plural.ts` on top of `Intl.PluralRules('en-GB')`. Three lines, and the sign-in sheet work will need the same helper for "bowlers" and "teams".                                                                                                                                                                                                                                                                        |
-| `try { await window.api.x() } catch (caught) { add({ title: ipcErrorMessage(caught), variant: 'error' }) }`                                                                                                                                                                | 15 sites in 12 files                                                                      | Covered by the `MutationCache` in phase 4: `onError` toasts once for every mutation, and the call sites lose their `try`/`catch`. Reads that fail surface through `isError` instead. Not a new package.                                                                                                                                                                                                                                           |
-| IPC channels typed three times: the `handle('season:create', (_e, opts: Omit<…>) => …)` parameter in `main/index.ts`, the method in `preload/index.ts`, and the `vi.fn<RendererApi[…]>` in `tests/mock-api.ts`; input is trusted as typed until the operation validates it | `src/main/index.ts`, `src/preload/index.ts`, `src/renderer/src/tests/mock-api.ts`         | Declare each channel once in `src/shared/ipc.ts` as `{ channel, input: z.tuple([...]), output: type }` using the zod already installed. `handle()` in main parses `input` before the handler runs, preload derives its method types from the same table, and `installMockApi` iterates it so a new channel cannot be forgotten in the mock. Typed-IPC packages exist but add a runtime the project does not need; the table is about forty lines. |
-| Platform `switch` in `reveal-label.ts`, `trash-label.ts` and `app-shortcut-label.ts`                                                                                                                                                                                       | Three files, one `currentPlatform()` call each                                            | One `lib/os-labels.ts` with a `Record<Platform, { reveal, trash, modifier }>`; the spec `os-labels.spec.ts` already treats them as one unit. No package.                                                                                                                                                                                                                                                                                          |
-| Interval plus `visibilitychange` polling, `matchMedia` listener, document-level `dragover`/`drop` refusal                                                                                                                                                                  | `use-renderer-metrics.ts`, `theme.ts`, `App.tsx`                                          | Three effects, each different enough that a generic `useEventListener` would save a dozen lines in total. Leave them.                                                                                                                                                                                                                                                                                                                             |
+| Pattern                                                                                                                                                                          | Where                                                                                                                                                                                                                                                                                                                          | Cleanup                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Task-dialog lifecycle: reset every field on open, bump a `submission` ticket, `busy` flag, `error` string, refocus the field on failure, refuse close while busy                 | `NewLeagueDialog` and `NewSeasonDialog`                                                                                                                                                                                                                                                                                        | One `useDialogTask({ open, onOpenChange, run })` returning `{ busy, error, submit, handleOpenChange }`. Scoped to these two on purpose: `DeleteResourceDialog` looks like a third copy but also carries a `moved` flag and promotes a pending error toast on teardown, so forcing it through the hook would need an escape hatch. Two of the repository's four `set-state-in-effect` lint disables go with it.                                                                                         |
+| `${n} item${n === 1 ? '' : 's'}`                                                                                                                                                 | 9 occurrences on 8 lines in `LeagueView`, `DirectoryBrowser`, `TreeFileBrowser` and `use-import-files`, over the nouns item, folder, file and template, plus two hard-coded "N of M" plurals beside them                                                                                                                       | `plural(n, noun)` in `lib/plural.ts` over `Intl.PluralRules`. The sign-in sheet work will want the same helper for bowlers and teams.                                                                                                                                                                                                                                                                                                                                                                  |
+| `try { await window.api.x() } catch (caught) { add({ title: ipcErrorMessage(caught), variant: 'error' }) }`                                                                      | 8 sites in 5 files, of which only 4 are mutations                                                                                                                                                                                                                                                                              | Partly covered by the `MutationCache` in phase 4. Counted honestly: the wider population is 19 `ipcErrorMessage` call sites across 12 files, but 11 of those feed inline dialog error state rather than a toast and are untouched by any cache. See the write-orchestration row and the risk on refresh failure.                                                                                                                                                                                       |
+| IPC channel shapes declared four times over: a zod schema, the `handle` signature, the preload method, and the renderer mock                                                     | 7 of 10 input-taking channels now parse at the boundary through two separate parser modules, which disagree with each other: the sync parser validates the season name and the create parser leaves that to the operation. `dir:list`, `folder:trash` and `root:choose` still take a trusted typed parameter                   | Declare each channel once in `src/shared/ipc.ts` as channel, input schema and output type, using the zod already installed. Main parses from the table, preload derives its method types from it, and the mock iterates it so a new channel cannot be missed. Note the premise has improved since this RFC was drafted: input is no longer merely trusted. The duplication argument is now stronger rather than weaker, because validation added a fourth declaration site and a second parser module. |
+| Platform branching on `currentPlatform()`                                                                                                                                        | `reveal-label.ts` and `trash-label.ts` switch; `app-shortcut-label.ts` instead tests for darwin twice across two exported functions                                                                                                                                                                                            | One `lib/os-labels.ts` with a `Record<Platform, …>`. The spec `os-labels.spec.ts` already imports all three and drives them from a single platform table, so the tests are ahead of the source.                                                                                                                                                                                                                                                                                                        |
+| `DirectoryBrowser` and `TreeFileBrowser` are the same component differing only in how a row exposes its path and name                                                            | Roughly 110 lines: the keyed filter state, the id and ref preamble, the focus-request effect, the context-menu opener and the actions-menu block are byte-identical, comments included                                                                                                                                         | Give the tree's row type flat `path` and `name` accessors, then extract `useBrowserGrid({ currentDir, paths })` plus a `BrowserState` component for the error, loading, no-matches and empty ladder. This is the largest single duplication in the renderer and is independent of Query, so it should land first.                                                                                                                                                                                      |
+| One-shot focus request: a `pendingFocusDir` ref, a `consumeFocusRequest` callback and `enter` / `enterMany` / `jumpTo` wrappers                                                  | Three copies in `LeagueView`, `FolderPane` and `OtherPane`, identical except for the base-directory identifier                                                                                                                                                                                                                 | Move the ref into `useCrumbs`, which already takes `baseDir`, and let the navigation methods take the focus flag. Removes the prop from both browser interfaces.                                                                                                                                                                                                                                                                                                                                       |
+| "Reset this state when its owner key changes"                                                                                                                                    | Six different spellings: a state object holding the directory in `use-file-selection` and in both browsers, a derived re-base in `use-crumbs`, a mirrored location in `OperationFeedbackProvider`, a scope ref in `use-tree-folders`, a membership test in `use-row-actions-menu`                                              | A six-line `useKeyedState(key, initial)` fits the first four. The last two keep their bespoke logic. Worth doing because reviewers have now re-derived this idiom six times.                                                                                                                                                                                                                                                                                                                           |
+| Write orchestration: guard a busy flag, `begin` the feedback, await the write, reload the listing, await the refresh, qualify the message if the refresh failed, toast, `finish` | Four copies in `LeagueView.zip`, `LeagueView.syncTemplates`, `use-import-files` and `DeleteResourceDialog`, with the refresh-failure sentence duplicated four times                                                                                                                                                            | One `useWriteOperation({ label, run, onChanged, successMessage, noun })`. This is also the reason the `MutationCache` cannot own all feedback; see the risks.                                                                                                                                                                                                                                                                                                                                          |
+| Recent locations: a ticket-guarded fetch and a two-line row of basename over full path                                                                                           | Two copies in `FirstRun` and `LocationSwitcher`, byte-identical JSX but with different and undocumented failure policies, one showing an inline error and one silently swallowing                                                                                                                                              | A `LocationRow` component and one `useRecentRoots()` hook, which is also the natural seam for the phase 3 recents query. Converging them forces one deliberate failure policy.                                                                                                                                                                                                                                                                                                                         |
+| Main-process helpers reimplemented rather than shared                                                                                                                            | The "is this path inside that one" predicate is written four times, "is this a single path segment" three times, reading a filesystem error code three times each with its own lint suppression, the archive folder path computed at five sites of which one validates it, and the `meta.json` serialise-and-write three times | One exported predicate, one segment check, one error-code reader, and a `writeLeagueMeta` helper. The archive-path duplication is not cosmetic: the site that validates is the zip path, and the site that moves a season during archiving does not, which is how one of the separately raised defects arises.                                                                                                                                                                                         |
+| Interval plus `visibilitychange` polling, `matchMedia` listener, document-level `dragover`/`drop` refusal                                                                        | `use-renderer-metrics.ts`, `theme.ts`, `App.tsx`                                                                                                                                                                                                                                                                               | Three effects, each different enough that a generic `useEventListener` would save a dozen lines in total. Leave them.                                                                                                                                                                                                                                                                                                                                                                                  |
 
 ### Considered and not proposed
 
@@ -397,6 +413,24 @@ Test impact per phase is confined to the specs of the hooks touched; `installMoc
 
 - **Offline pause.** Covered by `networkMode: 'always'`; a test in phase 1 should assert the
   client is built with it.
+- **A successful write whose refresh fails is a third outcome, and the cache cannot express
+  it.** Four flows today report "zipped, but the league could not be refreshed", which means the
+  write succeeded and the invalidation did not. A rejected `invalidateQueries` inside `onSuccess`
+  does not reject the mutation, so it never reaches `MutationCache.onError` and the user would
+  see a plain success. `DeleteResourceDialog` is the sharpest case: it must keep its `moved` flag
+  so the delete is not retried, and promote the message to a toast if the dialog has closed.
+  Either these four keep their own `try`/`catch` with only `begin` and `finish` moving into the
+  cache, or they adopt the `useWriteOperation` hook instead. Decide this in phase 4, not during it.
+- **Operation feedback is location-scoped and Query is not.** `OperationFeedbackProvider` drops
+  pending location-scoped operations when the location changes while keeping application-scoped
+  ones, and a spec pins that. A `MutationCache` feeding the same context has no notion of that
+  scope, so an in-flight mutation would keep announcing across a location switch.
+- **Tree pruning is deliberate, not an artifact of hand-rolling.** `use-tree-folders` deletes
+  branches and pending tickets outside the current directory on navigation, so that filesystem
+  events cannot keep polling abandoned paths. Query's equivalent marks them stale and leaves
+  eviction to `gcTime`. Preserving today's behaviour needs an explicit `removeQueries` on
+  navigation, which is hand-written code of roughly the size being deleted. Name it in phase 3
+  so it is not found later as a regression.
 - **Blanket invalidation cost.** Every `tree:changed` refetches every _active_ query. Today's
   code already refetches every subscriber on that event, so this is not a regression; the
   watcher's 500 ms debounce still applies. If a very large folder makes it noticeable, narrow
