@@ -84,8 +84,14 @@ export async function assertRealLayout(
   if (!isInsideRoot(realRoot, realExistingPrefix)) {
     throw new UserFacingError('Path is outside the leagues folder')
   }
+  const actualRelative = relative(realRoot, realExistingPrefix)
+  // Case-insensitive volumes can return on-disk casing from realpath rather than the requested casing.
+  const matchesLayout =
+    process.platform === 'win32' || process.platform === 'darwin'
+      ? actualRelative.toLowerCase() === expectedRelative.toLowerCase()
+      : actualRelative === expectedRelative
   // Containment permits aliases within the root; writes must still land in the location named by the UI.
-  if (relative(realRoot, realExistingPrefix) !== expectedRelative) {
+  if (!matchesLayout) {
     throw new UserFacingError('Path does not match the selected leagues location')
   }
   return resolved
@@ -125,12 +131,11 @@ export async function resolveImportDestination(root: string, destination: string
   const parts = requested.split(sep)
   const first = parts[0]
   const isManaged = first === '_shared' || first === '_templates'
-  const season = parts.length >= 3 ? parseSeasonName(parts[2]) : null
-  const isLive =
-    isWeekday(first) && (parts.length === 2 || (parts.length >= 3 && season?.name === parts[2]))
+  // The UI imports at any depth outside archives, so layout validation pins only the day and league.
+  const isLive = isWeekday(first) && parts.length >= 2
   const isOtherRootItem = parts.length === 1 && first !== '_archives' && !isWeekday(first)
   // Archives and incomplete weekday paths are browseable, but imports must target a user-managed pane.
-  if (!isManaged && !isLive && !isOtherRootItem) {
+  if (first === '_archives' || (!isManaged && !isLive && !isOtherRootItem)) {
     throw new UserFacingError('Invalid import destination')
   }
   return assertRealLayout(root, resolved, requested)

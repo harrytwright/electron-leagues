@@ -327,7 +327,13 @@ function registerIpc(): void {
   // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
   handle('file:open', async (_e, input: unknown) => {
     const requested = parsePathRequest(input)
-    const path = await assertInsideRoot(requireRoot(), requested)
+    let path: string
+    try {
+      path = await assertInsideRoot(requireRoot(), requested)
+    } catch (err) {
+      // A stale browser row is an expected filesystem failure, not an application fault.
+      throw toUserFacing(err)
+    }
     capture('document_opened', { onedrive: (await oneDriveStatus(path)).availability })
     return shell.openPath(path)
   })
@@ -335,8 +341,14 @@ function registerIpc(): void {
   // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
   handle('file:reveal', async (_e, input: unknown) => {
     const requested = parsePathRequest(input)
-    // Location menus reveal the selected root itself; other file actions still require a descendant.
-    const path = await assertInsideRoot(requireRoot(), requested, { allowRoot: true })
+    let path: string
+    try {
+      // Location menus reveal the selected root itself; other file actions still require a descendant.
+      path = await assertInsideRoot(requireRoot(), requested, { allowRoot: true })
+    } catch (err) {
+      // Revealing a stale row should use the same user-facing error as opening it.
+      throw toUserFacing(err)
+    }
     shell.showItemInFolder(path)
   })
 

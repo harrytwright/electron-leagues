@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { UserFacingError } from '../fs-errors'
+import { toUserFacing, UserFacingError } from '../fs-errors'
 import {
   assertInsideRoot,
   classifyTrashTarget,
@@ -89,6 +89,20 @@ describe('assertInsideRoot', () => {
     })
   })
 
+  test('a missing path maps to a user-facing error at an operation boundary', async () => {
+    const assertExistingPath = async (): Promise<string> => {
+      try {
+        return await assertInsideRoot(root, join(root, 'missing'))
+      } catch (err) {
+        throw toUserFacing(err)
+      }
+    }
+
+    await expect(assertExistingPath()).rejects.toEqual(
+      new UserFacingError('That folder no longer exists')
+    )
+  })
+
   test('allows the root only when the caller opts in', async () => {
     await expect(assertInsideRoot(root, root)).rejects.toThrow(/outside the leagues folder/)
     await expect(assertInsideRoot(root, root, { allowRoot: true })).resolves.toBe(root)
@@ -98,6 +112,8 @@ describe('assertInsideRoot', () => {
 describe('resolveImportDestination', () => {
   test.each([
     ['live league', 'monday/Pairs'],
+    ['live child folder', 'monday/Pairs/Notes'],
+    ['live non-season child', 'monday/Pairs/2025-q1'],
     ['live season child', 'monday/Pairs/2025-26/results'],
     ['shared', '_shared'],
     ['templates', '_templates/nested'],
@@ -110,7 +126,7 @@ describe('resolveImportDestination', () => {
     )
   })
 
-  test.each(['', '_archives/Pairs', 'monday', 'monday/Pairs/not-a-season', '_unknown/nested'])(
+  test.each(['', '_archives/Pairs', '_archives/Pairs/2024-25', 'monday', '_unknown/nested'])(
     'rejects the disallowed layout %j',
     async (requested) => {
       const destination = requested ? join(root, requested) : root
