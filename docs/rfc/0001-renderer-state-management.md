@@ -1,12 +1,13 @@
 # RFC 0001: Renderer state management and TanStack dependencies
 
-| Field    | Value                                                                                |
-| -------- | ------------------------------------------------------------------------------------ |
-| Status   | Proposed                                                                             |
-| Author   | Harry Wright (drafted with Claude)                                                   |
-| Date     | 2026-09-08                                                                           |
-| Baseline | `claude/sidebar-treeview-redesign-8thsrj` at `6741de6`                               |
-| Scope    | Renderer only. Main-process code, IPC contracts and the on-disk model are unchanged. |
+| Field    | Value                                                                                                                                                                                                |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Status   | Ready for review                                                                                                                                                                                     |
+| Author   | Harry Wright (drafted with Claude)                                                                                                                                                                   |
+| Drafted  | 2026-09-08                                                                                                                                                                                           |
+| Revised  | 2026-09-12, after three review passes over the code                                                                                                                                                  |
+| Baseline | `claude/sidebar-treeview-redesign-8thsrj` at `6741de6`                                                                                                                                               |
+| Scope    | The state migration is renderer-only and changes no IPC contract or on-disk format. The cleanup catalogue below also names main-process duplication, which is separate work and separately optional. |
 
 ## Summary
 
@@ -22,11 +23,10 @@ rather than product documentation, and survives in git history; its boundary is 
 because this RFC is the deliberate place to lift it, with the reasons written down.
 
 Because #3 stacks the dependency PR on top of the UI work, this document also lists the
-non-state additions that PR should carry. After measuring each against the code, that comes to
-one runtime package (`react-error-boundary`), no tooling packages for now, and a set of in-house
-cleanups that are cheaper than any package. Four of the five tooling packages originally
-proposed here were cut on evidence; the reasoning is kept below because it points at what the
-repository actually lacks, which is CI.
+non-state additions that PR should carry: one runtime package (`react-error-boundary`) and one
+lint ratchet (`@vitest/eslint-plugin`), plus a set of in-house cleanups that are cheaper than
+any package. Three further tooling packages were proposed in an earlier draft and cut on
+evidence; their verdicts are kept below so the question is not reopened from intuition.
 
 ## Motivation
 
@@ -84,7 +84,9 @@ plus a data grid and an import wizard.
    persisted per location without a custom localStorage layer.
 5. Every behaviour the existing specs pin down keeps passing, with `installMockApi` and
    `emitTreeChanged` unchanged as the test seam.
-6. Nothing in `src/main`, `src/preload` or `src/shared` changes.
+6. The state migration itself touches nothing in `src/main`, `src/preload` or `src/shared`.
+   The optional cleanups catalogued later do touch main, and are scoped and sequenced
+   separately so this guarantee holds for phases 0 to 5.
 
 ## Non-goals
 
@@ -112,12 +114,12 @@ published on the date of this RFC and are pinned with a caret.
 
 **Adopt now**
 
-| Package                          | Version  | Role                                                                                                                                                                                                                                                                                                                                 |
-| -------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `@tanstack/react-query`          | ^5.102.8 | Cache and lifecycle for every IPC read; mutations with keyed invalidation                                                                                                                                                                                                                                                            |
-| `@tanstack/react-query-devtools` | ^5.102.8 | Dev-only inspector, rendered behind `import.meta.env.DEV`                                                                                                                                                                                                                                                                            |
-| `@tanstack/eslint-plugin-query`  | ^5.102.8 | `exhaustive-deps` for query keys, which is the one footgun that makes newly adopted Query serve stale data. Kept where the general-purpose lint plugins were cut, because it guards the thing this RFC introduces rather than the code that already exists. The same caveat applies: without CI it only runs when someone remembers. |
-| `zustand`                        | ^5.0.15  | One `workspace` store for cross-pane UI state, with the `persist` middleware                                                                                                                                                                                                                                                         |
+| Package                          | Version  | Role                                                                                                                                                                                                                                                                             |
+| -------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@tanstack/react-query`          | ^5.102.8 | Cache and lifecycle for every IPC read; mutations with keyed invalidation                                                                                                                                                                                                        |
+| `@tanstack/react-query-devtools` | ^5.102.8 | Dev-only inspector, rendered behind `import.meta.env.DEV`                                                                                                                                                                                                                        |
+| `@tanstack/eslint-plugin-query`  | ^5.102.8 | `exhaustive-deps` for query keys, which is the one footgun that makes newly adopted Query serve stale data. Kept where the general-purpose lint plugins were cut, because it guards what this RFC introduces rather than code that already exists, and CI on `main` enforces it. |
+| `zustand`                        | ^5.0.15  | One `workspace` store for cross-pane UI state, with the `persist` middleware                                                                                                                                                                                                     |
 
 **Adopt with the members database**
 
@@ -138,8 +140,25 @@ published on the date of this RFC and are pinned with a caret.
 | `@tanstack/react-store`                  | See alternatives. It is a 0.x internal of Form and Router with no persist middleware.                                                                          |
 
 Approximate cost in the production renderer bundle: Query about 13 kB min+gz, Zustand about
-1 kB. Devtools and the ESLint plugin never ship. Kumo already pulls in
-`use-sync-external-store`, which both libraries build on.
+1 kB. Devtools and the lint plugins never ship. Kumo already pulls in `use-sync-external-store`,
+which both libraries build on.
+
+**The canonical install list.** Packages are named across three sections of this document for
+different reasons. This is the whole set the dependency PR adds, and nothing else:
+
+```
+npm i -D @tanstack/react-query@^5.102.8 \
+         @tanstack/react-query-devtools@^5.102.8 \
+         @tanstack/eslint-plugin-query@^5.102.8 \
+         zustand@^5.0.15 \
+         react-error-boundary@^6.1.5 \
+         @vitest/eslint-plugin@^1.6.27
+```
+
+Six packages. `@tanstack/react-table` and `@tanstack/react-form` are deliberately absent and
+arrive with the members database. `devDependencies` is correct for all six despite four of them
+shipping in the bundle: electron-vite bundles the renderer, and this repository puts runtime
+renderer packages there on purpose. Do not "fix" that.
 
 ### TanStack Query: the IPC cache
 
@@ -310,7 +329,8 @@ mistaken for missing packages.
 ### Tooling
 
 A review pass measured each proposed package against the code rather than against intuition,
-and **four of the five did not survive**. They are kept here with their verdicts because the
+and **only one of the five survived as an adopt-now**: three were cut outright and one
+deferred. They are kept here with their verdicts because the
 reasoning matters more than the list. One correction to that pass: it reported that the project
 has no CI, which is true of this branch but not of the project. `main` carries workflows running
 lint, typecheck and the suite across an OS matrix on every pull request, and this branch predates
@@ -408,41 +428,77 @@ re-renders on every selection change. Zustand costs about 1 kB and removes both 
 
 ## Migration plan
 
-Each phase is one PR, keeps `npm test`, `npm run typecheck` and `npm run lint` green, and can be
-reverted alone. The hand-rolled hooks and Query can coexist while a phase is in flight because
-the extra subscription is harmless.
+Each phase is one PR that keeps `npm test`, `npm run typecheck` and `npm run lint` green and can
+be reverted alone. CI on `main` runs all three across an OS matrix, so a phase is not done until
+it is green there. The hand-rolled hooks and Query can coexist mid-phase, because the extra
+subscription is harmless.
 
-0. **Widen the test harness.** Add a hook renderer and an optional location key to the shared
-   helper, so the provider tree has one definition. Without this, the roughly twenty hand-nested
-   provider sites will not pick up the provider added in phase 1. This is a prerequisite, not a
-   cleanup, and it is the one step that must come first.
-1. **Install.** Add the packages from the adopt-now table and the lockfile changes, then wire
-   `QueryClientProvider` in `main.tsx` and the shared test helper. No behaviour change. The
-   ESLint plugin that used to sit in this step is cut; see the tooling section.
-2. **Directory listings.** Reimplement `useDirListing` on `useQuery` behind the same signature.
-   Move the `onTreeChanged` subscription to the single invalidation point. The two existing
-   `use-dir-listing.spec.ts` cases become the acceptance test.
-3. **Tree and recents.** Move `scan` into `treeQuery`; derive `phase`; delete `scanGeneration`.
-   Move `recentRoots` (used by `LocationSwitcher` and `FirstRun`) onto a query.
-   `useTreeFolders` becomes `useQueries` over the expanded set, keeping the `TreeFolders`
-   interface that `LeagueView` passes to `TreeFileBrowser`.
-4. **Mutations and feedback.** Convert create league, create season, sync templates, zip, trash,
-   import and location switching to `useMutation` with `meta.label`. Route feedback through a
-   `MutationCache`. Point the `refresh` and location app-command handlers at the query client.
-   Remove the drilled `onChanged` props once no caller needs them.
-5. **Workspace store.** Introduce `createWorkspaceStore`, migrate selection, current folder,
-   collapsed days and diagnostics; delete `lib/local-store.ts` and the navigation state in
-   `App`. Note the restoration-by-derivation behaviour change in the PR description.
-6. **Members (later).** Add Table and Form with the feature.
+**Phase 0 — widen the test harness.** Add a hook renderer and an optional location key to the
+shared test helper so the provider tree has exactly one definition, then move the roughly twenty
+hand-nested provider sites onto it. No production code changes.
+_Done when:_ no spec file constructs a provider tree inline, except the provider's own spec.
+_Why first:_ phase 1 adds a provider to that tree, and the hand-nested sites would not pick it up.
 
-The tooling packages, the error boundary and the no-dependency cleanups are independent of
-phases 1 to 5. The dependency PR that follows #3 installs them alongside phase 1; the cleanups
-are best done as they are touched, with the dialog hook and the shared IPC table first because
-each removes three copies at once.
+**Phase 1 — install.** Add the six packages from the canonical list, wire `QueryClientProvider`
+in `main.tsx` and the shared test helper, mount the error boundaries, and enable both lint
+plugins. No behaviour change beyond the boundaries.
+_Done when:_ a test asserts the client is built with `networkMode: 'always'`, and the devtools
+import is behind `import.meta.env.DEV` with the production bundle checked.
 
-Test impact per phase is confined to the specs of the hooks touched; `installMockApi` and
-`emitTreeChanged` stay the seam because the single subscriber still registers through
-`window.api.onTreeChanged`.
+**Phase 2 — directory listings.** Reimplement `useDirListing` on `useQuery` behind its current
+signature. Move the `onTreeChanged` subscription to the single invalidation point.
+_Done when:_ the two existing cases in `use-dir-listing.spec.ts` pass against the new
+implementation, rewritten to assert behaviour rather than generation-ref call counts.
+
+**Phase 3 — tree and recents.** Move `scan` into `treeQuery` and derive `phase` from it. Move
+`recentRoots` onto a query, which is also where the two divergent recents fetches converge.
+Reimplement `useTreeFolders` as `useQueries` over the expanded set.
+_Done when:_ the `TreeFolders` interface is byte-identical, so `TreeFileBrowser` is untouched;
+and navigation still evicts abandoned branches, which needs an explicit `removeQueries` because
+Query only marks them stale. The pruning spec is the acceptance test and must not be weakened.
+
+**Phase 4 — mutations and feedback.** Convert the writes to `useMutation` with `meta.label` and
+route `begin` / `finish` through a `MutationCache`. Point the `refresh` and location app-command
+handlers at the query client. Remove the drilled `onChanged` props once no caller needs them.
+_Decide before starting, not during:_ the four write flows that report "succeeded, but could not
+be refreshed" either keep their own `try`/`catch` with only the feedback moving into the cache,
+or adopt the `useWriteOperation` hook from the cleanup catalogue. A `MutationCache` alone cannot
+express that outcome. See the risk below.
+_Done when:_ location-scoped feedback still clears on a location switch while application-scoped
+feedback survives, which an existing spec pins.
+
+**Phase 5 — workspace store.** Introduce `createWorkspaceStore`, migrate the location, selection,
+current folder and collapsed days, and delete `lib/local-store.ts` along with the navigation
+state in `App`. The diagnostics preference stays where it is; it is already an external store.
+_Done when:_ the roughly twenty raw-key storage assertions are ported to the store's `merge`
+guards rather than deleted, and the PR description states plainly that restoration by derivation
+is a bug fix, since today a league lost to one scan never re-selects itself.
+
+**Phase 6 — members (later).** Table and Form arrive with that feature, not before.
+
+### Sequencing the cleanups
+
+The cleanups need no dependency and are independent of the phases, so they are ordered by what
+they unblock rather than by size. The first two pay for themselves immediately:
+
+1. `useBrowserGrid` and a `BrowserState` component for the two file browsers. The largest
+   single duplication in the renderer, and it should land before Query touches those files.
+2. `useCrumbs` absorbs the one-shot focus ref, deleting three copies and a prop from two
+   interfaces.
+3. `useDialogTask` for the two dialogs it fits, and `useWriteOperation`, which phase 4 may
+   depend on.
+4. `useKeyedState`, `plural` and `os-labels`. Small, safe, do them while passing.
+5. The shared IPC table and the main-process helper consolidation. These touch main and are the
+   only cleanups outside this RFC's renderer scope, so they belong in their own PR with their
+   own review. The archive-path duplication among them is the root cause of a filed bug.
+
+### What this plan does not promise
+
+Test rewriting is real work in phases 2, 3 and 5, not an afterthought. `installMockApi` and
+`emitTreeChanged` remain the seam, because the single subscriber still registers through
+`window.api.onTreeChanged`, but the specs that assert generation-ref call counts, raw storage
+keys or `restoreSelection` directly are rewritten rather than carried across. The risks section
+names where that cost falls.
 
 ## Risks
 
@@ -491,10 +547,23 @@ Test impact per phase is confined to the specs of the hooks touched; `installMoc
 
 ## Open questions
 
-1. Zustand, or defer the client store and do phases 1 to 4 only? Query is the larger win; the
-   store is justified mostly by persistence and the status-bar plumbing.
-2. Should per-location UI memory move to `electron-store` in main, next to recent locations,
-   instead of persisting in the renderer? The now-removed polish plan rejected a second renderer
-   store for recents; the same argument may apply here.
-3. Ship the devtools at all, or rely on the ESLint plugin and tests?
-4. Migrate the two file browsers to TanStack Table when members lands, or leave them?
+These are for the reviewer to settle. Everything else in this document is decided.
+
+1. **Zustand, or Query only?** Defer the store and stop after phase 4 is a legitimate shape. The
+   review strengthened the case for the store rather than weakening it: the current folder has
+   two reporters and three layers of guarding, all to print one string in the status bar. But
+   Query is the larger win and could ship alone.
+2. **Should per-location UI memory live in `electron-store` in main** instead of persisting in
+   the renderer, next to recent locations? The now-removed polish plan rejected a second renderer
+   store for recents, and the same argument may apply. This changes phase 5's shape, so answer it
+   before phase 5 rather than during.
+3. **Do the four refresh-failure write flows keep their own error handling, or move to
+   `useWriteOperation`?** Phase 4 cannot start without an answer. My recommendation is the hook,
+   because it also deletes three other copies.
+4. **Do the main-process cleanups belong to this RFC at all,** or to the issues already filed
+   against those files? They are catalogued here because the survey found them, but they are
+   outside the renderer scope this document otherwise keeps.
+
+Answered by the review and no longer open: whether to ship the devtools (yes, they never reach
+the bundle), and whether to migrate the browsers to TanStack Table (no, but they do need the
+shared grid hook first).
