@@ -5,7 +5,7 @@
 | Status   | Proposed                                                                             |
 | Author   | Harry Wright (drafted with Claude)                                                   |
 | Date     | 2026-09-08                                                                           |
-| Baseline | `claude/sidebar-treeview-redesign-8thsrj` at `8523525` (326 tests passing)           |
+| Baseline | `claude/sidebar-treeview-redesign-8thsrj` at `6741de6`                               |
 | Scope    | Renderer only. Main-process code, IPC contracts and the on-disk model are unchanged. |
 
 ## Summary
@@ -16,8 +16,10 @@ remount. Add **TanStack Table** and **TanStack Form** only when the members data
 that is the first feature with a real data grid and a multi-step form. Do not adopt TanStack
 Router, TanStack DB, TanStack Virtual or a query persister.
 
-The desktop polish plan set a "no new dependencies" boundary for its own passes. This RFC is the
-deliberate place to lift that boundary, with the reasons written down.
+The desktop polish plan that governed the preceding UI passes set a "no new dependencies"
+boundary for them. That plan was removed from the repository in `0fa7118` as orchestration
+rather than product documentation, and survives in git history; its boundary is quoted here
+because this RFC is the deliberate place to lift it, with the reasons written down.
 
 Because #3 stacks the dependency PR on top of the UI work, this document also lists the
 non-state additions that PR should carry: one runtime package (`react-error-boundary`), five
@@ -300,7 +302,7 @@ own small PR whenever convenient.
 | Package                               | Version | Why                                                                                                                                                                                                                                                                                             |
 | ------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `eslint-plugin-jsx-a11y`              | ^6.10.2 | The last three source commits fixed accessible names, tab order and popup naming by hand after cold review. The plugin catches the mechanical half of that class (missing labels, invalid roles, `tabIndex` misuse) before review.                                                              |
-| `eslint-plugin-testing-library`       | ^7.16.2 | 161 specs call `installMockApi` and the suite has grown to 326 tests. The plugin enforces `findBy` over `waitFor` plus `getBy`, no direct DOM access, and `userEvent` over `fireEvent`, which are the review comments the specs keep receiving.                                                 |
+| `eslint-plugin-testing-library`       | ^7.16.2 | 161 specs call `installMockApi` and the suite passed 348 tests at its last reported run. The plugin enforces `findBy` over `waitFor` plus `getBy`, no direct DOM access, and `userEvent` over `fireEvent`, which are the review comments the specs keep receiving.                              |
 | `@vitest/eslint-plugin`               | ^1.6.27 | Focused tests (`it.only`), missing `await` on `expect(...).resolves`, and identical titles are the vitest-specific slips the test-library plugin does not cover.                                                                                                                                |
 | `knip`                                | ^6.35.1 | Two rewrites have removed whole component trees (`FileList`, `SharedView`, `ListingPanel`, `app-shortcuts`). knip reports unused files, exports and dependencies in one run, and can gate CI. Its first run will also confirm whether `echarts` and other unmet peers are the only dead weight. |
 | `@ianvs/prettier-plugin-sort-imports` | ^4.7.1  | Import order differs file to file (`react`, Kumo, icons, `@shared`, `@renderer`, relative, in no fixed sequence). The project already delegates formatting to Prettier, so a Prettier plugin keeps that decision in one place with no ESLint rule to maintain.                                  |
@@ -413,7 +415,7 @@ Test impact per phase is confined to the specs of the hooks touched; `installMoc
 1. Zustand, or defer the client store and do phases 1 to 4 only? Query is the larger win; the
    store is justified mostly by persistence and the status-bar plumbing.
 2. Should per-location UI memory move to `electron-store` in main, next to recent locations,
-   instead of persisting in the renderer? The polish plan rejected a second renderer store for
-   recents; the same argument may apply here.
+   instead of persisting in the renderer? The now-removed polish plan rejected a second renderer
+   store for recents; the same argument may apply here.
 3. Ship the devtools at all, or rely on the ESLint plugin and tests?
 4. Migrate the two file browsers to TanStack Table when members lands, or leave them?
