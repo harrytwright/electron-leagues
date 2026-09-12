@@ -22,8 +22,11 @@ rather than product documentation, and survives in git history; its boundary is 
 because this RFC is the deliberate place to lift it, with the reasons written down.
 
 Because #3 stacks the dependency PR on top of the UI work, this document also lists the
-non-state additions that PR should carry: one runtime package (`react-error-boundary`), five
-tooling packages, and the in-house cleanups that are cheaper than any package.
+non-state additions that PR should carry. After measuring each against the code, that comes to
+one runtime package (`react-error-boundary`), no tooling packages for now, and a set of in-house
+cleanups that are cheaper than any package. Four of the five tooling packages originally
+proposed here were cut on evidence; the reasoning is kept below because it points at what the
+repository actually lacks, which is CI.
 
 ## Motivation
 
@@ -109,12 +112,12 @@ published on the date of this RFC and are pinned with a caret.
 
 **Adopt now**
 
-| Package                          | Version  | Role                                                                                     |
-| -------------------------------- | -------- | ---------------------------------------------------------------------------------------- |
-| `@tanstack/react-query`          | ^5.102.8 | Cache and lifecycle for every IPC read; mutations with keyed invalidation                |
-| `@tanstack/react-query-devtools` | ^5.102.8 | Dev-only inspector, rendered behind `import.meta.env.DEV`                                |
-| `@tanstack/eslint-plugin-query`  | ^5.102.8 | `exhaustive-deps` for query keys and the other recommended rules; flat-config compatible |
-| `zustand`                        | ^5.0.15  | One `workspace` store for cross-pane UI state, with the `persist` middleware             |
+| Package                          | Version  | Role                                                                                                                                                                                                                                                                                                                                 |
+| -------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `@tanstack/react-query`          | ^5.102.8 | Cache and lifecycle for every IPC read; mutations with keyed invalidation                                                                                                                                                                                                                                                            |
+| `@tanstack/react-query-devtools` | ^5.102.8 | Dev-only inspector, rendered behind `import.meta.env.DEV`                                                                                                                                                                                                                                                                            |
+| `@tanstack/eslint-plugin-query`  | ^5.102.8 | `exhaustive-deps` for query keys, which is the one footgun that makes newly adopted Query serve stale data. Kept where the general-purpose lint plugins were cut, because it guards the thing this RFC introduces rather than the code that already exists. The same caveat applies: without CI it only runs when someone remembers. |
+| `zustand`                        | ^5.0.15  | One `workspace` store for cross-pane UI state, with the `persist` middleware                                                                                                                                                                                                                                                         |
 
 **Adopt with the members database**
 
@@ -306,16 +309,46 @@ mistaken for missing packages.
 
 ### Tooling
 
-None of these ship in the bundle, and none depend on the state work, so they can land in their
-own small PR whenever convenient.
+A review pass measured each proposed package against the code rather than against intuition,
+and **four of the five did not survive**. They are kept here with their verdicts because the
+reasoning matters more than the list: every one of them is a lint gate, and this repository has
+nothing to gate with.
 
-| Package                               | Version | Why                                                                                                                                                                                                                                                                                             |
-| ------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eslint-plugin-jsx-a11y`              | ^6.10.2 | The last three source commits fixed accessible names, tab order and popup naming by hand after cold review. The plugin catches the mechanical half of that class (missing labels, invalid roles, `tabIndex` misuse) before review.                                                              |
-| `eslint-plugin-testing-library`       | ^7.16.2 | 161 specs call `installMockApi` and the suite passed 348 tests at its last reported run. The plugin enforces `findBy` over `waitFor` plus `getBy`, no direct DOM access, and `userEvent` over `fireEvent`, which are the review comments the specs keep receiving.                              |
-| `@vitest/eslint-plugin`               | ^1.6.27 | Focused tests (`it.only`), missing `await` on `expect(...).resolves`, and identical titles are the vitest-specific slips the test-library plugin does not cover.                                                                                                                                |
-| `knip`                                | ^6.35.1 | Two rewrites have removed whole component trees (`FileList`, `SharedView`, `ListingPanel`, `app-shortcuts`). knip reports unused files, exports and dependencies in one run, and can gate CI. Its first run will also confirm whether `echarts` and other unmet peers are the only dead weight. |
-| `@ianvs/prettier-plugin-sort-imports` | ^4.7.1  | Import order differs file to file (`react`, Kumo, icons, `@shared`, `@renderer`, relative, in no fixed sequence). The project already delegates formatting to Prettier, so a Prettier plugin keeps that decision in one place with no ESLint rule to maintain.                                  |
+| Package                               | Verdict                          | Evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eslint-plugin-jsx-a11y`              | **Cut**                          | The renderer is almost entirely Kumo components, which the plugin does not inspect without a hand-maintained component map. The accessible-name, tab-order and popup-naming fixes cited as justification are `aria-labelledby`, `aria-controls`, `aria-level` and `role="status"`, and no rule covers any of them. What it would report is four deliberate modal `autoFocus` sites and one false positive. Instead, enable oxlint's built-in jsx-a11y rules, which are off only by omission and cost nothing. |
+| `eslint-plugin-testing-library`       | **Cut**                          | The headline justification was enforcing `findBy` over `waitFor` plus `getBy`. There are 51 `waitFor` sites and every one wraps an assertion, so that rule fires zero times; the suite already uses `findBy` correctly throughout. Across every other rule the yield is nine flags, all deliberate, chiefly fake-timer and synchronous double-activation tests that `userEvent` cannot express. Nine flags, nine suppressions.                                                                                |
+| `@vitest/eslint-plugin`               | **Defer** until there is CI      | All four cited justifications return zero: no focused tests, no missing `await` on a settled assertion, no duplicate titles within a scope, no test without an assertion. Its value is prevention, and prevention without enforcement is nothing.                                                                                                                                                                                                                                                             |
+| `knip`                                | **Cut** for now                  | Hand-running its three analyses found no unused files, one unused dependency, and roughly four genuinely unused exports among thirty-three reports. The two rewrites left no residue. Note also that its promised confirmation about `echarts` was wrong: `echarts` is an **optional** peer of Kumo, so nothing would ever report it. Do not run it in production mode here, which would flag every runtime dependency as misplaced under this repository's deliberate devDependencies rule.                  |
+| `@ianvs/prettier-plugin-sort-imports` | **Defer** until the stack merges | The disorder is real and one file interleaves four groups. The cost is the problem: the one-off diff touches 86 files and 573 import lines while a 98-file stacked PR is in flight, which turns clean merges into conflicts that cannot be resolved by reading, since every hunk looks alike. Land it alone as the first commit after the stack, recorded in `.git-blame-ignore-revs`.                                                                                                                        |
+
+**What the review found instead, in descending order of value.** These are worth more than the
+four cut packages combined.
+
+1. **There is no CI.** No workflow file exists anywhere in the repository. Lint, typecheck and
+   the suite run only when someone remembers. A workflow running the three existing scripts on
+   push is the prerequisite that makes any lint gate meaningful, and it is the single highest
+   -value tooling change available.
+2. **The anti-slop plugin enforces fifteen error-level rules and is itself unguarded.** Its
+   twenty-one TypeScript files are excluded from ESLint, from oxlint, from Prettier and from
+   both tsconfigs, and have no tests. Nothing type-checks the code that gates every other file,
+   and its own style has already drifted from the repository's. Adding a tools tsconfig and rule
+   fixtures protects an existing investment for less work than any package migration here.
+3. **The test harness needs widening before phase 1, not after.** `TestProviders` exposes only a
+   component renderer, so five spec files re-nest the provider tree by hand at roughly twenty
+   sites. Phase 1 adds `QueryClientProvider` to that tree, and those sites would not pick it up.
+   Adding a hook renderer and an optional location key to the shared helper is a prerequisite of
+   this RFC rather than an optional cleanup.
+4. **Vitest config hygiene.** The renderer project sets no `restoreMocks`, `unstubEnvs` or
+   `unstubGlobals`, so two spec files re-implement that cleanup by hand and one leaks a spy when
+   it fails early. Three config lines remove all of it.
+
+One package does survive unchanged, and it is the runtime one: `react-error-boundary`. A
+separate pass confirmed the renderer has no boundary, no `componentDidCatch` and no global
+handler, so a render-time throw below `App` blanks the window.
+
+Unrelated to any of the above, the review found a real accessibility defect that no linter here
+would have caught: the renderer's HTML document has no `lang` attribute.
 
 ### Cleanups that need no dependency
 
@@ -381,9 +414,13 @@ Each phase is one PR, keeps `npm test`, `npm run typecheck` and `npm run lint` g
 reverted alone. The hand-rolled hooks and Query can coexist while a phase is in flight because
 the extra subscription is harmless.
 
-1. **Install.** Add the four "adopt now" packages and the lockfile changes, wire
-   `QueryClientProvider` in `main.tsx` and `TestProviders`, enable the ESLint plugin. No behaviour
-   change.
+0. **Widen the test harness.** Add a hook renderer and an optional location key to the shared
+   helper, so the provider tree has one definition. Without this, the roughly twenty hand-nested
+   provider sites will not pick up the provider added in phase 1. This is a prerequisite, not a
+   cleanup, and it is the one step that must come first.
+1. **Install.** Add the packages from the adopt-now table and the lockfile changes, then wire
+   `QueryClientProvider` in `main.tsx` and the shared test helper. No behaviour change. The
+   ESLint plugin that used to sit in this step is cut; see the tooling section.
 2. **Directory listings.** Reimplement `useDirListing` on `useQuery` behind the same signature.
    Move the `onTreeChanged` subscription to the single invalidation point. The two existing
    `use-dir-listing.spec.ts` cases become the acceptance test.
@@ -431,6 +468,16 @@ Test impact per phase is confined to the specs of the hooks touched; `installMoc
   eviction to `gcTime`. Preserving today's behaviour needs an explicit `removeQueries` on
   navigation, which is hand-written code of roughly the size being deleted. Name it in phase 3
   so it is not found later as a regression.
+- **The suite pins some of what these phases change, and that cost is concentrated.** Roughly
+  twenty assertions across four spec files read or seed raw localStorage keys and their exact
+  bodies, all of which the `persist` middleware's versioned envelope invalidates in phase 5.
+  Three tests target `restoreSelection` directly, including one asserting the very fallback that
+  derivation removes. Four tests in the directory-listing spec are about generation-ref
+  semantics and become Query invariants, so they are rewritten rather than kept. The sharpest
+  one is a tree-browser test asserting that navigating away clears the expanded set, which is
+  the deliberate pruning named above: Query offers no equivalent, so that test goes red unless
+  the pruning is reimplemented. Budget test rewriting into each phase rather than treating the
+  suite as a fixed backstop.
 - **Blanket invalidation cost.** Every `tree:changed` refetches every _active_ query. Today's
   code already refetches every subscriber on that event, so this is not a regression; the
   watcher's 500 ms debounce still applies. If a very large folder makes it noticeable, narrow
