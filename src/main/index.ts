@@ -11,9 +11,11 @@ import {
   parseArchiveZipRequest,
   parseImportFilesRequest,
   parseLeagueCreateRequest,
-  parseRootSetRequest
+  parseRootSetRequest,
+  parsePathRequest,
+  parseSeasonSyncRequest
 } from './lib/operation-requests'
-import { registerDiagnosticsIpc, watchDiagnosticsLoads } from './lib/diagnostics-menu'
+import { updateDiagnosticsMenu } from './lib/diagnostics-menu'
 import {
   buildAppMenuTemplate,
   buildEditableContextMenuTemplate,
@@ -28,11 +30,10 @@ import {
   prepareRootSelection,
   repairReservedLocations,
   syncSeasonWithTemplates,
-  zipArchivedSeasons,
-  type CreateSeasonOptions
+  zipArchivedSeasons
 } from './lib/operations'
 import { isMissing, toUserFacing, UserFacingError } from './lib/fs-errors'
-import { assertInsideRoot, planTrash } from './lib/paths'
+import { assertInsideRoot, planTrash, resolveImportDestination } from './lib/paths'
 import { pruneRecents, seedRecents, updateRecents, type RootProbe } from './lib/recents'
 import { listDirEntries, scanLeaguesRoot } from './lib/scanner'
 import * as Sentry from '@sentry/electron/main'
@@ -184,7 +185,14 @@ function diagnosticsMenuItem(): Electron.MenuItem | undefined {
 }
 
 function registerIpc(): void {
-  registerDiagnosticsIpc(ipcMain, () => mainWindow?.webContents ?? null, diagnosticsMenuItem)
+  ipcMain.on('diagnostics:changed', (event, enabled) => {
+    updateDiagnosticsMenu(
+      event.sender,
+      mainWindow?.webContents ?? null,
+      enabled,
+      diagnosticsMenuItem
+    )
+  })
   // The renderer's Sentry SDK inherits its config from the main process,
   // so only PostHog needs anything over IPC.
   handle('analytics:config', () => ({
@@ -278,17 +286,16 @@ function registerIpc(): void {
     return result
   })
 
-  handle(
-    'season:sync-templates',
-    async (_e, opts: Pick<CreateSeasonOptions, 'day' | 'leagueFolder' | 'seasonName'>) => {
-      const result = await syncSeasonWithTemplates({
-        ...opts,
-        root: requireRoot()
-      })
-      capture('season_templates_synced', { added: result.added.length })
-      return result
-    }
-  )
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
+  handle('season:sync-templates', async (_e, input: unknown) => {
+    const opts = parseSeasonSyncRequest(input)
+    const result = await syncSeasonWithTemplates({
+      ...opts,
+      root: requireRoot()
+    })
+    capture('season_templates_synced', { added: result.added.length })
+    return result
+  })
 
   // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
   handle('archive:zip', async (_e, leagueInput: unknown, seasonsInput: unknown) => {
@@ -317,19 +324,26 @@ function registerIpc(): void {
     return result.canceled ? [] : result.filePaths
   })
 
-  handle('file:open', async (_e, path: string) => {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
+  handle('file:open', async (_e, input: unknown) => {
+    const requested = parsePathRequest(input)
+    const path = await assertInsideRoot(requireRoot(), requested)
     capture('document_opened', { onedrive: (await oneDriveStatus(path)).availability })
     return shell.openPath(path)
   })
 
-  handle('file:reveal', (_e, path: string) => {
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
+  handle('file:reveal', async (_e, input: unknown) => {
+    const requested = parsePathRequest(input)
+    // Location menus reveal the selected root itself; other file actions still require a descendant.
+    const path = await assertInsideRoot(requireRoot(), requested, { allowRoot: true })
     shell.showItemInFolder(path)
   })
 
   // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
   handle('file:import', async (_e, destInput: unknown, sourcesInput: unknown) => {
     const { dest, sources } = parseImportFilesRequest({ dest: destInput, sources: sourcesInput })
-    const copied = await importFiles(await assertInsideRoot(requireRoot(), dest), sources)
+    const copied = await importFiles(await resolveImportDestination(requireRoot(), dest), sources)
     capture('files_imported', { count: copied.length })
     return copied
   })
@@ -368,11 +382,6 @@ function createWindow(): void {
   if (process.platform === 'darwin') options.trafficLightPosition = { x: 14, y: 18 }
   if (process.platform === 'linux') options.icon = icon
   mainWindow = new BrowserWindow(options)
-  watchDiagnosticsLoads(
-    mainWindow.webContents,
-    () => mainWindow?.webContents ?? null,
-    diagnosticsMenuItem
-  )
 
   // Keep native surfaces in step when the OS theme changes at runtime.
   const onThemeUpdated = (): void => {

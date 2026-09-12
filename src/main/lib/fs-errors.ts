@@ -31,5 +31,8 @@ export function toUserFacing(err: unknown): Error {
   if (errorCode(err) === 'ENOSPC') {
     return new UserFacingError('There isn’t enough free space to complete that operation')
   }
+  if (errorCode(err) === 'EISDIR') {
+    return new UserFacingError('A folder already exists where the file should be created')
+  }
   return err instanceof Error ? err : new Error(String(err))
 }

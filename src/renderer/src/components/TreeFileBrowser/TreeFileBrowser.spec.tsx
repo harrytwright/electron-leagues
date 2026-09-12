@@ -139,7 +139,7 @@ it('supports arrow-key navigation and opens nested folders with their full bread
   expect(onNavigate).toHaveBeenCalledWith([weeks, week1], true)
 })
 
-it('hands menu-based folder navigation focus to the destination', async () => {
+it('marks menu-based folder navigation as keyboard initiated', async () => {
   installMockApi()
   const onNavigate = vi.fn()
   const user = userEvent.setup()

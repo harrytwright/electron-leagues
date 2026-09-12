@@ -1,4 +1,5 @@
 import AdmZip from 'adm-zip'
+import { ZipArchive } from 'archiver'
 import {
   chmod,
   mkdtemp,
@@ -149,12 +150,33 @@ describe('createLeague', () => {
   })
 
   test('rejects a league whose name sanitises to nothing', async () => {
-    await expect(createLeague(root, 'monday', '***')).rejects.toThrow(/name/i)
+    await expect(createLeague(root, 'monday', '***')).rejects.toBeInstanceOf(UserFacingError)
   })
 
   test('rejects a duplicate league folder', async () => {
     await createLeague(root, 'monday', 'Mens Triples')
-    await expect(createLeague(root, 'monday', 'Mens Triples')).rejects.toThrow(/exists/i)
+    await expect(createLeague(root, 'monday', 'Mens Triples')).rejects.toBeInstanceOf(
+      UserFacingError
+    )
+  })
+
+  test('rejects an in-root weekday alias before creating a league', async () => {
+    await makeTree(root, { monday: null, tuesday: null })
+    await rm(join(root, 'monday'), { recursive: true })
+    await symlink(join(root, 'tuesday'), join(root, 'monday'))
+
+    await expect(createLeague(root, 'monday', 'Pairs')).rejects.toThrow(/does not match/)
+    expect(await readdir(join(root, 'tuesday'))).toEqual([])
+  })
+
+  test('reports an existing league before validating its different real layout', async () => {
+    await makeTree(root, { monday: null, 'tuesday/Trios': null })
+    await symlink(join(root, 'tuesday/Trios'), join(root, 'monday/Pairs'))
+
+    const attempt = createLeague(root, 'monday', 'Pairs')
+    await expect(attempt).rejects.toBeInstanceOf(UserFacingError)
+    await expect(attempt).rejects.toThrow('A league folder named "Pairs" already exists')
+    expect(await readdir(join(root, 'tuesday/Trios'))).toEqual([])
   })
 })
 
@@ -420,7 +442,7 @@ describe('createSeason', () => {
         source: 'empty',
         archiveOldest: false
       })
-    ).rejects.toThrow(/selected live league/)
+    ).rejects.toThrow(/does not match/)
     expect(await readdir(join(root, 'monday'))).toEqual(['Pairs'])
     expect(await readdir(join(root, 'tuesday/Trios'))).toEqual([])
   })
@@ -591,6 +613,44 @@ describe('zipArchivedSeasons', () => {
     expect(await readdir(outside)).toEqual(['2025-26'])
   })
 
+  test('rejects an in-root archive league alias before writing', async () => {
+    await makeTree(root, { '_archives/Other League/2025-26/Rules.docx': 'rules' })
+    await symlink(join(root, '_archives/Other League'), join(root, '_archives/Mens Triples'))
+
+    await expect(zipArchivedSeasons(root, 'Mens Triples', ['2025-26'])).rejects.toThrow(
+      /does not match/
+    )
+    expect(await readdir(join(root, '_archives/Other League'))).toEqual(['2025-26'])
+  })
+
+  test('settles when a directory occupies the zip output path', async () => {
+    await makeTree(root, {
+      '_archives/Mens Triples/2025-26/Rules.docx': 'rules',
+      '_archives/Mens Triples/2025-26.zip': null
+    })
+
+    await expect(zipArchivedSeasons(root, 'Mens Triples', ['2025-26'])).rejects.toBeInstanceOf(
+      UserFacingError
+    )
+    expect((await stat(join(root, '_archives/Mens Triples/2025-26.zip'))).isDirectory()).toBe(true)
+  })
+
+  test('removes a partial output and maps an archive failure', async () => {
+    await makeTree(root, { '_archives/Mens Triples/2025-26/Rules.docx': 'rules' })
+    const fault = Object.assign(new Error('archive denied'), { code: 'EACCES' })
+    vi.spyOn(ZipArchive.prototype, 'finalize').mockImplementationOnce(function (
+      this: ZipArchive
+    ): Promise<void> {
+      this.emit('error', fault)
+      return Promise.reject(fault)
+    })
+
+    await expect(zipArchivedSeasons(root, 'Mens Triples', ['2025-26'])).rejects.toEqual(
+      new UserFacingError('That folder can’t be read or changed (permission denied)')
+    )
+    expect(await exists(join(root, '_archives/Mens Triples/2025-26.zip'))).toBe(false)
+  })
+
   test.skipIf(process.getuid?.() === 0)(
     'settles with a user-facing error when the zip destination is read-only',
     async () => {
@@ -626,5 +686,18 @@ describe('importFiles', () => {
     expect(await readFile(join(dest, 'bls-backup.bak'), 'utf8')).toBe('original')
     expect(await readFile(join(dest, 'bls-backup (2).bak'), 'utf8')).toBe('newer')
     expect((await readdir(dest)).sort()).toEqual(['bls-backup (2).bak', 'bls-backup.bak'])
+  })
+
+  test('does not follow a dangling symlink at a candidate target name', async () => {
+    await makeTree(root, { 'monday/Mens Triples/2025-26': null })
+    await makeTree(outside, { 'bls-backup.bak': 'newer' })
+    const dest = join(root, 'monday/Mens Triples/2025-26')
+    const danglingTarget = join(outside, 'missing.bak')
+    await symlink(danglingTarget, join(dest, 'bls-backup.bak'))
+
+    await importFiles(dest, [join(outside, 'bls-backup.bak')])
+
+    expect(await readFile(join(dest, 'bls-backup (2).bak'), 'utf8')).toBe('newer')
+    expect(await exists(danglingTarget)).toBe(false)
   })
 })

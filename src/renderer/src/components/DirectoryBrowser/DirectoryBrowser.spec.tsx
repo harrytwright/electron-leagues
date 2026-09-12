@@ -173,7 +173,7 @@ it('composes Open and reveal with custom row actions without opening twice', asy
   expect(onZip).toHaveBeenCalledOnce()
 })
 
-it('hands menu-based folder navigation focus to the destination', async () => {
+it('marks menu-based folder navigation as keyboard initiated', async () => {
   installMockApi()
   const onNavigate = vi.fn()
   const user = userEvent.setup()

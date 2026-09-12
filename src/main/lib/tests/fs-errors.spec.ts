@@ -26,6 +26,9 @@ describe('toUserFacing', () => {
     expect(toUserFacing(fsError('ENOSPC'))).toEqual(
       new UserFacingError('There isn’t enough free space to complete that operation')
     )
+    expect(toUserFacing(fsError('EISDIR'))).toEqual(
+      new UserFacingError('A folder already exists where the file should be created')
+    )
   })
 
   test('passes other errors through unchanged', () => {

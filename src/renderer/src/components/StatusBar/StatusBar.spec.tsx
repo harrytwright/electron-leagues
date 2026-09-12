@@ -49,7 +49,10 @@ it('shows the last three POSIX segments while retaining the complete path title'
   const api = installMockApi()
   renderStatus()
   const path = '/root/monday/Mixed triples/2025-26/Week 1'
-  expect(screen.getByTitle(path)).toHaveTextContent('…/Mixed triples/2025-26/Week 1')
+  const pathText = screen.getByTitle(path)
+  expect(pathText).toHaveTextContent('…/Mixed triples/2025-26/Week 1')
+  expect(pathText).toHaveClass('overflow-hidden', 'whitespace-nowrap', 'text-ellipsis')
+  expect(pathText).toHaveStyle({ direction: 'rtl', unicodeBidi: 'plaintext' })
   expect(api.getRendererMetrics).not.toHaveBeenCalled()
 })
 

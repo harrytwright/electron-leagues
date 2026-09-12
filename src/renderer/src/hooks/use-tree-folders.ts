@@ -38,6 +38,7 @@ export function useTreeFolders(currentDir: string): TreeFolders {
     setExpanded((current) => new Set([...current].filter((path) => isInside(path, currentDir))))
   }
   useEffect(() => {
+    // Commit the latest reload inputs after render so the watcher never observes an abandoned render.
     reloadScope.current = { currentDir, expanded }
   })
 

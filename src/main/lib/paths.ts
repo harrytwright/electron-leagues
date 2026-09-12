@@ -23,6 +23,7 @@ export function isInsideRoot(root: string, target: string): boolean {
  */
 interface ContainmentOptions {
   allowMissingLeaf?: boolean
+  allowRoot?: boolean
 }
 
 async function resolveExistingPrefix(target: string): Promise<string> {
@@ -64,8 +65,28 @@ export async function assertInsideRoot(
   const realTarget = options.allowMissingLeaf
     ? await resolveExistingPrefix(resolved)
     : await realpath(resolved)
-  if (!isInsideRoot(realRoot, realTarget)) {
+  const isRoot = realTarget === realRoot
+  if ((!options.allowRoot || !isRoot) && !isInsideRoot(realRoot, realTarget)) {
     throw new UserFacingError('Path is outside the leagues folder')
+  }
+  return resolved
+}
+
+/** Reject an in-root alias whose real location no longer matches the requested layout. */
+export async function assertRealLayout(
+  root: string,
+  target: string,
+  expectedRelative: string
+): Promise<string> {
+  const resolved = resolve(target)
+  const realRoot = await realpath(root)
+  const realExistingPrefix = await resolveExistingPrefix(resolved)
+  if (!isInsideRoot(realRoot, realExistingPrefix)) {
+    throw new UserFacingError('Path is outside the leagues folder')
+  }
+  // Containment permits aliases within the root; writes must still land in the location named by the UI.
+  if (relative(realRoot, realExistingPrefix) !== expectedRelative) {
+    throw new UserFacingError('Path does not match the selected leagues location')
   }
   return resolved
 }
@@ -80,18 +101,39 @@ export async function resolveNewLiveSeasonRoot(
   assertLeagueFolderName(leagueFolder)
   const target = resolve(root, day, leagueFolder, seasonName)
   try {
-    const resolved = await assertInsideRoot(root, target, { allowMissingLeaf: true })
-    const realRoot = await realpath(root)
-    const realExistingPrefix = await resolveExistingPrefix(resolved)
     const expected = join(day, leagueFolder, seasonName)
-    // Containment alone accepts an in-root symlink alias, which could create a season in another league.
-    if (relative(realRoot, realExistingPrefix) !== expected) {
-      throw new UserFacingError('Only the selected live league can contain the new season')
-    }
-    return resolved
+    return await assertRealLayout(root, target, expected)
   } catch (err) {
     throw toUserFacing(err)
   }
+}
+
+/** Validate an import destination by both its requested and real on-disk layout. */
+export async function resolveImportDestination(root: string, destination: string): Promise<string> {
+  const resolvedRoot = resolve(root)
+  const resolved = resolve(destination)
+  const requested = relative(resolvedRoot, resolved)
+  if (
+    !requested ||
+    isAbsolute(requested) ||
+    requested === '..' ||
+    requested.startsWith(`..${sep}`)
+  ) {
+    throw new UserFacingError('Invalid import destination')
+  }
+
+  const parts = requested.split(sep)
+  const first = parts[0]
+  const isManaged = first === '_shared' || first === '_templates'
+  const season = parts.length >= 3 ? parseSeasonName(parts[2]) : null
+  const isLive =
+    isWeekday(first) && (parts.length === 2 || (parts.length >= 3 && season?.name === parts[2]))
+  const isOtherRootItem = parts.length === 1 && first !== '_archives' && !isWeekday(first)
+  // Archives and incomplete weekday paths are browseable, but imports must target a user-managed pane.
+  if (!isManaged && !isLive && !isOtherRootItem) {
+    throw new UserFacingError('Invalid import destination')
+  }
+  return assertRealLayout(root, resolved, requested)
 }
 
 /** Reject path syntax where an exact league folder name is required. */

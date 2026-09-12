@@ -3,7 +3,13 @@ import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { UserFacingError } from '../fs-errors'
-import { assertInsideRoot, classifyTrashTarget, isInsideRoot, planTrash } from '../paths'
+import {
+  assertInsideRoot,
+  classifyTrashTarget,
+  isInsideRoot,
+  planTrash,
+  resolveImportDestination
+} from '../paths'
 
 let root: string
 let outside: string
@@ -81,6 +87,47 @@ describe('assertInsideRoot', () => {
     await expect(assertInsideRoot(root, join(root, 'missing'))).rejects.toMatchObject({
       code: 'ENOENT'
     })
+  })
+
+  test('allows the root only when the caller opts in', async () => {
+    await expect(assertInsideRoot(root, root)).rejects.toThrow(/outside the leagues folder/)
+    await expect(assertInsideRoot(root, root, { allowRoot: true })).resolves.toBe(root)
+  })
+})
+
+describe('resolveImportDestination', () => {
+  test.each([
+    ['live league', 'monday/Pairs'],
+    ['live season child', 'monday/Pairs/2025-26/results'],
+    ['shared', '_shared'],
+    ['templates', '_templates/nested'],
+    ['root-level other item', 'Notes'],
+    ['root-level underscored item', '_Notes']
+  ])('accepts a %s destination', async (_label, requested) => {
+    await mkdir(join(root, requested), { recursive: true })
+    await expect(resolveImportDestination(root, join(root, requested))).resolves.toBe(
+      join(root, requested)
+    )
+  })
+
+  test.each(['', '_archives/Pairs', 'monday', 'monday/Pairs/not-a-season', '_unknown/nested'])(
+    'rejects the disallowed layout %j',
+    async (requested) => {
+      const destination = requested ? join(root, requested) : root
+      await expect(resolveImportDestination(root, destination)).rejects.toBeInstanceOf(
+        UserFacingError
+      )
+    }
+  )
+
+  test('rejects an in-root destination alias', async () => {
+    await mkdir(join(root, '_shared'), { recursive: true })
+    await mkdir(join(root, 'monday/Pairs'), { recursive: true })
+    await symlink(join(root, '_shared'), join(root, 'monday/Pairs/2025-26'))
+
+    await expect(
+      resolveImportDestination(root, join(root, 'monday/Pairs/2025-26'))
+    ).rejects.toThrow(/does not match/)
   })
 })
 

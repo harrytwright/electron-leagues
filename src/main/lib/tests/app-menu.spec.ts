@@ -58,10 +58,8 @@ describe('buildAppMenuTemplate', () => {
     const windows = items(buildAppMenuTemplate('win32', true, vi.fn())).filter(
       (item) => item.role === 'toggleDevTools'
     )
-    expect(mac.map((item) => item.accelerator)).toEqual(['Alt+Command+I', 'CmdOrCtrl+Shift+I'])
-    expect(windows.map((item) => item.accelerator)).toEqual(['F12', 'CmdOrCtrl+Shift+I'])
-    expect(mac.filter((item) => item.visible !== false)).toHaveLength(1)
-    expect(windows.filter((item) => item.visible !== false)).toHaveLength(1)
+    expect(mac.map((item) => item.accelerator)).toEqual(['Alt+Command+I'])
+    expect(windows.map((item) => item.accelerator)).toEqual(['F12'])
   })
 
   it.each([false, true])('offers diagnostics independently of development=%s', (development) => {

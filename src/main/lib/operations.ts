@@ -1,5 +1,5 @@
 import { ZipArchive } from 'archiver'
-import { createWriteStream } from 'node:fs'
+import { constants, createWriteStream } from 'node:fs'
 import {
   copyFile,
   cp,
@@ -23,6 +23,7 @@ import { toUserFacing, UserFacingError } from './fs-errors'
 import {
   assertInsideRoot,
   assertLeagueFolderName,
+  assertRealLayout,
   resolveNewLiveSeasonRoot,
   resolveLiveSeasonRoot
 } from './paths'
@@ -188,10 +189,14 @@ export async function createLeague(
   displayName: string
 ): Promise<string> {
   const folderName = sanitiseFolderName(displayName)
-  if (!folderName) throw new Error(`"${displayName}" is not a usable league name`)
+  if (!folderName) throw new UserFacingError(`"${displayName}" is not a usable league name`)
 
   const path = join(root, day, folderName)
-  if (await exists(path)) throw new Error(`A league folder named "${folderName}" already exists`)
+  // Check collisions first: realpath can canonicalise casing and obscure an ordinary duplicate-name error.
+  if (await exists(path)) {
+    throw new UserFacingError(`A league folder named "${folderName}" already exists`)
+  }
+  await assertRealLayout(root, path, join(day, folderName))
 
   await mkdir(path, { recursive: true })
   const meta = healMeta(parseLeagueMetaInput({ name: displayName.trim() }), {
@@ -343,7 +348,7 @@ export async function zipArchivedSeasons(
   })
   if (seasons.length === 0) return []
   const archiveDir = join(root, '_archives', leagueFolder)
-  await assertInsideRoot(root, archiveDir, { allowMissingLeaf: true })
+  await assertRealLayout(root, archiveDir, join('_archives', leagueFolder))
   // Validate the entire batch first so a later invalid selection cannot leave earlier zip writes behind.
   const plans = await Promise.all(
     seasons.map(async (season) => {
@@ -364,16 +369,37 @@ export async function zipArchivedSeasons(
     await new Promise<void>((resolvePromise, reject) => {
       const output = createWriteStream(zipPath)
       const zip = new ZipArchive({ zlib: { level: 9 } })
-      output.on('close', () => resolvePromise())
-      // Archive errors do not cover destination failures, so handle the stream or the promise can hang.
-      output.on('error', (err) => {
-        zip.destroy()
-        reject(toUserFacing(err))
+      let failed = false
+      let outputClosed = false
+      output.on('close', () => {
+        outputClosed = true
+        if (!failed) resolvePromise()
       })
-      zip.on('error', reject)
+      const fail = (err: Error): void => {
+        if (failed) return
+        failed = true
+        zip.destroy()
+        const cleanup = (): void => {
+          // A failed archive is never useful; ignore cleanup failure so the initiating error stays actionable.
+          void rm(zipPath, { force: true }).then(
+            () => reject(toUserFacing(err)),
+            () => reject(toUserFacing(err))
+          )
+        }
+        if (outputClosed) cleanup()
+        else {
+          // Windows cannot remove an open destination, so wait for destruction to close its handle.
+          output.once('close', cleanup)
+          output.destroy()
+        }
+      }
+      // Archive errors do not cover destination failures, so handle the stream or the promise can hang.
+      output.on('error', fail)
+      zip.on('error', fail)
       zip.pipe(output)
       zip.directory(seasonDir, season.name)
-      void zip.finalize()
+      // Archiver reports through both the emitter and its promise; handling both prevents a rejected finalize leak.
+      void zip.finalize().catch(fail)
     })
     zips.push(zipPath)
   }
@@ -387,12 +413,22 @@ export async function importFiles(dest: string, sources: string[]): Promise<stri
   for (const source of sources) {
     const ext = extname(source)
     const stem = basename(source, ext)
-    let target = join(dest, `${stem}${ext}`)
-    for (let n = 2; await exists(target); n++) {
-      target = join(dest, `${stem} (${n})${ext}`)
+    let suffix = 1
+    while (true) {
+      const name = suffix === 1 ? `${stem}${ext}` : `${stem} (${suffix})${ext}`
+      const target = join(dest, name)
+      try {
+        // The exclusive flag closes the exists/copy race and refuses dangling links as destinations.
+        await copyFile(source, target, constants.COPYFILE_EXCL)
+        copied.push(target)
+        break
+      } catch (err) {
+        // SAFETY: Node filesystem errors are Errors carrying an optional string code.
+        const code = err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined
+        if (code !== 'EEXIST') throw err
+        suffix += 1
+      }
     }
-    await copyFile(source, target)
-    copied.push(target)
   }
   return copied
 }

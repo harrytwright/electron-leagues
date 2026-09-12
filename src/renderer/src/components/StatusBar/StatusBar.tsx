@@ -25,8 +25,14 @@ export function StatusBar({ path }: Props): React.JSX.Element {
       className="flex min-h-7 w-full shrink-0 items-center gap-4 border-t border-kumo-line bg-kumo-base px-3"
     >
       <div className="min-w-0 flex-1 overflow-hidden whitespace-nowrap">
-        {/* pathTail already bounds the text; tail truncation would hide the current folder. */}
-        <Text title={path}>{pathTail(path)}</Text>
+        {/* RTL overflow elides the head while plaintext bidi preserves the path's natural segment order. */}
+        <Text
+          title={path}
+          DANGEROUS_className="overflow-hidden whitespace-nowrap text-ellipsis"
+          DANGEROUS_style={{ direction: 'rtl', unicodeBidi: 'plaintext' }}
+        >
+          {pathTail(path)}
+        </Text>
       </div>
       {/* App owns the persistent live region; this visual copy must not announce twice. */}
       <div className="max-w-64 min-w-0 truncate" data-operation-activity>
