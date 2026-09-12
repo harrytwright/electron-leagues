@@ -460,10 +460,10 @@ Query only marks them stale. The pruning spec is the acceptance test and must no
 **Phase 4 — mutations and feedback.** Convert the writes to `useMutation` with `meta.label` and
 route `begin` / `finish` through a `MutationCache`. Point the `refresh` and location app-command
 handlers at the query client. Remove the drilled `onChanged` props once no caller needs them.
-_Decide before starting, not during:_ the four write flows that report "succeeded, but could not
-be refreshed" either keep their own `try`/`catch` with only the feedback moving into the cache,
-or adopt the `useWriteOperation` hook from the cleanup catalogue. A `MutationCache` alone cannot
-express that outcome. See the risk below.
+_Settled, so do not relitigate:_ the four write flows that report "succeeded, but could not be
+refreshed" adopt the `useWriteOperation` hook from the cleanup catalogue rather than keeping
+their own `try`/`catch`. A `MutationCache` alone cannot express that outcome, so build the hook
+first and convert the four onto it. See the risk below for why the naive shape is wrong.
 _Done when:_ location-scoped feedback still clears on a location switch while application-scoped
 feedback survives, which an existing spec pins.
 
@@ -485,8 +485,8 @@ they unblock rather than by size. The first two pay for themselves immediately:
    single duplication in the renderer, and it should land before Query touches those files.
 2. `useCrumbs` absorbs the one-shot focus ref, deleting three copies and a prop from two
    interfaces.
-3. `useDialogTask` for the two dialogs it fits, and `useWriteOperation`, which phase 4 may
-   depend on.
+3. `useDialogTask` for the two dialogs it fits, and `useWriteOperation`, which phase 4 now
+   depends on and must therefore precede it.
 4. `useKeyedState`, `plural` and `os-labels`. Small, safe, do them while passing.
 5. The shared IPC table and the main-process helper consolidation. These touch main and are the
    only cleanups outside this RFC's renderer scope, so they belong in their own PR with their
@@ -511,7 +511,8 @@ names where that cost falls.
   see a plain success. `DeleteResourceDialog` is the sharpest case: it must keep its `moved` flag
   so the delete is not retried, and promote the message to a toast if the dialog has closed.
   Either these four keep their own `try`/`catch` with only `begin` and `finish` moving into the
-  cache, or they adopt the `useWriteOperation` hook instead. Decide this in phase 4, not during it.
+  cache, or they adopt the `useWriteOperation` hook instead. This is settled in favour of the
+  hook; the risk is recorded because the naive shape looks correct and silently is not.
 - **Operation feedback is location-scoped and Query is not.** `OperationFeedbackProvider` drops
   pending location-scoped operations when the location changes while keeping application-scoped
   ones, and a spec pins that. A `MutationCache` feeding the same context has no notion of that
@@ -545,24 +546,35 @@ names where that cost falls.
 - **Version drift.** TanStack Table 9 is a recent major; confirm its API against the docs at
   adoption time rather than from memory.
 
-## Open questions
+## Decisions left to the reviewer
 
-These are for the reviewer to settle. Everything else in this document is decided.
+Two, and **neither blocks starting**. Phases 0 to 4 proceed whatever you decide, so a worker can
+begin without waiting on this section.
 
-1. **Zustand, or Query only?** Defer the store and stop after phase 4 is a legitimate shape. The
-   review strengthened the case for the store rather than weakening it: the current folder has
-   two reporters and three layers of guarding, all to print one string in the status bar. But
-   Query is the larger win and could ship alone.
+1. **Zustand, or Query only?** Stopping after phase 4 and leaving the store out is a legitimate
+   shape, and roughly halves the work. The review strengthened the case for the store rather
+   than weakening it: the current folder has two reporters and three layers of guarding, all so
+   the status bar can print one string. But Query is the larger win by some margin and could
+   ship alone. You decide this when phase 4 lands, not before.
 2. **Should per-location UI memory live in `electron-store` in main** instead of persisting in
    the renderer, next to recent locations? The now-removed polish plan rejected a second renderer
-   store for recents, and the same argument may apply. This changes phase 5's shape, so answer it
-   before phase 5 rather than during.
-3. **Do the four refresh-failure write flows keep their own error handling, or move to
-   `useWriteOperation`?** Phase 4 cannot start without an answer. My recommendation is the hook,
-   because it also deletes three other copies.
-4. **Do the main-process cleanups belong to this RFC at all,** or to the issues already filed
-   against those files? They are catalogued here because the survey found them, but they are
-   outside the renderer scope this document otherwise keeps.
+   store for recents and the same argument may apply. Note this would breach the renderer-only
+   scope above, which is a reason to weigh it deliberately rather than a reason to refuse it.
+   It shapes phase 5, so answer it before phase 5 rather than during.
+
+### Decided rather than asked
+
+Two questions in the previous draft were mine to settle, not yours, and leaving them open would
+have stalled a worker for no good reason:
+
+- **The four refresh-failure write flows adopt `useWriteOperation`** rather than keeping their
+  own error handling. It is the smaller diff, it deletes three other copies of the same
+  orchestration, and it keeps the one outcome a `MutationCache` cannot express in code that
+  states it plainly. Phase 4 can start on that basis. Say so if you disagree.
+- **The main-process cleanups belong to the filed issues, not to this RFC.** They stay
+  catalogued here as evidence, because the duplication is what let the archive-path validation
+  diverge, but the work is tracked in #9 and #11. This keeps the document renderer-only in
+  practice as well as in its scope line.
 
 Answered by the review and no longer open: whether to ship the devtools (yes, they never reach
 the bundle), and whether to migrate the browsers to TanStack Table (no, but they do need the
