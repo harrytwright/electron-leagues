@@ -1,8 +1,9 @@
 import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
-import { Button, Dialog, ToastProvider, useKumoToastManager } from '@cloudflare/kumo'
+import { Button, Dialog, useKumoToastManager } from '@cloudflare/kumo'
 import { emitAppCommand, installMockApi } from '../tests/mock-api'
+import { renderWithProviders } from '../tests/render-helpers'
 import { useAppCommandHandler, useAppCommands } from './use-app-commands'
 
 function Harness({ refresh }: { refresh: () => void }): React.JSX.Element {
@@ -24,6 +25,7 @@ function ToastHarness({ refresh }: { refresh: () => void }): React.JSX.Element {
 it('dispatches once and guards repeat, composition and overlays', () => {
   installMockApi()
   const refresh = vi.fn()
+  // Keep command dispatch isolated from the toast manager and other providers.
   render(<Harness refresh={refresh} />)
   act(() => emitAppCommand({ command: 'refresh', repeat: false, composing: false }))
   expect(refresh).toHaveBeenCalledOnce()
@@ -45,11 +47,7 @@ it('dispatches once and guards repeat, composition and overlays', () => {
 it('does not let a non-modal Kumo toast block commands', async () => {
   installMockApi()
   const refresh = vi.fn()
-  render(
-    <ToastProvider>
-      <ToastHarness refresh={refresh} />
-    </ToastProvider>
-  )
+  renderWithProviders(<ToastHarness refresh={refresh} />)
   await userEvent.setup().click(screen.getByRole('button', { name: 'Show toast' }))
   const toast = await screen.findByRole('dialog')
   expect(toast).toHaveAttribute('aria-modal', 'false')
@@ -61,6 +59,7 @@ it('does not let a non-modal Kumo toast block commands', async () => {
 it('blocks commands while an actual modal Kumo dialog is open', () => {
   installMockApi()
   const refresh = vi.fn()
+  // Exercise the modal guard without a toast manager.
   render(
     <>
       <Harness refresh={refresh} />
@@ -80,6 +79,7 @@ it('blocks commands while an actual modal Kumo dialog is open', () => {
 it('removes both the command handler and IPC subscription on unmount', () => {
   const api = installMockApi()
   const refresh = vi.fn()
+  // Verify command cleanup without mounting unrelated providers.
   const view = render(<Harness refresh={refresh} />)
   view.unmount()
   act(() => emitAppCommand({ command: 'refresh', repeat: false, composing: false }))

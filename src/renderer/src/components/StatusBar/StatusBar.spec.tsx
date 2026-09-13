@@ -1,7 +1,7 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
-import { OperationFeedbackProvider } from '../OperationFeedbackProvider'
+import { renderWithProviders } from '../../tests/render-helpers'
 import { emitAppCommand, installMockApi } from '../../tests/mock-api'
 import { StatusBar } from './index'
 import { useOperationFeedback } from '@renderer/hooks/use-operation-feedback'
@@ -30,12 +30,12 @@ function DiagnosticsCommands(): null {
   return null
 }
 
-function renderStatus(): ReturnType<typeof render> {
-  return render(
-    <OperationFeedbackProvider>
+function renderStatus(): ReturnType<typeof renderWithProviders> {
+  return renderWithProviders(
+    <>
       <DiagnosticsCommands />
       <StatusBar path="/root/monday/Mixed triples/2025-26/Week 1" />
-    </OperationFeedbackProvider>
+    </>
   )
 }
 
@@ -58,30 +58,22 @@ it('shows the last three POSIX segments while retaining the complete path title'
 
 it('uses Windows separators and leaves short paths intact', () => {
   installMockApi()
-  const view = render(
-    <OperationFeedbackProvider>
-      <StatusBar path={'C:\\Leagues\\monday\\Pairs\\2025-26'} />
-    </OperationFeedbackProvider>
-  )
+  const view = renderWithProviders(<StatusBar path={'C:\\Leagues\\monday\\Pairs\\2025-26'} />)
   expect(screen.getByTitle('C:\\Leagues\\monday\\Pairs\\2025-26')).toHaveTextContent(
     'C:\\…\\monday\\Pairs\\2025-26'
   )
 
-  view.rerender(
-    <OperationFeedbackProvider>
-      <StatusBar path="/root/monday" />
-    </OperationFeedbackProvider>
-  )
+  view.rerender(<StatusBar path="/root/monday" />)
   expect(screen.getByTitle('/root/monday')).toHaveTextContent('/root/monday')
 })
 
 it('shows pending activity without creating a second live region', async () => {
   installMockApi()
-  render(
-    <OperationFeedbackProvider>
+  renderWithProviders(
+    <>
       <StatusBar path="/root" />
       <StartOperation />
-    </OperationFeedbackProvider>
+    </>
   )
   expect(screen.queryByRole('status')).not.toBeInTheDocument()
   await userEvent.setup().click(screen.getByRole('button', { name: 'Start operation' }))
@@ -91,11 +83,11 @@ it('shows pending activity without creating a second live region', async () => {
 
 it('does not render completion results in the status bar', async () => {
   installMockApi()
-  render(
-    <OperationFeedbackProvider>
+  renderWithProviders(
+    <>
       <StatusBar path="/root" />
       <StartOperation />
-    </OperationFeedbackProvider>
+    </>
   )
   await userEvent.setup().click(screen.getByRole('button', { name: 'Fail operation' }))
   expect(screen.queryByText('Importing…')).not.toBeInTheDocument()

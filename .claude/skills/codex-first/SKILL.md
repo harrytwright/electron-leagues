@@ -39,7 +39,7 @@ P=$(mktemp); cat >"$P" <<'EOF'
 <goal, repo + key paths, constraints ("don't touch X"), non-goals, proof expected, output shape>
 EOF
 command codex exec --yolo -C <repo> \
-  -c model_reasoning_effort="high" -m gpt-5.6-sol \
+  -c model_reasoning_effort="high" -m gpt-6-astra \
   -o /tmp/codex-last.md - <"$P" 2>/dev/null
 ```
 

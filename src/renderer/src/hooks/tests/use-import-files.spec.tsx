@@ -1,9 +1,7 @@
-import { act, render, renderHook, screen, waitFor } from '@testing-library/react'
-import { ToastProvider } from '@cloudflare/kumo'
-import { OperationFeedbackProvider } from '../../components/OperationFeedbackProvider'
+import { act, screen, waitFor } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
-import { StrictMode } from 'react'
 import { installMockApi } from '../../tests/mock-api'
+import { renderHookWithProviders, renderWithProviders } from '../../tests/render-helpers'
 import { useImportFiles } from '../use-import-files'
 import { useOperationFeedback } from '../use-operation-feedback'
 
@@ -15,15 +13,13 @@ function FeedbackStatus(): React.JSX.Element | null {
 function renderImporter(
   dest: string | undefined,
   onImported?: () => void
-): ReturnType<typeof renderHook<ReturnType<typeof useImportFiles>, void>> {
-  return renderHook(() => useImportFiles(dest, onImported), {
+): ReturnType<typeof renderHookWithProviders<ReturnType<typeof useImportFiles>, void>> {
+  return renderHookWithProviders(() => useImportFiles(dest, onImported), {
     wrapper: ({ children }) => (
-      <ToastProvider>
-        <OperationFeedbackProvider>
-          {children}
-          <FeedbackStatus />
-        </OperationFeedbackProvider>
-      </ToastProvider>
+      <>
+        {children}
+        <FeedbackStatus />
+      </>
     )
   })
 }
@@ -152,16 +148,9 @@ it('ignores a picker result after the destination changes in StrictMode', async 
   const api = installMockApi({
     pickFiles: vi.fn(() => new Promise<string[]>((resolve) => (finishPicker = resolve)))
   })
-  const wrapper = ({ children }: { children: React.ReactNode }): React.JSX.Element => (
-    <StrictMode>
-      <ToastProvider>
-        <OperationFeedbackProvider>{children}</OperationFeedbackProvider>
-      </ToastProvider>
-    </StrictMode>
-  )
-  const { result, rerender } = renderHook(({ dest }) => useImportFiles(dest), {
+  const { result, rerender } = renderHookWithProviders(({ dest }) => useImportFiles(dest), {
     initialProps: { dest: '/first' },
-    wrapper
+    reactStrictMode: true
   })
   let picking!: Promise<void>
   act(() => {
@@ -182,17 +171,18 @@ it('reports a completed import after the destination changes without refreshing 
     importFiles: vi.fn(() => new Promise<string[]>((resolve) => (finishImport = resolve)))
   })
   const onImported = vi.fn()
-  const { result, rerender } = renderHook(({ dest }) => useImportFiles(dest, onImported), {
-    initialProps: { dest: '/first' },
-    wrapper: ({ children }) => (
-      <ToastProvider>
-        <OperationFeedbackProvider>
+  const { result, rerender } = renderHookWithProviders(
+    ({ dest }) => useImportFiles(dest, onImported),
+    {
+      initialProps: { dest: '/first' },
+      wrapper: ({ children }) => (
+        <>
           {children}
           <FeedbackStatus />
-        </OperationFeedbackProvider>
-      </ToastProvider>
-    )
-  })
+        </>
+      )
+    }
+  )
   let importing!: Promise<void>
   act(() => {
     importing = result.current.importPaths(['/tmp/a.pdf'])
@@ -223,14 +213,12 @@ it('reports a failed import after its hook unmounts without refreshing stale con
     return <button onClick={() => void importer.importPaths(['/tmp/a.pdf'])}>Start import</button>
   }
   const shell = (show: boolean): React.JSX.Element => (
-    <ToastProvider>
-      <OperationFeedbackProvider>
-        {show ? <ImportProbe /> : null}
-        <FeedbackStatus />
-      </OperationFeedbackProvider>
-    </ToastProvider>
+    <>
+      {show ? <ImportProbe /> : null}
+      <FeedbackStatus />
+    </>
   )
-  const view = render(shell(true))
+  const view = renderWithProviders(shell(true))
   screen.getByRole('button', { name: 'Start import' }).click()
   view.rerender(shell(false))
 
@@ -241,15 +229,8 @@ it('reports a failed import after its hook unmounts without refreshing stale con
 
 it('reports a refresh callback rejection and releases the busy state', async () => {
   installMockApi()
-  const { result } = renderHook(
-    () => useImportFiles('/dest', () => Promise.reject(new Error('Scan failed'))),
-    {
-      wrapper: ({ children }) => (
-        <ToastProvider>
-          <OperationFeedbackProvider>{children}</OperationFeedbackProvider>
-        </ToastProvider>
-      )
-    }
+  const { result } = renderHookWithProviders(() =>
+    useImportFiles('/dest', () => Promise.reject(new Error('Scan failed')))
   )
   await act(() => result.current.importPaths(['/tmp/a.pdf']))
   expect(
