@@ -2,10 +2,11 @@
 
 | Field    | Value                                                                                                                                                                                                |
 | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Status   | Ready for review                                                                                                                                                                                     |
+| Status   | Accepted, corrected 2026-09-13 against the implementation plan                                                                                                                                       |
 | Author   | Harry Wright (drafted with Claude)                                                                                                                                                                   |
 | Drafted  | 2026-09-08                                                                                                                                                                                           |
-| Revised  | 2026-09-12, after three review passes over the code                                                                                                                                                  |
+| Revised  | 2026-09-13, corrected against the implementation plan                                                                                                                                                |
+| Plan     | [Implementation plan](../plans/2026-09-13-renderer-state-management.md)                                                                                                                              |
 | Baseline | `claude/sidebar-treeview-redesign-8thsrj` at `6741de6`                                                                                                                                               |
 | Scope    | The state migration is renderer-only and changes no IPC contract or on-disk format. The cleanup catalogue below also names main-process duplication, which is separate work and separately optional. |
 
@@ -74,6 +75,12 @@ None of this is wrong. It is the point at which a library that does exactly this
 tested, pays for itself, and the members database is about to add a fourth copy of the pattern
 plus a data grid and an import wizard.
 
+Query alone does not deliver these contracts for this app. The migration adds three in-house
+modules: a refresh coordinator, a location-operation provider that serialises choose, switch
+and forget and reconciles through `getRoot()` after an ambiguous IPC failure, and a
+write-operation hook. Each PR introducing one must compare its size and clarity against the
+hand-rolled code it deletes and simplify where the same behaviour needs less code.
+
 ## Goals
 
 1. One subscription to `tree:changed`; one place where "the disk changed" becomes "refetch".
@@ -98,8 +105,8 @@ plus a data grid and an import wizard.
   state. It is an imperative signal consumed once by the next mount, and a ref is the right tool.
   The ref is right; its placement is not, and the cleanup table below folds the three copies into
   `useCrumbs`, which already owns the base directory they each re-derive.
-- Moving UI memory into `electron-store` in main. Worth a separate discussion (see open
-  questions); this RFC keeps it in the renderer.
+- Moving UI memory into `electron-store` in main. UI memory stays in the renderer; main
+  remains authoritative for the chosen root.
 - Rewriting `DirectoryBrowser` / `TreeFileBrowser` onto TanStack Table. Possible later; not
   required by anything here. That is not the same as leaving them alone: they share roughly a
   hundred duplicated lines today, and the cleanup table treats that as its own work.
@@ -119,7 +126,12 @@ published on the date of this RFC and are pinned with a caret.
 | `@tanstack/react-query`          | ^5.102.8 | Cache and lifecycle for every IPC read; mutations with keyed invalidation                                                                                                                                                                                                        |
 | `@tanstack/react-query-devtools` | ^5.102.8 | Dev-only inspector, rendered behind `import.meta.env.DEV`                                                                                                                                                                                                                        |
 | `@tanstack/eslint-plugin-query`  | ^5.102.8 | `exhaustive-deps` for query keys, which is the one footgun that makes newly adopted Query serve stale data. Kept where the general-purpose lint plugins were cut, because it guards what this RFC introduces rather than code that already exists, and CI on `main` enforces it. |
-| `zustand`                        | ^5.0.15  | One `workspace` store for cross-pane UI state, with the `persist` middleware                                                                                                                                                                                                     |
+
+**Adopt in phase 5**
+
+| Package   | Version | Role                                                                         |
+| --------- | ------- | ---------------------------------------------------------------------------- |
+| `zustand` | ^5.0.15 | One `workspace` store for cross-pane UI state, with the `persist` middleware |
 
 **Adopt with the members database**
 
@@ -144,21 +156,21 @@ Approximate cost in the production renderer bundle: Query about 13 kB min+gz, Zu
 which both libraries build on.
 
 **The canonical install list.** Packages are named across three sections of this document for
-different reasons. This is the whole set the dependency PR adds, and nothing else:
+different reasons. This is the whole set the phase 1 dependency PR adds, and nothing else:
 
 ```
 npm i -D @tanstack/react-query@^5.102.8 \
          @tanstack/react-query-devtools@^5.102.8 \
          @tanstack/eslint-plugin-query@^5.102.8 \
-         zustand@^5.0.15 \
          react-error-boundary@^6.1.5 \
          @vitest/eslint-plugin@^1.6.27
 ```
 
-Six packages. `@tanstack/react-table` and `@tanstack/react-form` are deliberately absent and
-arrive with the members database. `devDependencies` is correct for all six despite four of them
-shipping in the bundle: electron-vite bundles the renderer, and this repository puts runtime
-renderer packages there on purpose. Do not "fix" that.
+Five packages. `zustand@^5.0.15` follows in phase 5. `@tanstack/react-table` and
+`@tanstack/react-form` are deliberately absent and arrive with the members database.
+`devDependencies` is correct for all five, including the runtime packages shipping in the
+bundle: electron-vite bundles the renderer, and this repository puts runtime renderer packages
+there on purpose. Do not "fix" that.
 
 ### TanStack Query: the IPC cache
 
@@ -191,49 +203,47 @@ while the browser reports offline, and a laptop with Wi-Fi off would otherwise n
 **Query definitions** live in `src/renderer/src/queries/`, one file per IPC domain, using
 `queryOptions()` so keys and types are declared once:
 
-```ts
-// queries/tree.ts
-export const treeQuery = queryOptions({
-  queryKey: ['tree'],
-  queryFn: () => window.api.scan() // LeaguesTree | null; null means "no root chosen"
-})
+| Data             | Key                     | Ownership and lifecycle                                                                                                     |
+| ---------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Selected root    | `['root']`              | Bootstrap from `window.api.getRoot()`; location operations publish confirmed changes.                                       |
+| Tree             | `['tree', root]`        | Enable only for the confirmed active root and verify the returned tree belongs to it.                                       |
+| Directory        | `['dir', absolutePath]` | Share between listings and tree branches; carry the owning root in the query definition for filtering and execution checks. |
+| Recent locations | `['recents']`           | Application-wide; refresh on location changes and missing-recent removal.                                                   |
+| Members, later   | `['members', root]`     | Use the same root isolation as the tree.                                                                                    |
 
-// queries/dir.ts
-export const dirListingQuery = (path: string) =>
-  queryOptions({ queryKey: ['dir', path], queryFn: () => window.api.listDir(path) })
+A stale directory read from a previous root must not execute against the current root, even if
+its old component remains mounted briefly. Main remains authoritative for the chosen root.
 
-// queries/recents.ts, later queries/members.ts
-```
+**One invalidation point.** The client-scoped refresh coordinator in `lib/query-refresh.ts`
+handles watcher events, manual refresh and write completion. Routine refresh excludes `['root']`.
+It marks matching inactive queries stale and refetches matching active queries. The watcher
+stays mounted through loading, no-root and error screens; phase 3b removes the final legacy
+subscriber.
 
-Keys that are not path-addressed (the future `['members']`) include the root, so switching
-location can never serve the previous location's data.
+Invalidating a query with no cached data reuses its in-flight fetch rather than cancelling it,
+so a watcher event during the first listing would be swallowed. The coordinator explicitly
+cancels matching unfinished reads before refetching, and a deferred-promise test pins that
+behaviour. Cancellation prevents obsolete results from being accepted; IPC filesystem work may
+continue. Overlapping refreshes are coordinated so a newer request is not lost and an awaiting
+caller does not report success merely because an older read was cancelled.
 
-**One invalidation point.** `App` (or the bootstrap in `main.tsx`) owns the only
-`onTreeChanged` subscription:
-
-```ts
-useEffect(() => window.api.onTreeChanged(() => void queryClient.invalidateQueries()), [])
-```
-
-Everything the renderer caches is derived from the folder tree, so a blanket invalidation is
-correct. Query refetches active queries immediately and marks inactive ones stale, so a collapsed
-tree branch is refetched on re-expand rather than eagerly. That is cheaper than today's
-`useTreeFolders.reload()`, which refetches every folder ever opened, and the user cannot tell the
-difference.
+Collapsed branches retain loaded data through subscribers and refresh on re-expand. This
+preserves the current hook's watcher behaviour: collapsed and abandoned branches cause no
+watcher reads. Phase 3b makes observer retention and reopening explicit.
 
 **What replaces what**
 
-| Today                                                    | With Query                                                                                                                                                                                                      |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `phase` state machine in `App`                           | Derived: `isPending` → loading, `isError` → error, `data === null` → no-root, else ready                                                                                                                        |
-| `scanGeneration`, `generation`, `requests` race guards   | Query deduplicates in-flight fetches per key and drops results for a key no longer observed. `use-dir-listing.spec.ts`'s "slow earlier folder" case is a Query invariant. Applies to the four read guards only. |
-| "Keep old rows during re-list, never across folders"     | Query's default: same key refetch keeps `data` with `isFetching`; a new key starts with no data. No `placeholderData` needed.                                                                                   |
-| `useDirListing(dir)`                                     | Same signature, implemented as `useQuery({ ...dirListingQuery(dir), enabled: dir !== null })`. Components do not change in that phase.                                                                          |
-| `useTreeFolders().branches`                              | `useQueries` over the expanded paths; `branches` becomes a derived `Map`. `LeagueView` still owns the hook and passes the same `TreeFolders` shape down, so `TreeFileBrowser` is untouched.                     |
-| `refresh` app command → `onRefresh` → `listing.reload()` | `queryClient.invalidateQueries()`, the same call the watcher makes. A pane-scoped variant (`['dir', currentDir]`) is available if a full refresh ever proves too broad.                                         |
-| `onChanged` / `refresh` props                            | `useMutation` with `onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tree'] })`. `await`ing the invalidation preserves today's "dialog closes after the new season is visible" timing.              |
-| `begin` / `finish` calls in each flow                    | A `MutationCache` with `onMutate` / `onSuccess` / `onError` reading `mutation.meta.label`, feeding the existing `OperationFeedbackContext`.                                                                     |
-| `forgetAndRestart`                                       | `queryClient.setQueryData(treeQuery.queryKey, null)` plus `removeQueries` for `['dir']`.                                                                                                                        |
+| Today                                                    | With Query                                                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `phase` state machine in `App`                           | Derived from root and tree queries: pending → loading, error → error, confirmed null root → no-root, else ready.                                                                                                                                                                                                                                                                |
+| `scanGeneration`, `generation`, `requests` race guards   | Query isolates reads by key; `lib/query-refresh.ts` explicitly cancels matching unfinished reads before refetching. Invalidation alone reuses a first fetch with no cached data. A deferred-promise test pins this race; the four existing listing behaviour tests remain. Applies to the four read guards only.                                                                |
+| "Keep old rows during re-list, never across folders"     | Same-key refetch keeps `data` with `isFetching`; an uncached key starts empty, and a cached key may show its own rows. No cross-folder `placeholderData`.                                                                                                                                                                                                                       |
+| `useDirListing(dir)`                                     | Same signature, implemented with the directory query carrying its owning root and enabled only for a non-null directory in the confirmed active root. Components do not change in that phase.                                                                                                                                                                                   |
+| `useTreeFolders().branches`                              | `useQueries` over expanded and visited paths, with disabled observers retaining collapsed data; `branches` becomes a derived `Map`. `LeagueView` keeps the same `TreeFolders` shape, so `TreeFileBrowser` is untouched.                                                                                                                                                         |
+| `refresh` app command → `onRefresh` → `listing.reload()` | The refresh coordinator handles the same scoped refresh as the watcher, excluding the root query. A pane-scoped refresh can match the current directory and its owning root.                                                                                                                                                                                                    |
+| `onChanged` / `refresh` props                            | `useWriteOperation` awaits the write and refresh inside the operation, preserving the timing of dialogs closing after refreshed data is visible. A successful write with failed refresh returns a typed result.                                                                                                                                                                 |
+| `begin` / `finish` calls in each flow                    | Query v5 awaits cache-level then per-mutation `onSuccess` inside its try block; a rejection enters `MutationCache.onError` and makes the mutation report an error. Keep refresh inside `useWriteOperation`, returning a typed result if it fails after a successful write. Use `MutationCache` only to begin activity in `onMutate` and finish it on settlement in `onSettled`. |
+| `forgetAndRestart`                                       | The location-operation provider suspends new folder reads and cancels outstanding ones before IPC. After main confirms forget, publish a null root in the root query and clear location-derived view state. Reconcile ambiguous IPC failures through `getRoot()`; a late scan cannot restore the forgotten root.                                                                |
 
 Structural sharing is a quiet win: `LeaguesTree` is plain JSON from IPC, so an unchanged league
 keeps its object identity across scans and memoised children stop re-rendering on every
@@ -241,7 +251,7 @@ watcher tick.
 
 ### Zustand: the workspace store
 
-The state that genuinely spans panes is small: the chosen location, the selection, the folder
+The state that genuinely spans panes is small: the confirmed location, the selection, the folder
 being viewed (for the status bar) and the collapsed sidebar days. Today it lives in `App` and is
 either drilled down or reported up. The diagnostics preference is deliberately excluded: it is
 already an external store read through `useSyncExternalStore` in `use-diagnostics-preference.ts`,
@@ -264,7 +274,10 @@ interface WorkspaceState {
   `{ locations: Record<root, { selection, collapsedDays }> }` is written, under one
   versioned key. A custom `merge` validates the stored shape with the zod schemas that already
   exist in `lib/selection.ts` and `lib/local-store.ts`, keeping today's guarantee that corrupt or
-  missing storage can never break the app. `lib/local-store.ts` then goes away.
+  missing storage can never break the app. Wrap storage reads, writes and removals so failures
+  cannot break navigation. Migrate legacy per-root selection and collapsed-day keys on first use
+  and retain them during rollout. Move diagnostics storage helpers to their own module before
+  deleting `lib/local-store.ts`. The root is confirmed by main and is not persisted as UI memory.
 - **Restoration becomes derivation.** Instead of `restoreSelection` writing `HOME` into state
   when a league is missing from one scan, the render reads `findLeague(tree, selection) ?? HOME`.
   The stored selection survives a sync-lag scan, and the league re-selects itself when it
@@ -377,14 +390,14 @@ lines, and pulling a library in for any of them would cost more surface than it 
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Task-dialog lifecycle: reset every field on open, bump a `submission` ticket, `busy` flag, `error` string, refocus the field on failure, refuse close while busy                 | `NewLeagueDialog` and `NewSeasonDialog`                                                                                                                                                                                                                                                                                        | One `useDialogTask({ open, onOpenChange, run })` returning `{ busy, error, submit, handleOpenChange }`. Scoped to these two on purpose: `DeleteResourceDialog` looks like a third copy but also carries a `moved` flag and promotes a pending error toast on teardown, so forcing it through the hook would need an escape hatch. Two of the repository's four `set-state-in-effect` lint disables go with it.                                                                                         |
 | `${n} item${n === 1 ? '' : 's'}`                                                                                                                                                 | 9 occurrences on 8 lines in `LeagueView`, `DirectoryBrowser`, `TreeFileBrowser` and `use-import-files`, over the nouns item, folder, file and template, plus two hard-coded "N of M" plurals beside them                                                                                                                       | `plural(n, noun)` in `lib/plural.ts` over `Intl.PluralRules`. The sign-in sheet work will want the same helper for bowlers and teams.                                                                                                                                                                                                                                                                                                                                                                  |
-| `try { await window.api.x() } catch (caught) { add({ title: ipcErrorMessage(caught), variant: 'error' }) }`                                                                      | 8 sites in 5 files, of which only 4 are mutations                                                                                                                                                                                                                                                                              | Partly covered by the `MutationCache` in phase 4. Counted honestly: the wider population is 19 `ipcErrorMessage` call sites across 12 files, but 11 of those feed inline dialog error state rather than a toast and are untouched by any cache. See the write-orchestration row and the risk on refresh failure.                                                                                                                                                                                       |
+| `try { await window.api.x() } catch (caught) { add({ title: ipcErrorMessage(caught), variant: 'error' }) }`                                                                      | 8 sites in 5 files, of which only 4 are mutations                                                                                                                                                                                                                                                                              | Phase 4 keeps error presentation with each operation; `MutationCache` only begins activity and finishes it on settlement. Counted honestly: the wider population is 19 `ipcErrorMessage` call sites across 12 files, but 11 of those feed inline dialog error state rather than a toast and are untouched by any cache. See the write-orchestration row and the risk on refresh failure.                                                                                                               |
 | IPC channel shapes declared four times over: a zod schema, the `handle` signature, the preload method, and the renderer mock                                                     | 7 of 10 input-taking channels now parse at the boundary through two separate parser modules, which disagree with each other: the sync parser validates the season name and the create parser leaves that to the operation. `dir:list`, `folder:trash` and `root:choose` still take a trusted typed parameter                   | Declare each channel once in `src/shared/ipc.ts` as channel, input schema and output type, using the zod already installed. Main parses from the table, preload derives its method types from it, and the mock iterates it so a new channel cannot be missed. Note the premise has improved since this RFC was drafted: input is no longer merely trusted. The duplication argument is now stronger rather than weaker, because validation added a fourth declaration site and a second parser module. |
 | Platform branching on `currentPlatform()`                                                                                                                                        | `reveal-label.ts` and `trash-label.ts` switch; `app-shortcut-label.ts` instead tests for darwin twice across two exported functions                                                                                                                                                                                            | One `lib/os-labels.ts` with a `Record<Platform, …>`. The spec `os-labels.spec.ts` already imports all three and drives them from a single platform table, so the tests are ahead of the source.                                                                                                                                                                                                                                                                                                        |
-| `DirectoryBrowser` and `TreeFileBrowser` are the same component differing only in how a row exposes its path and name                                                            | Roughly 110 lines: the keyed filter state, the id and ref preamble, the focus-request effect, the context-menu opener and the actions-menu block are byte-identical, comments included                                                                                                                                         | Give the tree's row type flat `path` and `name` accessors, then extract `useBrowserGrid({ currentDir, paths })` plus a `BrowserState` component for the error, loading, no-matches and empty ladder. This is the largest single duplication in the renderer and is independent of Query, so it should land first.                                                                                                                                                                                      |
+| `DirectoryBrowser` and `TreeFileBrowser` are the same component differing only in how a row exposes its path and name                                                            | Roughly 110 lines: the keyed filter state, the id and ref preamble, the focus-request effect, the context-menu opener and the actions-menu block are byte-identical, comments included                                                                                                                                         | Give the tree's row type flat `path` and `name` accessors, then extract `useBrowserGrid({ currentDir, paths })` plus a `BrowserState` component for the error, loading, no-matches and empty ladder. This is the largest single duplication in the renderer and is independent of Query, so it may land before phase 2 if ready; it is not a prerequisite.                                                                                                                                             |
 | One-shot focus request: a `pendingFocusDir` ref, a `consumeFocusRequest` callback and `enter` / `enterMany` / `jumpTo` wrappers                                                  | Three copies in `LeagueView`, `FolderPane` and `OtherPane`, identical except for the base-directory identifier                                                                                                                                                                                                                 | Move the ref into `useCrumbs`, which already takes `baseDir`, and let the navigation methods take the focus flag. Removes the prop from both browser interfaces.                                                                                                                                                                                                                                                                                                                                       |
 | "Reset this state when its owner key changes"                                                                                                                                    | Six different spellings: a state object holding the directory in `use-file-selection` and in both browsers, a derived re-base in `use-crumbs`, a mirrored location in `OperationFeedbackProvider`, a scope ref in `use-tree-folders`, a membership test in `use-row-actions-menu`                                              | A six-line `useKeyedState(key, initial)` fits the first four. The last two keep their bespoke logic. Worth doing because reviewers have now re-derived this idiom six times.                                                                                                                                                                                                                                                                                                                           |
-| Write orchestration: guard a busy flag, `begin` the feedback, await the write, reload the listing, await the refresh, qualify the message if the refresh failed, toast, `finish` | Four copies in `LeagueView.zip`, `LeagueView.syncTemplates`, `use-import-files` and `DeleteResourceDialog`, with the refresh-failure sentence duplicated four times                                                                                                                                                            | One `useWriteOperation({ label, run, onChanged, successMessage, noun })`. This is also the reason the `MutationCache` cannot own all feedback; see the risks.                                                                                                                                                                                                                                                                                                                                          |
-| Recent locations: a ticket-guarded fetch and a two-line row of basename over full path                                                                                           | Two copies in `FirstRun` and `LocationSwitcher`, byte-identical JSX but with different and undocumented failure policies, one showing an inline error and one silently swallowing                                                                                                                                              | A `LocationRow` component and one `useRecentRoots()` hook, which is also the natural seam for the phase 3 recents query. Converging them forces one deliberate failure policy.                                                                                                                                                                                                                                                                                                                         |
+| Write orchestration: guard a busy flag, `begin` the feedback, await the write, reload the listing, await the refresh, qualify the message if the refresh failed, toast, `finish` | Four copies in `LeagueView.zip`, `LeagueView.syncTemplates`, `use-import-files` and `DeleteResourceDialog`, with the refresh-failure sentence duplicated four times                                                                                                                                                            | One `useWriteOperation` hook keeps write and coordinated refresh inside the operation and returns a typed result for a successful write whose refresh fails. This is also the reason the `MutationCache` cannot own all feedback; see the risks.                                                                                                                                                                                                                                                       |
+| Recent locations: a ticket-guarded fetch and a two-line row of basename over full path                                                                                           | Two copies in `FirstRun` and `LocationSwitcher`, byte-identical JSX but with different and undocumented failure policies, one showing an inline error and one silently swallowing                                                                                                                                              | A `LocationRow` component and one `useRecentRoots()` hook, which is also the natural seam for the phase 3a recents query. Converging them forces one deliberate failure policy.                                                                                                                                                                                                                                                                                                                        |
 | Main-process helpers reimplemented rather than shared                                                                                                                            | The "is this path inside that one" predicate is written four times, "is this a single path segment" three times, reading a filesystem error code three times each with its own lint suppression, the archive folder path computed at five sites of which one validates it, and the `meta.json` serialise-and-write three times | One exported predicate, one segment check, one error-code reader, and a `writeLeagueMeta` helper. The archive-path duplication is not cosmetic: the site that validates is the zip path, and the site that moves a season during archiving does not, which is how one of the separately raised defects arises.                                                                                                                                                                                         |
 | Interval plus `visibilitychange` polling, `matchMedia` listener, document-level `dragover`/`drop` refusal                                                                        | `use-renderer-metrics.ts`, `theme.ts`, `App.tsx`                                                                                                                                                                                                                                                                               | Three effects, each different enough that a generic `useEventListener` would save a dozen lines in total. Leave them.                                                                                                                                                                                                                                                                                                                                                                                  |
 
@@ -433,48 +446,86 @@ be reverted alone. CI on `main` runs all three across an OS matrix, so a phase i
 it is green there. The hand-rolled hooks and Query can coexist mid-phase, because the extra
 subscription is harmless.
 
-**Phase 0 — widen the test harness.** Add a hook renderer and an optional location key to the
-shared test helper so the provider tree has exactly one definition, then move the roughly twenty
+**Phase 0: correct the RFC and widen the test harness.** Align the RFC with the implementation
+plan. Add a hook renderer and an optional location key to the shared test helper so the provider
+tree has exactly one definition, then move the roughly twenty
 hand-nested provider sites onto it. No production code changes.
 _Done when:_ no spec file constructs a provider tree inline, except the provider's own spec.
 _Why first:_ phase 1 adds a provider to that tree, and the hand-nested sites would not pick it up.
 
-**Phase 1 — install.** Add the six packages from the canonical list, wire `QueryClientProvider`
+**Phase 1: install.** Add the five packages from the canonical list, wire `QueryClientProvider`
 in `main.tsx` and the shared test helper, mount the error boundaries, and enable both lint
 plugins. No behaviour change beyond the boundaries.
-_Done when:_ a test asserts the client is built with `networkMode: 'always'`, and the devtools
-import is behind `import.meta.env.DEV` with the production bundle checked.
+_Done when:_ a local read and a write run while Query's online manager reports offline, with
+that global state restored in test cleanup. The devtools import is behind `import.meta.env.DEV`
+with the production bundle checked.
 
-**Phase 2 — directory listings.** Reimplement `useDirListing` on `useQuery` behind its current
-signature. Move the `onTreeChanged` subscription to the single invalidation point.
-_Done when:_ the two existing cases in `use-dir-listing.spec.ts` pass against the new
-implementation, rewritten to assert behaviour rather than generation-ref call counts.
+**Phase 2: directory listings.** Reimplement `useDirListing` on `useQuery` behind its current
+signature, leaving browser components untouched. Add the refresh coordinator in
+`lib/query-refresh.ts` and its watcher subscriber; keep legacy App and tree-folder subscribers
+until their consumers migrate. Preserve root-switch refreshes during coexistence.
+_Done when:_ all four existing directory-listing behaviour tests pass with only provider setup
+changing: earlier-folder responses, retained rows during refresh, recovery from errors and a
+null directory. Invalidation alone reuses an in-flight first fetch with no cached data; the
+coordinator explicitly cancels matching unfinished reads before refetching. A deferred-promise
+test pins that a watcher event during the first listing cannot be swallowed or let the earlier
+result overwrite its replacement. Cover overlapping refreshes, superseded refresh failures and
+cache sharing. IPC work may continue after cancellation, but its obsolete result is ignored.
 
-**Phase 3 — tree and recents.** Move `scan` into `treeQuery` and derive `phase` from it. Move
-`recentRoots` onto a query, which is also where the two divergent recents fetches converge.
-Reimplement `useTreeFolders` as `useQueries` over the expanded set.
-_Done when:_ the `TreeFolders` interface is byte-identical, so `TreeFileBrowser` is untouched;
-and navigation still evicts abandoned branches, which needs an explicit `removeQueries` because
-Query only marks them stale. The pruning spec is the acceptance test and must not be weakened.
+**Phase 3a: root, tree, recents and location transitions.** Bootstrap `['root']` through
+`window.api.getRoot()`, move `scan` into `['tree', root]` and derive `phase` from both queries.
+Move `recentRoots` onto a shared query with recoverable inline errors in both location surfaces.
+Add the location-operation provider to serialise choose, switch and forget: suspend new folder
+reads and cancel outstanding ones before root-changing IPC, publish only confirmed roots,
+refresh destination caches and recents, and load the matching tree. Picker cancellation resumes
+the existing location; an ambiguous IPC failure reconciles through `getRoot()`. Remove App's
+legacy watcher and temporary root-switch adapter, keeping write refresh callbacks through the
+coordinator until phase 4.
+_Done when:_ tests cover a slow root-A scan settling after switching to B, switching back to an
+unwatched root, picker cancellation, a missing recent root, forgetting during a scan and scan
+retry. Displayed root, tree and operation scope agree throughout transitions.
 
-**Phase 4 — mutations and feedback.** Convert the writes to `useMutation` with `meta.label` and
-route `begin` / `finish` through a `MutationCache`. Point the `refresh` and location app-command
-handlers at the query client. Remove the drilled `onChanged` props once no caller needs them.
-_Decide before starting, not during:_ the four write flows that report "succeeded, but could not
-be refreshed" either keep their own `try`/`catch` with only the feedback moving into the cache,
-or adopt the `useWriteOperation` hook from the cleanup catalogue. A `MutationCache` alone cannot
-express that outcome. See the risk below.
-_Done when:_ location-scoped feedback still clears on a location switch while application-scoped
-feedback survives, which an existing spec pins.
+**Phase 3b: branch queries and final watcher consolidation.** Reimplement `useTreeFolders` with
+Query observers for expanded and visited paths. Navigation prunes expansion and abandoned
+visited paths and detaches their observers; it does not delete shared cache data, which the
+listing and tree branches both use. Collapsed branch data survives beyond cache collection only
+while a subscriber exists; a disabled observer counts. Comment this where observers are created
+and test the loaded-files filter after advancing past the collection time with a branch collapsed.
+Preserve branch retry and fresh reads on reopening. Remove the final legacy watcher subscriber.
+_Done when:_ the `TreeFolders` interface is byte-identical, so `TreeFileBrowser` is untouched.
+The existing pruning spec must not be weakened. Preserve collapsed-cache, loaded-descendant
+filter and retry specs; test that abandoning a branch preserves another consumer's data and that
+collapsed data outlives the collection interval. Exactly one watcher remains after mount,
+rerender and Strict Mode cleanup.
 
-**Phase 5 — workspace store.** Introduce `createWorkspaceStore`, migrate the location, selection,
-current folder and collapsed days, and delete `lib/local-store.ts` along with the navigation
-state in `App`. The diagnostics preference stays where it is; it is already an external store.
-_Done when:_ the roughly twenty raw-key storage assertions are ported to the store's `merge`
-guards rather than deleted, and the PR description states plainly that restoration by derivation
-is a bug fix, since today a league lost to one scan never re-selects itself.
+**Phase 4: mutations and feedback.** Convert writes to `useWriteOperation` with `meta.label`.
+All four refresh-failure flows adopt the hook. Keep write and refresh inside the operation and
+return a typed result for "write succeeded, refresh failed"; write failures throw. Use
+`MutationCache` only to begin activity and finish it once on settlement. Capture the original
+root and affected paths; if that root is no longer active, mark its caches stale and defer refresh
+until it is active again. Point refresh commands at the refresh coordinator and location commands
+at the location-operation provider. Remove refresh-only callbacks once no caller needs them.
+_Done when:_ the four flows cover failed writes, successful writes and successful writes with
+failed refresh, without relying on watcher events. Activity stays pending through refresh,
+completed deletes cannot repeat, and feedback is presented once. Location-scoped feedback still
+clears on a location switch while application-scoped feedback survives. Query ships through this
+phase as a complete increment. Each PR introducing the refresh coordinator, location-operation
+provider or write-operation hook compares it against the hand-rolled code it deletes.
 
-**Phase 6 — members (later).** Table and Form arrive with that feature, not before.
+**Phase 5: workspace store.** Install `zustand@^5.0.15` here, with its own review of the remaining
+shared UI state. Introduce `createWorkspaceStore` for selection, current folder and collapsed
+days; main remains authoritative for the chosen root. Migrate legacy
+`leagues:<root>:selection` and `leagues:<root>:collapsed-days` keys on first use, giving valid new
+records precedence and retaining legacy keys during rollout. Wrap storage access so read, write
+and removal failures cannot break navigation. Move diagnostics storage helpers to their own
+module before deleting `lib/local-store.ts` and the navigation state in `App`; the diagnostics
+preference remains its existing external store.
+_Done when:_ raw-key assertions remain as legacy migration fixtures alongside new-format
+validation. Cover root A/B persistence, reload, corrupt data, throwing storage, collapsed-day
+round trips and stale directory reports. The PR states plainly that restoration by derivation is
+a bug fix and tests temporary league disappearance, its return and an explicit Home selection.
+
+**Phase 6: members (later).** Table and Form arrive with that feature, not before.
 
 ### Sequencing the cleanups
 
@@ -482,11 +533,11 @@ The cleanups need no dependency and are independent of the phases, so they are o
 they unblock rather than by size. The first two pay for themselves immediately:
 
 1. `useBrowserGrid` and a `BrowserState` component for the two file browsers. The largest
-   single duplication in the renderer, and it should land before Query touches those files.
+   single duplication in the renderer; it may land before phase 2 if ready; it is not a prerequisite.
 2. `useCrumbs` absorbs the one-shot focus ref, deleting three copies and a prop from two
    interfaces.
-3. `useDialogTask` for the two dialogs it fits, and `useWriteOperation`, which phase 4 may
-   depend on.
+3. `useDialogTask` for the two dialogs it fits, and `useWriteOperation`, which phase 4
+   adopts.
 4. `useKeyedState`, `plural` and `os-labels`. Small, safe, do them while passing.
 5. The shared IPC table and the main-process helper consolidation. These touch main and are the
    only cleanups outside this RFC's renderer scope, so they belong in their own PR with their
@@ -494,75 +545,70 @@ they unblock rather than by size. The first two pay for themselves immediately:
 
 ### What this plan does not promise
 
-Test rewriting is real work in phases 2, 3 and 5, not an afterthought. `installMockApi` and
+Test migration is real work in phases 2, 3a, 3b and 5, not an afterthought. `installMockApi` and
 `emitTreeChanged` remain the seam, because the single subscriber still registers through
-`window.api.onTreeChanged`, but the specs that assert generation-ref call counts, raw storage
-keys or `restoreSelection` directly are rewritten rather than carried across. The risks section
+`window.api.onTreeChanged`. All four directory-listing behaviour tests are retained with only
+provider setup changing. Raw storage fixtures gain legacy migration and new-format coverage;
+assertions about `restoreSelection` change to cover restoration by derivation. The risks section
 names where that cost falls.
 
 ## Risks
 
-- **Offline pause.** Covered by `networkMode: 'always'`; a test in phase 1 should assert the
-  client is built with it.
-- **A successful write whose refresh fails is a third outcome, and the cache cannot express
-  it.** Four flows today report "zipped, but the league could not be refreshed", which means the
-  write succeeded and the invalidation did not. A rejected `invalidateQueries` inside `onSuccess`
-  does not reject the mutation, so it never reaches `MutationCache.onError` and the user would
-  see a plain success. `DeleteResourceDialog` is the sharpest case: it must keep its `moved` flag
-  so the delete is not retried, and promote the message to a toast if the dialog has closed.
-  Either these four keep their own `try`/`catch` with only `begin` and `finish` moving into the
-  cache, or they adopt the `useWriteOperation` hook instead. Decide this in phase 4, not during it.
+- **Offline pause.** Covered by `networkMode: 'always'`; phase 1 tests that a local read and a
+  write run while Query's online manager reports offline and restores that global state in test
+  cleanup.
+- **A successful write whose refresh fails is a third outcome.** Four flows today qualify a
+  completed write when its refresh fails. Query v5 awaits both cache-level and per-mutation
+  `onSuccess` inside its try block. A rejected `invalidateQueries` there enters error handling,
+  including `MutationCache.onError`, and the mutation reports an error. Global success callbacks
+  run before per-mutation success callbacks, so finishing activity in global `onSuccess` could
+  also precede refresh. Keep refresh inside `useWriteOperation` and return "write succeeded,
+  refresh failed" as a typed result rather than an error. Use `MutationCache` only to begin
+  activity and finish it on settlement. `DeleteResourceDialog` keeps its `moved` flag so the
+  delete is not retried and promotes the message to a toast if the dialog has closed.
 - **Operation feedback is location-scoped and Query is not.** `OperationFeedbackProvider` drops
   pending location-scoped operations when the location changes while keeping application-scoped
   ones, and a spec pins that. A `MutationCache` feeding the same context has no notion of that
   scope, so an in-flight mutation would keep announcing across a location switch.
-- **Tree pruning is deliberate, not an artifact of hand-rolling.** `use-tree-folders` deletes
-  branches and pending tickets outside the current directory on navigation, so that filesystem
-  events cannot keep polling abandoned paths. Query's equivalent marks them stale and leaves
-  eviction to `gcTime`. Preserving today's behaviour needs an explicit `removeQueries` on
-  navigation, which is hand-written code of roughly the size being deleted. Name it in phase 3
-  so it is not found later as a regression.
+- **Tree pruning is deliberate, not an artifact of hand-rolling.** Navigation prunes expansion
+  and abandoned visited paths and detaches observers, preventing watcher reads of abandoned
+  paths. It does not delete shared cache data: directory listings and tree branches share it.
+  Collapsed branch data survives beyond cache collection only while a subscriber exists; a
+  disabled observer counts. Phase 3b comments this mechanism and tests beyond the collection
+  interval, including another consumer retaining its data. The existing pruning spec must not
+  be weakened.
 - **The suite pins some of what these phases change, and that cost is concentrated.** Roughly
   twenty assertions across four spec files read or seed raw localStorage keys and their exact
   bodies, all of which the `persist` middleware's versioned envelope invalidates in phase 5.
   Three tests target `restoreSelection` directly, including one asserting the very fallback that
-  derivation removes. Four tests in the directory-listing spec are about generation-ref
-  semantics and become Query invariants, so they are rewritten rather than kept. The sharpest
-  one is a tree-browser test asserting that navigating away clears the expanded set, which is
-  the deliberate pruning named above: Query offers no equivalent, so that test goes red unless
-  the pruning is reimplemented. Budget test rewriting into each phase rather than treating the
-  suite as a fixed backstop.
-- **Blanket invalidation cost.** Every `tree:changed` refetches every _active_ query. Today's
-  code already refetches every subscriber on that event, so this is not a regression; the
-  watcher's 500 ms debounce still applies. If a very large folder makes it noticeable, narrow
-  to `['tree']` plus `['dir']` prefixes.
-- **Cross-location cache.** Path-keyed queries are safe across roots; anything keyed without a
-  path must include the root in its key (phase 3 review item).
-- **Lazy branch refresh.** A collapsed cached branch now refreshes on re-expand rather than in
-  the background. Rows shown while that refetch runs are the cached ones, as today.
+  derivation removes. All four directory-listing tests are retained as behaviour tests with only
+  provider setup changing: earlier-folder responses, retained rows during refresh, recovery from
+  errors and a null directory. The tree-browser test asserting that navigating away clears the
+  expanded set remains the acceptance test for deliberate pruning. Budget provider and
+  persistence test migration into the phases without weakening those behaviours.
+- **Broad refresh cost.** Every `tree:changed` refetches matching active queries through the
+  coordinator, excluding the root query. Today's code already refetches active subscribers on
+  that event; the watcher's 500 ms debounce still applies. Narrow the affected root's tree and
+  directory scope if a very large folder makes the cost noticeable.
+- **Cross-location cache.** Tree and future members keys include the root. Directory queries
+  carry their owning root for filtering and execution checks, so stale reads cannot run against
+  a replacement root. The root query bootstraps from `getRoot()` and is excluded from routine
+  refresh. The location-operation provider suspends and cancels reads during transitions,
+  publishes confirmed roots and reconciles ambiguous IPC failures through `getRoot()`.
+- **Lazy branch refresh.** Preserve today's behaviour: a collapsed cached branch refreshes on
+  re-expand, with cached rows shown while that refetch runs. Disabled observers retain loaded
+  data without causing watcher reads; phase 3b tests retention and explicit reopening.
 - **Dev-only devtools.** Must be imported behind `import.meta.env.DEV` so nothing ships;
   phase 1 checks the production bundle.
 - **Version drift.** TanStack Table 9 is a recent major; confirm its API against the docs at
   adoption time rather than from memory.
 
-## Open questions
+## Answered
 
-These are for the reviewer to settle. Everything else in this document is decided.
-
-1. **Zustand, or Query only?** Defer the store and stop after phase 4 is a legitimate shape. The
-   review strengthened the case for the store rather than weakening it: the current folder has
-   two reporters and three layers of guarding, all to print one string in the status bar. But
-   Query is the larger win and could ship alone.
-2. **Should per-location UI memory live in `electron-store` in main** instead of persisting in
-   the renderer, next to recent locations? The now-removed polish plan rejected a second renderer
-   store for recents, and the same argument may apply. This changes phase 5's shape, so answer it
-   before phase 5 rather than during.
-3. **Do the four refresh-failure write flows keep their own error handling, or move to
-   `useWriteOperation`?** Phase 4 cannot start without an answer. My recommendation is the hook,
-   because it also deletes three other copies.
-4. **Do the main-process cleanups belong to this RFC at all,** or to the issues already filed
-   against those files? They are catalogued here because the survey found them, but they are
-   outside the renderer scope this document otherwise keeps.
+1. Query ships through phase 4 as a complete increment. Zustand is phase 5, with its own review.
+2. UI memory stays in the renderer; main remains authoritative for the chosen root.
+3. The four refresh-failure flows adopt `useWriteOperation`.
+4. Main-process cleanups are tracked outside this RFC.
 
 Answered by the review and no longer open: whether to ship the devtools (yes, they never reach
 the bundle), and whether to migrate the browsers to TanStack Table (no, but they do need the
