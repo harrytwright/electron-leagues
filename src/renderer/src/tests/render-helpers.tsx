@@ -7,9 +7,13 @@ import {
   type RenderHookResult
 } from '@testing-library/react'
 import { TestProviders } from './TestProviders'
+import type { QueryClient } from '@tanstack/react-query'
+import { createQueryClient } from '../lib/query-client'
+import { registerTestQueryClient } from './query-clients'
 
 interface ProviderOptions {
   locationKey?: string
+  queryClient?: QueryClient
 }
 
 type ProviderRenderOptions = RenderOptions & ProviderOptions
@@ -19,9 +23,10 @@ function createWrapper(
   options: ProviderOptions & Pick<RenderOptions, 'wrapper'>
 ): NonNullable<RenderOptions['wrapper']> {
   const InnerWrapper = options.wrapper
+  const queryClient = registerTestQueryClient(options.queryClient ?? createQueryClient())
   return function Wrapper({ children }: { children: React.ReactNode }): React.JSX.Element {
     return (
-      <TestProviders locationKey={options.locationKey}>
+      <TestProviders locationKey={options.locationKey} queryClient={queryClient}>
         {InnerWrapper ? <InnerWrapper>{children}</InnerWrapper> : children}
       </TestProviders>
     )

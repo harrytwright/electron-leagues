@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { QueryClient } from '@tanstack/react-query'
+import { AppProviders } from './components/AppProviders'
+import { AppErrorBoundary } from './components/AppErrorBoundary'
+import { PaneErrorBoundary } from './components/PaneErrorBoundary'
 import type { LeaguesTree } from '@shared/tree'
-import { Button, Loader, Sidebar as KumoSidebar, Text, ToastProvider } from '@cloudflare/kumo'
+import { Button, Loader, Sidebar as KumoSidebar, Text } from '@cloudflare/kumo'
 import { FirstRun } from './components/FirstRun'
 import { HomeView } from './components/HomeView'
 import { LeagueView } from './components/LeagueView'
@@ -264,26 +268,28 @@ function AppContent(): React.JSX.Element {
         <div className="flex min-h-0 w-full flex-1">
           <Sidebar key={tree.root} tree={tree} selection={selection} onSelect={select} />
           <main className="h-full min-w-0 flex-1 overflow-auto">
-            {selectedLeague ? (
-              <LeagueView
-                key={selectedLeague.path}
-                league={selectedLeague}
-                onChanged={refreshAfterWrite}
-                onRefresh={refreshForReading}
-                onCurrentDirChange={(currentDir) =>
-                  setLeagueNavigation({ ownerPath: selectedLeague.path, currentDir })
-                }
-              />
-            ) : (
-              <HomeView
-                key={tree.root}
-                tree={tree}
-                onSelect={select}
-                onChanged={refreshAfterWrite}
-                onRefresh={refreshForReading}
-                onCurrentDirChange={updateHomeCurrentDir}
-              />
-            )}
+            <PaneErrorBoundary resetKeys={[selectedLeague?.path ?? tree.root]}>
+              {selectedLeague ? (
+                <LeagueView
+                  key={selectedLeague.path}
+                  league={selectedLeague}
+                  onChanged={refreshAfterWrite}
+                  onRefresh={refreshForReading}
+                  onCurrentDirChange={(currentDir) =>
+                    setLeagueNavigation({ ownerPath: selectedLeague.path, currentDir })
+                  }
+                />
+              ) : (
+                <HomeView
+                  key={tree.root}
+                  tree={tree}
+                  onSelect={select}
+                  onChanged={refreshAfterWrite}
+                  onRefresh={refreshForReading}
+                  onCurrentDirChange={updateHomeCurrentDir}
+                />
+              )}
+            </PaneErrorBoundary>
           </main>
         </div>
         <StatusBar path={statusPath} />
@@ -302,11 +308,13 @@ function AppContent(): React.JSX.Element {
   )
 }
 
-function App(): React.JSX.Element {
+function App({ queryClient }: { queryClient: QueryClient }): React.JSX.Element {
   return (
-    <ToastProvider>
-      <AppContent />
-    </ToastProvider>
+    <AppProviders queryClient={queryClient}>
+      <AppErrorBoundary>
+        <AppContent />
+      </AppErrorBoundary>
+    </AppProviders>
   )
 }
 

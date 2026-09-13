@@ -3,6 +3,7 @@ import './assets/main.css'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
+import { createQueryClient } from './lib/query-client'
 import { watchSystemTheme } from './theme'
 import { initAnalytics } from './lib/analytics'
 
@@ -13,6 +14,6 @@ void initAnalytics()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <App queryClient={createQueryClient()} />
   </StrictMode>
 )

@@ -1,11 +1,26 @@
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+  type RenderResult
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import type { LeaguesTree } from '@shared/tree'
 import App from '../App'
+import { createQueryClient } from '../lib/query-client'
+import { registerTestQueryClient } from './query-clients'
 import { trashLabel } from '../lib/trash-label'
 import { makeDirEntry, makeLeague, makeTree } from './fixtures'
 import { emitAppCommand, emitTreeChanged, installMockApi } from './mock-api'
+
+function renderApp(): RenderResult {
+  const queryClient = registerTestQueryClient(createQueryClient())
+  return render(<App queryClient={queryClient} />)
+}
 
 function treeWithMondayLeagues(root = '/root', ...folderNames: string[]): LeaguesTree {
   const names = folderNames.length > 0 ? folderNames : ['Mixed triples']
@@ -29,7 +44,7 @@ function remember(root: string, day: string, folderName: string): string {
 it('shows loading, then FirstRun when scan returns null', async () => {
   installMockApi({ scan: vi.fn().mockResolvedValue(null) })
 
-  render(<App />)
+  renderApp()
 
   expect(screen.getByText(/loading…/i)).toBeInTheDocument()
   expect(screen.getByRole('status', { name: 'Loading' })).toBeInTheDocument()
@@ -44,7 +59,7 @@ it('shows a scan error without confirming an opened location', async () => {
     chooseRoot: vi.fn().mockResolvedValue('/chosen/leagues')
   })
   const user = userEvent.setup()
-  render(<App />)
+  renderApp()
 
   await user.click(await screen.findByRole('button', { name: /open location/i }))
   expect(await screen.findByText('Couldn’t read the leagues folder')).toBeInTheDocument()
@@ -60,7 +75,7 @@ it('shows a scan error without confirming a recent location', async () => {
     setRoot: vi.fn().mockResolvedValue('/recent/leagues')
   })
   const user = userEvent.setup()
-  render(<App />)
+  renderApp()
 
   await user.click(await screen.findByRole('button', { name: /leagues.*\/recent\/leagues/i }))
   expect(await screen.findByText('Couldn’t read the leagues folder')).toBeInTheDocument()
@@ -71,7 +86,7 @@ it('shows a scan error without confirming a recent location', async () => {
 
 it('opens or creates a location from application commands during FirstRun', async () => {
   const api = installMockApi({ scan: vi.fn().mockResolvedValue(null) })
-  render(<App />)
+  renderApp()
   await screen.findByRole('button', { name: /open location/i })
 
   act(() => emitAppCommand({ command: 'open-location', repeat: false, composing: false }))
@@ -92,7 +107,7 @@ it('keeps opening status visible through a recent-location scan, then confirms c
     setRoot: vi.fn().mockResolvedValue('/recent/leagues')
   })
   const user = userEvent.setup()
-  render(<App />)
+  renderApp()
 
   const activity = screen.getByRole('status', { name: 'Application activity' })
   await user.click(await screen.findByRole('button', { name: /leagues.*\/recent\/leagues/i }))
@@ -128,7 +143,7 @@ it('does not confirm a superseded location scan when the winning watcher scan fa
     scan,
     chooseRoot: vi.fn().mockResolvedValue('/chosen/leagues')
   })
-  render(<App />)
+  renderApp()
   await screen.findByRole('button', { name: /open location/i })
 
   act(() => emitAppCommand({ command: 'open-location', repeat: false, composing: false }))
@@ -156,7 +171,7 @@ it('shares one location-operation guard between FirstRun rows and app commands',
     chooseRoot
   })
   const user = userEvent.setup()
-  render(<App />)
+  renderApp()
 
   await user.click(await screen.findByRole('button', { name: /leagues.*\/recent\/leagues/i }))
   act(() => emitAppCommand({ command: 'open-location', repeat: false, composing: false }))
@@ -168,7 +183,7 @@ it('shares one location-operation guard between FirstRun rows and app commands',
 it('shows Home on Shared documents and reports that directory in the status bar', async () => {
   installMockApi({ scan: vi.fn().mockResolvedValue(makeTree()) })
 
-  render(<App />)
+  renderApp()
 
   expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
   const status = screen.getByRole('contentinfo', { name: 'Application status' })
@@ -181,7 +196,7 @@ it('shows Home on Shared documents and reports that directory in the status bar'
 it('routes application commands to the visible browser and location control', async () => {
   const scan = vi.fn().mockResolvedValue(makeTree())
   const api = installMockApi({ scan })
-  render(<App />)
+  renderApp()
   await screen.findByRole('heading', { name: 'Home' })
 
   act(() => emitAppCommand({ command: 'focus-filter', repeat: false, composing: false }))
@@ -217,7 +232,7 @@ it('updates the status path from the location root through league navigation', a
   })
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp()
 
   const status = await screen.findByRole('contentinfo', { name: 'Application status' })
   expect(within(status).getByTitle('/root/_shared')).toBeInTheDocument()
@@ -238,7 +253,7 @@ it('tracks Home tabs and resets Home to Shared documents after league navigation
   installMockApi({ scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs')) })
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp()
 
   const status = await screen.findByRole('contentinfo', { name: 'Application status' })
   await user.click(screen.getByRole('tab', { name: 'Templates' }))
@@ -262,7 +277,7 @@ it('keeps the current Home pane and status in sync on a redundant Home click', a
     listDir: vi.fn((dir: string) => Promise.resolve(dir === '/root/_templates' ? [folder] : []))
   })
   const user = userEvent.setup()
-  render(<App />)
+  renderApp()
   await user.click(await screen.findByRole('tab', { name: 'Templates' }))
   await user.dblClick(await screen.findByRole('row', { name: /^Admin/ }))
   await user.click(screen.getByRole('button', { name: 'Go home' }))
@@ -289,7 +304,7 @@ it('resets Home and its status directory when the location changes', async () =>
   installMockApi({ scan })
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp()
 
   const status = await screen.findByRole('contentinfo', { name: 'Application status' })
   await user.click(screen.getByRole('tab', { name: 'Templates' }))
@@ -310,7 +325,7 @@ it('rescans when the tree changes on disk', async () => {
   const scan = vi.fn().mockResolvedValueOnce(null).mockResolvedValue(makeTree())
   installMockApi({ scan })
 
-  render(<App />)
+  renderApp()
   expect(await screen.findByRole('button', { name: /open location/i })).toBeInTheDocument()
 
   act(() => emitTreeChanged())
@@ -326,7 +341,7 @@ it('shows a recoverable error when the scan fails, and retries', async () => {
   installMockApi({ scan })
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp()
 
   expect(
     await screen.findByRole('heading', { name: 'Couldn’t read the leagues folder' })
@@ -346,7 +361,7 @@ it('shows one scan error when a league overview refresh fails', async () => {
     .mockRejectedValueOnce(new Error('Scan failed'))
   installMockApi({ scan })
   const user = userEvent.setup()
-  render(<App />)
+  renderApp()
 
   await user.click(await screen.findByRole('button', { name: 'Pairs' }))
   await user.click(screen.getByRole('button', { name: 'Refresh files' }))
@@ -364,7 +379,7 @@ it('keeps the completed-delete context when its refresh replaces the dialog with
     .mockRejectedValueOnce(new Error('Scan failed'))
   const api = installMockApi({ scan })
   const user = userEvent.setup()
-  render(<App />)
+  renderApp()
 
   await user.click(await screen.findByRole('button', { name: 'Pairs' }))
   await user.click(screen.getByRole('button', { name: 'Actions for 2025-26' }))
@@ -391,7 +406,7 @@ it('shows one scan error when refreshing a missing Home folder fails', async () 
     .mockRejectedValueOnce(new Error('Scan failed'))
   installMockApi({ scan })
   const user = userEvent.setup()
-  render(<App />)
+  renderApp()
 
   await screen.findByText('No shared documents folder')
   await user.click(screen.getByRole('button', { name: 'Refresh files' }))
@@ -407,7 +422,7 @@ it('keeps offering retry when the rescan fails again', async () => {
   installMockApi({ scan })
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp()
 
   await screen.findByRole('heading', { name: 'Couldn’t read the leagues folder' })
   await user.click(screen.getByRole('button', { name: 'Try again' }))
@@ -424,7 +439,7 @@ it('escapes a broken folder by choosing another', async () => {
   const api = installMockApi({ scan })
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp()
 
   await screen.findByRole('heading', { name: 'Couldn’t read the leagues folder' })
   await user.click(screen.getByRole('button', { name: 'Choose another folder' }))
@@ -439,7 +454,7 @@ it('restores the remembered league for the location after the first scan', async
     scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs', 'Trios'))
   })
 
-  render(<App />)
+  renderApp()
 
   expect(await screen.findByRole('heading', { name: 'Trios' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Trios' })).toHaveAttribute('aria-current', 'true')
@@ -452,7 +467,7 @@ it('falls back to home when the remembered league is not where it was, keeping t
     scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs', 'Trios'))
   })
 
-  render(<App />)
+  renderApp()
 
   expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Go home' })).toHaveAttribute('aria-current', 'page')
@@ -463,7 +478,7 @@ it('remembers selections and returns to Home from the title bar', async () => {
   installMockApi({ scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs')) })
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp()
   await user.click(await screen.findByRole('button', { name: 'Pairs' }))
 
   expect(localStorage.getItem('leagues:/root:selection')).toBe(
@@ -487,7 +502,7 @@ it('drops the selection to home when the selected league disappears from a resca
   installMockApi({ scan })
   const user = userEvent.setup()
 
-  render(<App />)
+  renderApp()
   await user.click(await screen.findByRole('button', { name: 'Trios' }))
   expect(await screen.findByRole('heading', { name: 'Trios' })).toBeInTheDocument()
 
@@ -507,7 +522,7 @@ it('switching location restores that location’s memory without touching the ot
     .mockResolvedValue(treeWithMondayLeagues('/b', 'Trios'))
   installMockApi({ scan })
 
-  render(<App />)
+  renderApp()
   expect(await screen.findByRole('heading', { name: 'Pairs' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Monday' })).toHaveAttribute('aria-expanded', 'false')
 
@@ -525,9 +540,33 @@ it('unsubscribes from tree changes on unmount', async () => {
     onTreeChanged: vi.fn(() => unsubscribe)
   })
 
-  const { unmount } = render(<App />)
+  const { unmount } = renderApp()
   await screen.findByRole('button', { name: /open location/i })
 
   unmount()
   expect(unsubscribe).toHaveBeenCalled()
+})
+
+it('keeps the sidebar and location control usable after a pane render fails', async () => {
+  const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+  try {
+    const api = installMockApi({
+      scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs')),
+      listDir: vi.fn().mockResolvedValue([null])
+    })
+    const user = userEvent.setup()
+    renderApp()
+
+    expect(await screen.findByRole('alert')).toBeInTheDocument()
+    expect(screen.getByRole('navigation', { name: 'Leagues' })).toBeInTheDocument()
+    expect(screen.getByRole('contentinfo', { name: 'Application status' })).toBeInTheDocument()
+    act(() => emitAppCommand({ command: 'open-location', repeat: false, composing: false }))
+    expect(api.chooseRoot).toHaveBeenCalledExactlyOnceWith('select')
+
+    await user.click(screen.getByRole('button', { name: 'Pairs' }))
+    expect(await screen.findByRole('heading', { name: 'Pairs' })).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  } finally {
+    consoleError.mockRestore()
+  }
 })

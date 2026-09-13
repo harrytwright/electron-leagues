@@ -1,6 +1,8 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
 import { afterEach } from 'vitest'
+import { onlineManager } from '@tanstack/react-query'
+import { clearTestQueryClients } from './query-clients'
 
 let systemDark = false
 
@@ -98,6 +100,8 @@ export function setSystemDark(dark: boolean): void {
 
 afterEach(() => {
   cleanup()
+  clearTestQueryClients()
+  onlineManager.setOnline(true)
   localStorage.clear()
   systemDark = false
   darkQueryList.reset()
