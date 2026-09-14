@@ -13,6 +13,13 @@ import type { LeaguesTree } from '@shared/tree'
 import App from '../App'
 import { createQueryClient } from '../lib/query-client'
 import { registerTestQueryClient } from './query-clients'
+import {
+  createWorkspaceStore,
+  type WorkspaceStore,
+  type WorkspaceLocation
+} from '../lib/workspace-store'
+import { createLocalStorageWorkspaceStorage } from './local-storage-workspace-storage'
+import { parseWorkspaceEnvelope } from './workspace-envelope'
 import { trashLabel } from '../lib/trash-label'
 import { makeDirEntry, makeLeague, makeTree } from './fixtures'
 import {
@@ -23,9 +30,19 @@ import {
   type RendererApi
 } from './mock-api'
 
-function renderApp(): RenderResult {
+function renderApp(): RenderResult & { workspaceStore: WorkspaceStore } {
   const queryClient = registerTestQueryClient(createQueryClient())
-  return render(<App queryClient={queryClient} />)
+  // Real localStorage, like production, so legacy-key fixtures migrate and persistence
+  // assertions can read the browser storage.
+  const workspaceStore = createWorkspaceStore({ storage: createLocalStorageWorkspaceStorage() })
+  const view = render(<App queryClient={queryClient} workspaceStore={workspaceStore} />)
+  return { ...view, workspaceStore }
+}
+
+/** Reads a root's memory from the new `leagues:workspace` envelope. */
+function storedLocation(root: string): WorkspaceLocation | undefined {
+  const raw = localStorage.getItem('leagues:workspace')
+  return raw === null ? undefined : parseWorkspaceEnvelope(raw).state.locations[root]
 }
 
 function installScannedRoot(root: string, overrides: Partial<RendererApi> = {}): RendererApi {
@@ -47,10 +64,11 @@ function treeWithMondayLeagues(root = '/root', ...folderNames: string[]): League
   })
 }
 
-function remember(root: string, day: string, folderName: string): string {
-  const stored = JSON.stringify({ kind: 'league', day, folderName })
-  localStorage.setItem(`leagues:${root}:selection`, stored)
-  return stored
+function remember(root: string, day: string, folderName: string): void {
+  localStorage.setItem(
+    `leagues:${root}:selection`,
+    JSON.stringify({ kind: 'league', day, folderName })
+  )
 }
 
 it('shows loading, then FirstRun when getRoot returns null', async () => {
@@ -474,7 +492,7 @@ it('restores the remembered league for the location after the first scan', async
 
 it('falls back to home when the remembered league is not where it was, keeping the memory', async () => {
   // Same folder name, but remembered under a different day than the tree has it.
-  const stored = remember('/root', 'tuesday', 'Trios')
+  remember('/root', 'tuesday', 'Trios')
   installScannedRoot('/root', {
     scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs', 'Trios'))
   })
@@ -483,7 +501,11 @@ it('falls back to home when the remembered league is not where it was, keeping t
 
   expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Go home' })).toHaveAttribute('aria-current', 'page')
-  expect(localStorage.getItem('leagues:/root:selection')).toBe(stored)
+  expect(storedLocation('/root')?.selection).toEqual({
+    kind: 'league',
+    day: 'tuesday',
+    folderName: 'Trios'
+  })
 })
 
 it('remembers selections and returns to Home from the title bar', async () => {
@@ -495,9 +517,11 @@ it('remembers selections and returns to Home from the title bar', async () => {
   renderApp()
   await user.click(await screen.findByRole('button', { name: 'Pairs' }))
 
-  expect(localStorage.getItem('leagues:/root:selection')).toBe(
-    JSON.stringify({ kind: 'league', day: 'monday', folderName: 'Pairs' })
-  )
+  expect(storedLocation('/root')?.selection).toEqual({
+    kind: 'league',
+    day: 'monday',
+    folderName: 'Pairs'
+  })
 
   const home = screen.getByRole('button', { name: 'Go home' })
   expect(home).not.toHaveAttribute('aria-current')
@@ -505,7 +529,7 @@ it('remembers selections and returns to Home from the title bar', async () => {
 
   expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
   expect(home).toHaveAttribute('aria-current', 'page')
-  expect(localStorage.getItem('leagues:/root:selection')).toBe(JSON.stringify({ kind: 'home' }))
+  expect(storedLocation('/root')?.selection).toEqual({ kind: 'home' })
 })
 
 it('drops the selection to home when the selected league disappears from a rescan', async () => {
@@ -526,8 +550,77 @@ it('drops the selection to home when the selected league disappears from a resca
   expect(screen.getByRole('button', { name: 'Go home' })).toHaveAttribute('aria-current', 'page')
 })
 
+it('reselects a league once it returns after a temporary disappearance from a rescan', async () => {
+  const scan = vi
+    .fn()
+    .mockResolvedValueOnce(treeWithMondayLeagues('/root', 'Pairs', 'Trios'))
+    .mockResolvedValueOnce(treeWithMondayLeagues('/root', 'Pairs'))
+    .mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs', 'Trios'))
+  installScannedRoot('/root', { scan })
+  const user = userEvent.setup()
+
+  renderApp()
+  await user.click(await screen.findByRole('button', { name: 'Trios' }))
+  expect(await screen.findByRole('heading', { name: 'Trios' })).toBeInTheDocument()
+
+  act(() => emitTreeChanged())
+  expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
+
+  act(() => emitTreeChanged())
+  expect(await screen.findByRole('heading', { name: 'Trios' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Trios' })).toHaveAttribute('aria-current', 'true')
+})
+
+it('keeps an explicit Home selection through a league disappearing and returning', async () => {
+  const scan = vi
+    .fn()
+    .mockResolvedValueOnce(treeWithMondayLeagues('/root', 'Pairs', 'Trios'))
+    .mockResolvedValueOnce(treeWithMondayLeagues('/root', 'Pairs'))
+    .mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs', 'Trios'))
+  installScannedRoot('/root', { scan })
+  const user = userEvent.setup()
+
+  renderApp()
+  await user.click(await screen.findByRole('button', { name: 'Trios' }))
+  expect(await screen.findByRole('heading', { name: 'Trios' })).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Go home' }))
+  expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
+
+  act(() => emitTreeChanged())
+  expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
+
+  act(() => emitTreeChanged())
+  expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Go home' })).toHaveAttribute('aria-current', 'page')
+})
+
+it('ignores a delayed league directory report for a league that is no longer selected', async () => {
+  installScannedRoot('/root', {
+    scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs', 'Trios'))
+  })
+  const user = userEvent.setup()
+  const { workspaceStore } = renderApp()
+
+  const status = await screen.findByRole('contentinfo', { name: 'Application status' })
+  await user.click(screen.getByRole('button', { name: 'Pairs' }))
+  expect(within(status).getByTitle('/root/monday/Pairs')).toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: 'Trios' }))
+  expect(within(status).getByTitle('/root/monday/Trios')).toBeInTheDocument()
+
+  // A directory report from the pane the user has already navigated away from.
+  act(() =>
+    workspaceStore.getState().reportLeagueDir({
+      ownerPath: '/root/monday/Pairs',
+      currentDir: '/root/monday/Pairs/2025-26'
+    })
+  )
+
+  expect(within(status).getByTitle('/root/monday/Trios')).toBeInTheDocument()
+})
+
 it('switching location restores that location’s memory without touching the other’s', async () => {
-  const storedA = remember('/a', 'monday', 'Pairs')
+  remember('/a', 'monday', 'Pairs')
   remember('/b', 'monday', 'Trios')
   localStorage.setItem('leagues:/a:collapsed-days', JSON.stringify(['monday']))
   const scan = vi
@@ -544,7 +637,11 @@ it('switching location restores that location’s memory without touching the ot
 
   expect(await screen.findByRole('heading', { name: 'Trios' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Monday' })).toHaveAttribute('aria-expanded', 'true')
-  expect(localStorage.getItem('leagues:/a:selection')).toBe(storedA)
+  expect(storedLocation('/a')?.selection).toEqual({
+    kind: 'league',
+    day: 'monday',
+    folderName: 'Pairs'
+  })
 })
 
 it('refetches a previously visited folder after switching away and back', async () => {

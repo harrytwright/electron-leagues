@@ -1,6 +1,6 @@
 import { DropdownMenu, Text } from '@cloudflare/kumo'
 import { GaugeIcon } from '@phosphor-icons/react'
-import { saveDiagnosticsEnabled } from '@renderer/lib/local-store'
+import { saveDiagnosticsEnabled } from '@renderer/lib/diagnostics-store'
 import { useDiagnosticsPreference } from '@renderer/hooks/use-diagnostics-preference'
 import { pathTail } from '@renderer/lib/path-basename'
 import { useOperationFeedback } from '@renderer/hooks/use-operation-feedback'

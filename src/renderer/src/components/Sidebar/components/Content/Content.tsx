@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Sidebar, Text, useSidebar } from '@cloudflare/kumo'
 
 import { sentenceCase } from '@renderer/lib/sentence-case'
-import { loadCollapsedDays, saveCollapsedDays } from '@renderer/lib/local-store'
+import { useWorkspace } from '@renderer/hooks/use-workspace'
 import { WEEKDAYS, type Weekday } from '@shared/weekday'
 
 import type { Props } from './interface'
@@ -27,10 +27,15 @@ function toggled(days: ReadonlySet<Weekday>, day: Weekday): Set<Weekday> {
 export function Content({ tree, selection, onSelect }: Props): React.JSX.Element {
   const { state, setOpen } = useSidebar()
 
-  // Remembered per location; App remounts this component when the location
-  // changes, so the initialiser reads the right one.
+  const setStoredCollapsedDays = useWorkspace((workspace) => workspace.setCollapsedDays)
+  const storedCollapsedDays = useWorkspace(
+    (workspace) => workspace.locations[tree.root]?.collapsedDays
+  )
+  // The visible state is local: keyboard focus may open a day without changing what is
+  // remembered, and only a click persists. App remounts this component when the location
+  // changes, so the initialiser reads the right location's memory.
   const [collapsedDays, setCollapsedDays] = useState(
-    () => new Set<Weekday>(loadCollapsedDays(tree.root))
+    () => new Set<Weekday>(storedCollapsedDays ?? [])
   )
   const daysWithLeagues = WEEKDAYS.filter((day) => tree.days[day].length > 0)
   const rail = state === 'collapsed'
@@ -76,7 +81,7 @@ export function Content({ tree, selection, onSelect }: Props): React.JSX.Element
                         tooltip={sentenceCase(day)}
                         onClick={() => {
                           if (rail) setOpen(true)
-                          else saveCollapsedDays(tree.root, [...toggled(collapsedDays, day)])
+                          else setStoredCollapsedDays([...toggled(collapsedDays, day)])
                         }}
                       >
                         {sentenceCase(day)}

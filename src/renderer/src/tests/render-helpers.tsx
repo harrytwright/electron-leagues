@@ -10,10 +10,13 @@ import { TestProviders } from './TestProviders'
 import type { QueryClient } from '@tanstack/react-query'
 import { createQueryClient } from '../lib/query-client'
 import { registerTestQueryClient } from './query-clients'
+import { createWorkspaceStore, type WorkspaceStore } from '../lib/workspace-store'
+import { createMemoryWorkspaceStorage } from './memory-workspace-storage'
 
 interface ProviderOptions {
   locationKey?: string
   queryClient?: QueryClient
+  workspaceStore?: WorkspaceStore
 }
 
 type ProviderRenderOptions = RenderOptions & ProviderOptions
@@ -24,9 +27,15 @@ function createWrapper(
 ): NonNullable<RenderOptions['wrapper']> {
   const InnerWrapper = options.wrapper
   const queryClient = registerTestQueryClient(options.queryClient ?? createQueryClient())
+  const workspaceStore =
+    options.workspaceStore ?? createWorkspaceStore({ storage: createMemoryWorkspaceStorage() })
   return function Wrapper({ children }: { children: React.ReactNode }): React.JSX.Element {
     return (
-      <TestProviders locationKey={options.locationKey} queryClient={queryClient}>
+      <TestProviders
+        locationKey={options.locationKey}
+        queryClient={queryClient}
+        workspaceStore={workspaceStore}
+      >
         {InnerWrapper ? <InnerWrapper>{children}</InnerWrapper> : children}
       </TestProviders>
     )

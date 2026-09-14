@@ -3,7 +3,7 @@ import { skipToken, useQuery, type QueryClient, type UseQueryResult } from '@tan
 import { AppProviders } from './components/AppProviders'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
 import { PaneErrorBoundary } from './components/PaneErrorBoundary'
-import type { LeaguesTree } from '@shared/tree'
+import { WorkspaceStoreProvider } from './components/WorkspaceStoreProvider'
 import { Button, Loader, Sidebar as KumoSidebar, Text } from '@cloudflare/kumo'
 import { FirstRun } from './components/FirstRun'
 import { HomeView } from './components/HomeView'
@@ -14,8 +14,9 @@ import { Toolbar } from './components/Toolbar'
 import { OperationFeedbackProvider } from './components/OperationFeedbackProvider'
 import { LocationOperationProvider } from './components/LocationOperationProvider'
 import { ipcErrorMessage } from './lib/ipc-error'
-import { loadSelection, saveSelection } from './lib/local-store'
-import { findLeague, HOME, restoreSelection, type Selection } from './lib/selection'
+import { findLeague, HOME, restoreSelection } from './lib/selection'
+import type { WorkspaceStore } from './lib/workspace-store'
+import { useWorkspace } from './hooks/use-workspace'
 import { useAppCommandHandler, useAppCommands } from './hooks/use-app-commands'
 import { useLocationOperation } from './hooks/use-location-operation'
 import { useOperationFeedback } from './hooks/use-operation-feedback'
@@ -28,16 +29,6 @@ interface ScanErrorProps {
   message: string | null
   onRetry: () => Promise<void>
   onChooseAnother: () => Promise<void>
-}
-
-interface LeagueNavigation {
-  ownerPath: string
-  currentDir: string
-}
-
-interface HomeNavigation {
-  ownerRoot: string
-  currentDir: string
 }
 
 function AppCommandHandlers(): null {
@@ -121,36 +112,23 @@ function LocationContent({ root }: { root: UseQueryResult<string | null> }): Rea
     ...treeQuery(rootPath ?? ''),
     queryFn: rootPath !== null ? treeQuery(rootPath).queryFn : skipToken
   })
-  const [seenTree, setSeenTree] = useState<LeaguesTree>()
-  const [selection, setSelection] = useState<Selection>(HOME)
-  const [leagueNavigation, setLeagueNavigation] = useState<LeagueNavigation | null>(null)
-  const [homeNavigation, setHomeNavigation] = useState<HomeNavigation | null>(null)
 
-  if (seenTree !== tree.data) {
-    setSeenTree(tree.data)
-    if (tree.data) {
-      const changedRoot = seenTree?.root !== tree.data.root
-      setSelection(
-        restoreSelection(tree.data, changedRoot ? loadSelection(tree.data.root) : selection)
-      )
-      if (changedRoot) {
-        setHomeNavigation(null)
-        setLeagueNavigation(null)
-      }
-    }
-  }
-
-  // Remember user choices without erasing a league that is temporarily missing from a scan.
-  const select = useCallback(
-    (next: Selection) => {
-      setLeagueNavigation(null)
-      // A redundant Home click keeps the mounted pane and its reported directory together.
-      if (next.kind !== 'home') setHomeNavigation(null)
-      setSelection(next)
-      if (rootPath !== null) saveSelection(rootPath, next)
-    },
-    [rootPath]
+  const setWorkspaceRoot = useWorkspace((workspace) => workspace.setRoot)
+  const select = useWorkspace((workspace) => workspace.select)
+  const reportLeagueDir = useWorkspace((workspace) => workspace.reportLeagueDir)
+  const reportHomeDir = useWorkspace((workspace) => workspace.reportHomeDir)
+  const leagueNavigation = useWorkspace((workspace) => workspace.leagueNavigation)
+  const homeNavigation = useWorkspace((workspace) => workspace.homeNavigation)
+  // The remembered selection is only ever written by an explicit select(); a league missing
+  // from one scan is never overwritten, so it reselects itself once the scan finds it again.
+  // Keyed on the displayed root rather than the store's, which follows it from an effect.
+  const remembered = useWorkspace((workspace) =>
+    rootPath !== null ? workspace.locations[rootPath]?.selection : undefined
   )
+
+  useEffect(() => {
+    setWorkspaceRoot(root.data ?? null)
+  }, [root.data, setWorkspaceRoot])
 
   const homeRoot = root.data
   const updateHomeCurrentDir = useCallback(
@@ -161,10 +139,10 @@ function LocationContent({ root }: { root: UseQueryResult<string | null> }): Rea
           currentDir.startsWith(`${homeRoot}/`) ||
           currentDir.startsWith(`${homeRoot}\\`))
       ) {
-        setHomeNavigation({ ownerRoot: homeRoot, currentDir })
+        reportHomeDir({ ownerRoot: homeRoot, currentDir })
       }
     },
-    [homeRoot]
+    [homeRoot, reportHomeDir]
   )
 
   useEffect(() => {
@@ -214,7 +192,8 @@ function LocationContent({ root }: { root: UseQueryResult<string | null> }): Rea
     )
   } else if (tree.data) {
     const scanned = tree.data
-    const selectedLeague = findLeague(scanned, selection)
+    const effectiveSelection = restoreSelection(scanned, remembered ?? null)
+    const selectedLeague = findLeague(scanned, effectiveSelection)
     const statusPath = selectedLeague
       ? leagueNavigation?.ownerPath === selectedLeague.path
         ? leagueNavigation.currentDir
@@ -235,11 +214,16 @@ function LocationContent({ root }: { root: UseQueryResult<string | null> }): Rea
       >
         <Toolbar
           root={scanned.root}
-          isHome={selection.kind === 'home'}
+          isHome={effectiveSelection.kind === 'home'}
           onHome={() => select(HOME)}
         />
         <div className="flex min-h-0 w-full flex-1">
-          <Sidebar key={scanned.root} tree={scanned} selection={selection} onSelect={select} />
+          <Sidebar
+            key={scanned.root}
+            tree={scanned}
+            selection={effectiveSelection}
+            onSelect={select}
+          />
           <main className="h-full min-w-0 flex-1 overflow-auto">
             <PaneErrorBoundary resetKeys={[selectedLeague?.path ?? scanned.root]}>
               {selectedLeague ? (
@@ -247,7 +231,7 @@ function LocationContent({ root }: { root: UseQueryResult<string | null> }): Rea
                   key={selectedLeague.path}
                   league={selectedLeague}
                   onCurrentDirChange={(currentDir) =>
-                    setLeagueNavigation({ ownerPath: selectedLeague.path, currentDir })
+                    reportLeagueDir({ ownerPath: selectedLeague.path, currentDir })
                   }
                 />
               ) : (
@@ -277,12 +261,20 @@ function LocationContent({ root }: { root: UseQueryResult<string | null> }): Rea
   )
 }
 
-function App({ queryClient }: { queryClient: QueryClient }): React.JSX.Element {
+function App({
+  queryClient,
+  workspaceStore
+}: {
+  queryClient: QueryClient
+  workspaceStore: WorkspaceStore
+}): React.JSX.Element {
   return (
     <AppProviders queryClient={queryClient}>
-      <AppErrorBoundary>
-        <AppContent />
-      </AppErrorBoundary>
+      <WorkspaceStoreProvider store={workspaceStore}>
+        <AppErrorBoundary>
+          <AppContent />
+        </AppErrorBoundary>
+      </WorkspaceStoreProvider>
     </AppProviders>
   )
 }

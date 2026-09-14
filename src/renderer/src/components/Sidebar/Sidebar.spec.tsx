@@ -2,12 +2,22 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Sidebar as KumoSidebar } from '@cloudflare/kumo'
 import { expect, it, vi, type Mock } from 'vitest'
+import type { Weekday } from '@shared/weekday'
 import type { LeaguesTree } from '@shared/tree'
 import { Sidebar } from './Sidebar'
 import { HOME, type Selection } from '../../lib/selection'
+import { createWorkspaceStore } from '../../lib/workspace-store'
 import { makeLeague, makeTree } from '../../tests/fixtures'
 import { installMockApi } from '../../tests/mock-api'
+import { createLocalStorageWorkspaceStorage } from '../../tests/local-storage-workspace-storage'
+import { parseWorkspaceEnvelope } from '../../tests/workspace-envelope'
 import { renderWithProviders } from '../../tests/render-helpers'
+
+/** Reads the collapsed days persisted for a root under the new workspace envelope. */
+function storedCollapsedDays(root: string): Weekday[] | undefined {
+  const raw = localStorage.getItem('leagues:workspace')
+  return raw === null ? undefined : parseWorkspaceEnvelope(raw).state.locations[root]?.collapsedDays
+}
 
 interface RenderSidebarOptions {
   tree?: LeaguesTree
@@ -48,6 +58,10 @@ function renderSidebar(options: RenderSidebarOptions = {}): SidebarHarness {
   const tree = options.tree ?? makeTree()
   const selection = options.selection ?? HOME
   const onSelect = vi.fn<(next: Selection) => void>()
+  // Real localStorage, like App, so legacy-key fixtures migrate and persisted assertions can
+  // read the browser storage across successive renders within one test.
+  const workspaceStore = createWorkspaceStore({ storage: createLocalStorageWorkspaceStorage() })
+  workspaceStore.getState().setRoot(tree.root)
 
   const view = renderWithProviders(
     <KumoSidebar.Provider contained defaultOpen collapsible="icon" className="flex-col">
@@ -57,7 +71,8 @@ function renderSidebar(options: RenderSidebarOptions = {}): SidebarHarness {
       <div className="flex min-h-0 flex-1">
         <Sidebar tree={tree} selection={selection} onSelect={onSelect} />
       </div>
-    </KumoSidebar.Provider>
+    </KumoSidebar.Provider>,
+    { workspaceStore }
   )
 
   return { onSelect, unmount: view.unmount }
@@ -166,7 +181,7 @@ it('collapses a day on click and remembers it for this location only', async () 
   expect(dayTrigger('Monday')).toHaveAttribute('aria-expanded', 'false')
   expect(dayRegion('Monday')).toHaveAttribute('aria-hidden', 'true')
   expect(dayTrigger('Friday')).toHaveAttribute('aria-expanded', 'true')
-  expect(localStorage.getItem('leagues:/root:collapsed-days')).toBe(JSON.stringify(['monday']))
+  expect(storedCollapsedDays('/root')).toEqual(['monday'])
 
   first.unmount()
   const second = renderSidebar({ tree: twoDayTree() })
@@ -192,13 +207,12 @@ it('expands a collapsed day for keyboard focus without changing the memory', asy
   expect(dayTrigger('Monday')).toHaveAttribute('aria-expanded', 'true')
   expect(dayRegion('Monday')).not.toHaveAttribute('inert')
   expect(screen.getByRole('button', { name: 'Monday pairs' })).toHaveFocus()
-  expect(localStorage.getItem('leagues:/root:collapsed-days')).toBe(JSON.stringify(['monday']))
 
   await user.tab()
 
   expect(dayTrigger('Monday')).toHaveAttribute('aria-expanded', 'false')
   expect(dayRegion('Monday')).toHaveAttribute('inert')
-  expect(localStorage.getItem('leagues:/root:collapsed-days')).toBe(JSON.stringify(['monday']))
+  expect(storedCollapsedDays('/root')).toEqual(['monday'])
 })
 
 it('expands the sidebar instead of toggling a day from the icon rail', async () => {
@@ -213,5 +227,5 @@ it('expands the sidebar instead of toggling a day from the icon rail', async () 
 
   expect(screen.getByRole('button', { name: /collapse sidebar/i })).toBeInTheDocument()
   expect(dayTrigger('Monday')).toHaveAttribute('aria-expanded', 'false')
-  expect(localStorage.getItem('leagues:/root:collapsed-days')).toBe(JSON.stringify(['monday']))
+  expect(storedCollapsedDays('/root')).toEqual(['monday'])
 })

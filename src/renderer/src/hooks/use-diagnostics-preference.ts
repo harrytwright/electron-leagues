@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from 'react'
-import { loadDiagnosticsEnabled, saveDiagnosticsEnabled } from '@renderer/lib/local-store'
+import { loadDiagnosticsEnabled, saveDiagnosticsEnabled } from '@renderer/lib/diagnostics-store'
 import { useAppCommandHandler } from './use-app-commands'
 
 function subscribe(listener: () => void): () => void {
