@@ -13,7 +13,9 @@ const execFileAsync = promisify(execFile);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const pluginRoot = path.resolve(here, "..");
 const repoRoot = path.resolve(pluginRoot, "../../..");
-const oxlintBin = path.join(repoRoot, "node_modules/.bin/oxlint");
+// Run oxlint's Node launcher through the current Node binary: the `.bin` shim is a `.cmd`
+// file on Windows and cannot be spawned directly.
+const oxlintLauncher = path.join(repoRoot, "node_modules/oxlint/bin/oxlint");
 const fixturesRoot = path.join(pluginRoot, "fixtures");
 // Named rules.oxlintrc.json, not .oxlintrc.json: oxlint auto-discovers any nested ".oxlintrc.json"
 // during a plain repo-wide run and lets it override the root config's ignorePatterns for this
@@ -36,7 +38,8 @@ type OxlintReport = {
 /** Run the real oxlint binary and parse its JSON report, whichever exit path it takes. */
 async function runOxlint(configPath: string, targetPath: string): Promise<OxlintReport> {
 	try {
-		const { stdout } = await execFileAsync(oxlintBin, [
+		const { stdout } = await execFileAsync(process.execPath, [
+			oxlintLauncher,
 			"-c",
 			configPath,
 			"--format",
