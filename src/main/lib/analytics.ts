@@ -21,6 +21,7 @@ export function initAnalytics(
   if (sentryDSN) {
     Sentry.init({
       dsn: sentryDSN,
+      release: __LEAGUES_RELEASE__,
       environment: app.isPackaged ? 'production' : 'development'
     })
     Sentry.setUser({ id: machineId })

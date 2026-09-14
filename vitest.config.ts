@@ -8,6 +8,7 @@ export default defineConfig({
   test: {
     projects: [
       {
+        define: { __LEAGUES_RELEASE__: JSON.stringify('leagues@test') },
         test: {
           name: 'node',
           include: ['src/{main,shared,preload}/**/*.spec.ts', 'tools/**/*.spec.ts'],

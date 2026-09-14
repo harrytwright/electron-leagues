@@ -4,3 +4,6 @@ interface ImportMetaEnv {
   readonly MAIN_VITE_SENTRY_DSN?: string
   readonly MAIN_VITE_POSTHOG_KEY?: string
 }
+
+/** The Sentry release name, injected by electron.vite.config.ts so it matches the uploaded maps. */
+declare const __LEAGUES_RELEASE__: string
