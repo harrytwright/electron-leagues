@@ -1,8 +1,10 @@
 import { constants } from 'node:fs'
 import { copyFile, lstat, readdir, realpath, stat } from 'node:fs/promises'
-import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { join, relative, resolve } from 'node:path'
+import { isSingleSegment } from '../../shared/path-segment'
 import type { WorkflowId } from '../../shared/workflows'
-import { isMissing, UserFacingError } from './fs-errors'
+import { isAlreadyExists, isMissing, UserFacingError } from './fs-errors'
+import { relativeInside } from './paths'
 
 export type FileKind = 'file' | 'directory' | 'symlink' | 'other'
 
@@ -145,14 +147,7 @@ export const WORKFLOW_HANDLERS: Record<WorkflowId, Rule> = {
 }
 
 function safeDirectName(relativePath: string): boolean {
-  return (
-    relativePath.length > 0 &&
-    basename(relativePath) === relativePath &&
-    !isAbsolute(relativePath) &&
-    relativePath !== '.' &&
-    relativePath !== '..' &&
-    !relativePath.includes(sep)
-  )
+  return isSingleSegment(relativePath)
 }
 
 async function assertDirectRegularFile(base: string, relativePath: string): Promise<string> {
@@ -163,21 +158,13 @@ async function assertDirectRegularFile(base: string, relativePath: string): Prom
     realpath(path),
     lstat(path)
   ])
-  const rel = relative(realBase, realFile)
-  if (rel === '' || isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) {
+  if (relativeInside(realBase, realFile) === null) {
     throw new UserFacingError('A workflow source points outside its folder')
   }
   if (!info.isFile() || info.isSymbolicLink()) {
     throw new UserFacingError(`“${relativePath}” is no longer a regular file`)
   }
   return path
-}
-
-// oxlint-disable-next-line anti-slop/no-unknown-parameters -- catch clauses provide unknown at this filesystem boundary
-function isAlreadyExists(err: unknown): boolean {
-  if (!(err instanceof Error)) return false
-  // SAFETY: Node filesystem failures are Error instances with an optional code.
-  return (err as NodeJS.ErrnoException).code === 'EEXIST'
 }
 
 /** Apply a plan once. COPYFILE_EXCL makes stale metadata and copy races skip, never overwrite. */

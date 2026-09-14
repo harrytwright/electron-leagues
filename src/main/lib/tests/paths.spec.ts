@@ -4,6 +4,7 @@ import { join, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { toUserFacing, UserFacingError } from '../fs-errors'
 import {
+  assertAbsolutePath,
   assertInsideRoot,
   classifyTrashTarget,
   isInsideRoot,
@@ -41,6 +42,15 @@ describe('isInsideRoot', () => {
 
   test('a folder whose name merely starts with two dots is still inside', () => {
     expect(isInsideRoot(root, join(root, '..dots'))).toBe(true)
+  })
+})
+
+describe('assertAbsolutePath', () => {
+  test('accepts absolute paths and preserves the caller message for relative paths', () => {
+    expect(() => assertAbsolutePath(root, 'Invalid location request')).not.toThrow()
+    expect(() => assertAbsolutePath('leagues', 'Invalid location request')).toThrow(
+      new UserFacingError('Invalid location request')
+    )
   })
 })
 

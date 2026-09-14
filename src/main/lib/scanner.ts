@@ -5,10 +5,10 @@ import { compareSeasonNames, parseSeasonName, type SeasonName } from '../../shar
 import type { DirEntry, FileEntry, LeagueNode, LeaguesTree, SeasonNode } from '../../shared/tree'
 import { isWeekday, WEEKDAYS, type Weekday } from '../../shared/weekday'
 import { isMissing } from './fs-errors'
+import { META_FILE, serialiseLeagueMeta } from './league-meta'
+import { archivePathFor } from './paths'
 
 export type { DirEntry, FileEntry, LeagueNode, LeaguesTree, SeasonNode }
-
-const META_FILE = 'meta.json'
 
 function visible(name: string): boolean {
   return !name.startsWith('.')
@@ -115,7 +115,7 @@ async function scanLeague(
   }
   seasonFolders.sort((a, b) => compareSeasonNames(a.season, b.season))
 
-  const archivePath = join(root, '_archives', leagueDir.name)
+  const archivePath = archivePathFor(root, leagueDir.name)
   const archiveEntries = await listEntries(archivePath)
   const archivedSeasons = sortSeasonNames(
     archiveEntries.filter((e) => e.kind === 'folder').map((e) => e.name)
@@ -131,7 +131,7 @@ async function scanLeague(
   })
 
   if (heal) {
-    const serialised = JSON.stringify(meta, null, 2) + '\n'
+    const serialised = serialiseLeagueMeta(meta)
     if (serialised !== existing.raw) {
       try {
         await writeFile(metaPath, serialised, 'utf8')

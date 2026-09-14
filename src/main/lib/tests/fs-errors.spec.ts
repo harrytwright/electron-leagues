@@ -1,17 +1,29 @@
 import { describe, expect, test } from 'vitest'
-import { isMissing, isPermissionDenied, toUserFacing, UserFacingError } from '../fs-errors'
+import {
+  errorCode,
+  isAlreadyExists,
+  isMissing,
+  isPermissionDenied,
+  toUserFacing,
+  UserFacingError
+} from '../fs-errors'
 
 function fsError(code: string): NodeJS.ErrnoException {
   return Object.assign(new Error(`${code}: boom`), { code })
 }
 
 describe('fs error classification', () => {
-  test('recognises missing and permission errors by code', () => {
+  test('recognises filesystem errors by code', () => {
+    expect(errorCode(fsError('EEXIST'))).toBe('EEXIST')
+    expect(isAlreadyExists(fsError('EEXIST'))).toBe(true)
+    expect(isAlreadyExists(fsError('ENOENT'))).toBe(false)
     expect(isMissing(fsError('ENOENT'))).toBe(true)
     expect(isMissing(fsError('ENOTDIR'))).toBe(true)
     expect(isMissing(fsError('EACCES'))).toBe(false)
     expect(isPermissionDenied(fsError('EACCES'))).toBe(true)
     expect(isPermissionDenied(fsError('EPERM'))).toBe(true)
+    expect(isPermissionDenied({ code: 'EPERM' })).toBe(false)
+    expect(isAlreadyExists({ code: 'EEXIST' })).toBe(false)
     expect(isMissing(new Error('plain'))).toBe(false)
     expect(isMissing('not an error')).toBe(false)
   })

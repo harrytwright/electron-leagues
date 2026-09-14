@@ -6,15 +6,6 @@ import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import icon from '../../resources/icon.png?asset'
-import { parseSeasonCreateRequest } from './lib/season-create-request'
-import {
-  parseArchiveZipRequest,
-  parseImportFilesRequest,
-  parseLeagueCreateRequest,
-  parseRootSetRequest,
-  parsePathRequest,
-  parseSeasonSyncRequest
-} from './lib/operation-requests'
 import { updateDiagnosticsMenu } from './lib/diagnostics-menu'
 import {
   buildAppMenuTemplate,
@@ -32,8 +23,15 @@ import {
   syncSeasonWithTemplates,
   zipArchivedSeasons
 } from './lib/operations'
-import { isMissing, toUserFacing, UserFacingError } from './lib/fs-errors'
-import { assertInsideRoot, planTrash, resolveImportDestination } from './lib/paths'
+import { isMissing, toUserFacing } from './lib/fs-errors'
+import { registerInvokeHandler, type InvokeListener, type IpcErrorReporter } from './lib/ipc-handle'
+import type { InvokeName } from '../shared/ipc'
+import {
+  assertAbsolutePath,
+  assertInsideRoot,
+  planTrash,
+  resolveImportDestination
+} from './lib/paths'
 import { pruneRecents, seedRecents, updateRecents, type RootProbe } from './lib/recents'
 import { listDirEntries, scanLeaguesRoot } from './lib/scanner'
 import * as Sentry from '@sentry/electron/main'
@@ -160,24 +158,11 @@ async function recentRoots(): Promise<string[]> {
   return alive
 }
 
-/** ipcMain.handle, but unexpected failures are reported to Sentry before rejecting the invoke. */
-function handle<Args extends unknown[], Result>(
-  channel: string,
-  listener: (event: Electron.IpcMainInvokeEvent, ...args: Args) => Result
-): void {
-  ipcMain.handle(channel, async (event, ...args) => {
-    try {
-      // SAFETY: ipcMain delivers whatever the renderer invoked with; the
-      // listener's parameter types document the expected shape, exactly as
-      // when these listeners were passed to ipcMain.handle directly.
-      return await listener(event, ...(args as Args))
-    } catch (err) {
-      if (!(err instanceof UserFacingError)) {
-        Sentry.captureException(err, { tags: { ipc_channel: channel } })
-      }
-      throw err
-    }
-  })
+const reportIpcError: IpcErrorReporter = (error, channel) =>
+  Sentry.captureException(error, { tags: { ipc_channel: channel } })
+
+function register<Name extends InvokeName>(name: Name, listener: InvokeListener<Name>): void {
+  registerInvokeHandler(ipcMain, name, listener, reportIpcError)
 }
 
 function diagnosticsMenuItem(): Electron.MenuItem | undefined {
@@ -195,14 +180,14 @@ function registerIpc(): void {
   })
   // The renderer's Sentry SDK inherits its config from the main process,
   // so only PostHog needs anything over IPC.
-  handle('analytics:config', () => ({
+  register('getAnalyticsConfig', () => ({
     apiKey: posthogKey() ?? null,
     distinctId: machineId()
   }))
 
-  handle('root:get', () => currentRoot() ?? null)
+  register('getRoot', () => currentRoot() ?? null)
 
-  handle('root:choose', async (_e, mode: 'select' | 'init') => {
+  register('chooseRoot', async (_e, mode) => {
     if (!mainWindow) return null
     const result = await dialog.showOpenDialog(mainWindow, {
       title:
@@ -222,9 +207,9 @@ function registerIpc(): void {
     return root
   })
 
-  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
-  handle('root:set', async (_e, input: unknown) => {
-    const root = resolve(parseRootSetRequest(input))
+  register('setRoot', async (_e, path) => {
+    assertAbsolutePath(path, 'Invalid location request')
+    const root = resolve(path)
     const probe = await probeRoot(root)
     if (probe !== 'dir') {
       if (probe === 'missing') {
@@ -241,24 +226,25 @@ function registerIpc(): void {
     return root
   })
 
-  handle('root:recents', () => recentRoots())
+  register('recentRoots', () => recentRoots())
 
-  handle('root:repair', () => repairReservedLocations(requireRoot(), bundledTemplatesDir()))
+  register('repairLocation', () => repairReservedLocations(requireRoot(), bundledTemplatesDir()))
 
-  handle('root:forget', () => {
+  register('forgetRoot', () => {
     envRootOverride = undefined
     store.delete('rootPath')
     stopWatching()
   })
 
-  handle('leagues:scan', async () => {
+  register('scan', async () => {
     const root = currentRoot()
     if (!root) return null
     if (!watcher) watchRoot(root)
     return scanLeaguesRoot(root, { heal: true })
   })
 
-  handle('dir:list', async (_e, path: string) => {
+  register('listDir', async (_e, path) => {
+    assertAbsolutePath(path, 'Invalid file path')
     const root = requireRoot()
     try {
       return await listDirEntries(await assertInsideRoot(root, path))
@@ -267,17 +253,13 @@ function registerIpc(): void {
     }
   })
 
-  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
-  handle('league:create', async (_e, dayInput: unknown, nameInput: unknown) => {
-    const { day, name } = parseLeagueCreateRequest({ day: dayInput, name: nameInput })
+  register('createLeague', async (_e, day, name) => {
     const path = await createLeague(requireRoot(), day, name)
     capture('league_created', { day })
     return path
   })
 
-  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
-  handle('season:create', async (_e, input: unknown) => {
-    const opts = parseSeasonCreateRequest(input)
+  register('createSeason', async (_e, opts) => {
     const result = await createSeason({
       ...opts,
       root: requireRoot()
@@ -286,9 +268,7 @@ function registerIpc(): void {
     return result
   })
 
-  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
-  handle('season:sync-templates', async (_e, input: unknown) => {
-    const opts = parseSeasonSyncRequest(input)
+  register('syncSeasonTemplates', async (_e, opts) => {
     const result = await syncSeasonWithTemplates({
       ...opts,
       root: requireRoot()
@@ -297,18 +277,14 @@ function registerIpc(): void {
     return result
   })
 
-  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
-  handle('archive:zip', async (_e, leagueInput: unknown, seasonsInput: unknown) => {
-    const { leagueFolder, seasons } = parseArchiveZipRequest({
-      leagueFolder: leagueInput,
-      seasons: seasonsInput
-    })
+  register('zipArchive', async (_e, leagueFolder, seasons) => {
     const zips = await zipArchivedSeasons(requireRoot(), leagueFolder, seasons)
     capture('archive_zipped', { count: seasons.length })
     return zips
   })
 
-  handle('folder:trash', async (_e, path: string) => {
+  register('trashFolder', async (_e, path) => {
+    assertAbsolutePath(path, 'Invalid file path')
     const plan = await planTrash(requireRoot(), path)
     for (const target of plan.paths) {
       await shell.trashItem(target)
@@ -316,7 +292,7 @@ function registerIpc(): void {
     capture(plan.kind === 'league' ? 'league_deleted' : 'season_deleted')
   })
 
-  handle('files:pick', async () => {
+  register('pickFiles', async () => {
     if (!mainWindow) return []
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile', 'multiSelections']
@@ -324,9 +300,8 @@ function registerIpc(): void {
     return result.canceled ? [] : result.filePaths
   })
 
-  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
-  handle('file:open', async (_e, input: unknown) => {
-    const requested = parsePathRequest(input)
+  register('openFile', async (_e, requested) => {
+    assertAbsolutePath(requested, 'Invalid file path')
     let path: string
     try {
       path = await assertInsideRoot(requireRoot(), requested)
@@ -338,9 +313,8 @@ function registerIpc(): void {
     return shell.openPath(path)
   })
 
-  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
-  handle('file:reveal', async (_e, input: unknown) => {
-    const requested = parsePathRequest(input)
+  register('revealFile', async (_e, requested) => {
+    assertAbsolutePath(requested, 'Invalid file path')
     let path: string
     try {
       // Location menus reveal the selected root itself; other file actions still require a descendant.
@@ -352,9 +326,8 @@ function registerIpc(): void {
     shell.showItemInFolder(path)
   })
 
-  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- IPC is an untrusted process boundary
-  handle('file:import', async (_e, destInput: unknown, sourcesInput: unknown) => {
-    const { dest, sources } = parseImportFilesRequest({ dest: destInput, sources: sourcesInput })
+  register('importFiles', async (_e, dest, sources) => {
+    assertAbsolutePath(dest, 'Invalid file import request')
     const copied = await importFiles(await resolveImportDestination(requireRoot(), dest), sources)
     capture('files_imported', { count: copied.length })
     return copied

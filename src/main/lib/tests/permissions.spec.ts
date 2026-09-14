@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import { PERMISSION_DENIED_PREFIX } from '../../../shared/permissions'
-import { assertReadable, isPermissionError } from '../permissions'
+import { assertReadable } from '../permissions'
 
 let root: string
 
@@ -14,20 +14,6 @@ beforeEach(async () => {
 afterEach(async () => {
   await chmod(root, 0o700).catch(() => {})
   await rm(root, { recursive: true, force: true })
-})
-
-describe('isPermissionError', () => {
-  test.each(['EPERM', 'EACCES'])('recognises %s errors', (code) => {
-    expect(isPermissionError(Object.assign(new Error(code), { code }))).toBe(true)
-  })
-
-  test('rejects an Error without an errno code', () => {
-    expect(isPermissionError(new Error('failure'))).toBe(false)
-  })
-
-  test('rejects non-errors', () => {
-    expect(isPermissionError({ code: 'EPERM' })).toBe(false)
-  })
 })
 
 describe('assertReadable', () => {

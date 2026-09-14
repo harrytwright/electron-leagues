@@ -10,17 +10,19 @@ import {
   realpath,
   rename,
   rm,
-  stat,
-  writeFile
+  stat
 } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
 import { healMeta, parseLeagueMetaInput } from '../../shared/meta'
 import { compareSeasonNames, parseSeasonName, type SeasonName } from '../../shared/season'
 import { sanitiseFolderName } from '../../shared/sanitise'
 import type { Weekday } from '../../shared/weekday'
-import type { SeasonCreateRequest } from '../../shared/season-create'
-import { toUserFacing, UserFacingError } from './fs-errors'
+import type { SeasonCreateRequest, SeasonSyncRequest } from '../../shared/season-create'
+import { isAlreadyExists, toUserFacing, UserFacingError } from './fs-errors'
+import { META_FILE, writeLeagueMeta } from './league-meta'
 import {
+  ARCHIVES_FOLDER,
+  archivePathFor,
   assertInsideRoot,
   assertLeagueFolderName,
   assertRealLayout,
@@ -36,7 +38,7 @@ import {
   type CopyExecutionResult
 } from './template-workflows'
 
-const SPECIAL_FOLDERS = ['_templates', '_shared', '_archives'] as const
+const SPECIAL_FOLDERS = ['_templates', '_shared', ARCHIVES_FOLDER] as const
 const REQUIRED_TEMPLATES = ['Rules.docx', 'Sign-In Sheet.docx'] as const
 const REQUIRED_TEMPLATE_NAMES: ReadonlySet<string> = new Set(REQUIRED_TEMPLATES)
 
@@ -205,7 +207,7 @@ export async function createLeague(
     liveSeasons: [],
     archivedSeasons: []
   })
-  await writeFile(join(path, 'meta.json'), JSON.stringify(meta, null, 2) + '\n', 'utf8')
+  await writeLeagueMeta(path, meta)
   return path
 }
 
@@ -280,21 +282,19 @@ async function createSeasonUnlocked(
 
   let archived: string | null = null
   const after = await liveSeasonsOf(leaguePath)
+  const archivePath = archivePathFor(opts.root, opts.leagueFolder)
   if (opts.archiveOldest && after.length > 2) {
     const oldest = after[0]
-    await moveDir(
-      join(leaguePath, oldest.name),
-      join(opts.root, '_archives', opts.leagueFolder, oldest.name)
-    )
+    await assertRealLayout(opts.root, archivePath, join(ARCHIVES_FOLDER, opts.leagueFolder))
+    await moveDir(join(leaguePath, oldest.name), join(archivePath, oldest.name))
     archived = oldest.name
   }
 
-  const archivePath = join(opts.root, '_archives', opts.leagueFolder)
   const archivedSeasons = (await readdir(archivePath, { withFileTypes: true }).catch(() => []))
     .filter((e) => e.isDirectory())
     .map((e) => e.name)
 
-  const metaPath = join(leaguePath, 'meta.json')
+  const metaPath = join(leaguePath, META_FILE)
   const existing = await readFile(metaPath, 'utf8')
     .then((raw) => parseLeagueMetaInput(JSON.parse(raw)))
     .catch(() => null)
@@ -306,16 +306,13 @@ async function createSeasonUnlocked(
   })
   const created = meta.seasons.find((s) => s.name === season.name)
   if (created && !created.createdAt) created.createdAt = new Date().toISOString()
-  await writeFile(metaPath, JSON.stringify(meta, null, 2) + '\n', 'utf8')
+  await writeLeagueMeta(leaguePath, meta)
 
   return { seasonPath, archived }
 }
 
-export interface SyncSeasonOptions {
+export interface SyncSeasonOptions extends SeasonSyncRequest {
   root: string
-  day: Weekday
-  leagueFolder: string
-  seasonName: string
 }
 
 /** Fill one existing live season root with missing templates. */
@@ -347,8 +344,8 @@ export async function zipArchivedSeasons(
     return season
   })
   if (seasons.length === 0) return []
-  const archiveDir = join(root, '_archives', leagueFolder)
-  await assertRealLayout(root, archiveDir, join('_archives', leagueFolder))
+  const archiveDir = archivePathFor(root, leagueFolder)
+  await assertRealLayout(root, archiveDir, join(ARCHIVES_FOLDER, leagueFolder))
   // Validate the entire batch first so a later invalid selection cannot leave earlier zip writes behind.
   const plans = await Promise.all(
     seasons.map(async (season) => {
@@ -423,9 +420,7 @@ export async function importFiles(dest: string, sources: string[]): Promise<stri
         copied.push(target)
         break
       } catch (err) {
-        // SAFETY: Node filesystem errors are Errors carrying an optional string code.
-        const code = err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined
-        if (code !== 'EEXIST') throw err
+        if (!isAlreadyExists(err)) throw err
         suffix += 1
       }
     }

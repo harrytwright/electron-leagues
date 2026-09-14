@@ -1,14 +1,25 @@
 import { lstat, realpath, stat } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { isSingleSegment } from '../../shared/path-segment'
 import { parseSeasonName } from '../../shared/season'
 import { isWeekday, type Weekday } from '../../shared/weekday'
 import { isMissing, toUserFacing, UserFacingError } from './fs-errors'
 
-function relativeInside(root: string, target: string): string | null {
+export const ARCHIVES_FOLDER = '_archives'
+
+export function relativeInside(root: string, target: string): string | null {
   const rel = relative(resolve(root), resolve(target))
   if (rel === '' || isAbsolute(rel)) return null
   if (rel === '..' || rel.startsWith(`..${sep}`)) return null
   return rel
+}
+
+export function archivePathFor(root: string, leagueFolder: string): string {
+  return join(root, ARCHIVES_FOLDER, leagueFolder)
+}
+
+export function assertAbsolutePath(path: string, message: string): void {
+  if (!isAbsolute(path)) throw new UserFacingError(message)
 }
 
 /** True when `target` is strictly below `root` (the root itself does not count). */
@@ -116,15 +127,9 @@ export async function resolveNewLiveSeasonRoot(
 
 /** Validate an import destination by both its requested and real on-disk layout. */
 export async function resolveImportDestination(root: string, destination: string): Promise<string> {
-  const resolvedRoot = resolve(root)
   const resolved = resolve(destination)
-  const requested = relative(resolvedRoot, resolved)
-  if (
-    !requested ||
-    isAbsolute(requested) ||
-    requested === '..' ||
-    requested.startsWith(`..${sep}`)
-  ) {
+  const requested = relativeInside(root, resolved)
+  if (requested === null) {
     throw new UserFacingError('Invalid import destination')
   }
 
@@ -133,9 +138,9 @@ export async function resolveImportDestination(root: string, destination: string
   const isManaged = first === '_shared' || first === '_templates'
   // The UI imports at any depth outside archives, so layout validation pins only the day and league.
   const isLive = isWeekday(first) && parts.length >= 2
-  const isOtherRootItem = parts.length === 1 && first !== '_archives' && !isWeekday(first)
+  const isOtherRootItem = parts.length === 1 && first !== ARCHIVES_FOLDER && !isWeekday(first)
   // Archives and incomplete weekday paths are browseable, but imports must target a user-managed pane.
-  if (first === '_archives' || (!isManaged && !isLive && !isOtherRootItem)) {
+  if (first === ARCHIVES_FOLDER || (!isManaged && !isLive && !isOtherRootItem)) {
     throw new UserFacingError('Invalid import destination')
   }
   return assertRealLayout(root, resolved, requested)
@@ -143,7 +148,7 @@ export async function resolveImportDestination(root: string, destination: string
 
 /** Reject path syntax where an exact league folder name is required. */
 export function assertLeagueFolderName(name: string): void {
-  if (!name || name === '.' || name === '..' || basename(name) !== name) {
+  if (!isSingleSegment(name)) {
     throw new UserFacingError('Invalid league folder')
   }
 }
@@ -220,7 +225,7 @@ export async function planTrash(root: string, target: string): Promise<TrashPlan
   if (kind === 'league') {
     // Archived seasons live beside the league under _archives; leaving them
     // behind would orphan them.
-    const archive = join(root, '_archives', basename(resolved))
+    const archive = archivePathFor(root, basename(resolved))
     const present = await stat(archive).then(
       () => true,
       (err) => {

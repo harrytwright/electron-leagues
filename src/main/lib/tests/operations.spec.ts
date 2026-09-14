@@ -25,7 +25,6 @@ import {
   zipArchivedSeasons
 } from '../operations'
 import { UserFacingError } from '../fs-errors'
-import { parseSeasonCreateRequest } from '../season-create-request'
 import { FILE_RULES } from '../template-workflows'
 import { resolveNewLiveSeasonRoot } from '../paths'
 
@@ -181,53 +180,6 @@ describe('createLeague', () => {
 })
 
 describe('createSeason', () => {
-  test('rejects an unknown workflow at the IPC boundary', () => {
-    expect(() =>
-      parseSeasonCreateRequest({
-        day: 'monday',
-        leagueFolder: 'Pairs',
-        seasonName: '2026-27',
-        source: 'unknown',
-        archiveOldest: false
-      })
-    ).toThrow(new UserFacingError('Unknown season workflow'))
-  })
-
-  test('rejects a day that escapes the root at the IPC boundary', () => {
-    expect(() =>
-      parseSeasonCreateRequest({
-        day: '..',
-        leagueFolder: 'Pairs',
-        seasonName: '2026-27',
-        source: 'empty',
-        archiveOldest: false
-      })
-    ).toThrow(new UserFacingError('Invalid league day'))
-  })
-
-  test.each([
-    null,
-    {},
-    {
-      day: 'monday',
-      leagueFolder: 42,
-      seasonName: '2026-27',
-      source: 'empty',
-      archiveOldest: false
-    },
-    {
-      day: 'monday',
-      leagueFolder: 'Pairs',
-      seasonName: '2026-27',
-      source: 'empty',
-      archiveOldest: 'yes'
-    }
-  ])('rejects an invalid IPC request', (input) => {
-    expect(() => parseSeasonCreateRequest(input)).toThrow(
-      new UserFacingError('Invalid season request')
-    )
-  })
-
   test('rejects a league folder that escapes its weekday', async () => {
     await expect(
       createSeason({
@@ -348,6 +300,60 @@ describe('createSeason', () => {
     expect(await readFile(join(root, '_archives/Mens Triples/2023-24/Rules.docx'), 'utf8')).toBe(
       'old'
     )
+  })
+
+  test('does not move a live season through an archive league symlink', async () => {
+    await makeTree(root, {
+      _archives: null,
+      'monday/Mens Triples/2022-23/Rules.docx': 'oldest',
+      'monday/Mens Triples/2023-24/Rules.docx': 'older',
+      'monday/Mens Triples/2024-25/Rules.docx': 'previous'
+    })
+    await symlink(outside, join(root, '_archives/Mens Triples'))
+
+    await expect(
+      createSeason({
+        root,
+        day: 'monday',
+        leagueFolder: 'Mens Triples',
+        seasonName: '2025-26',
+        source: 'empty',
+        archiveOldest: true
+      })
+    ).rejects.toEqual(new UserFacingError('Path is outside the leagues folder'))
+    expect((await readdir(join(root, 'monday/Mens Triples'))).sort()).toEqual([
+      '2022-23',
+      '2023-24',
+      '2024-25',
+      '2025-26'
+    ])
+    expect(await readdir(outside)).toEqual([])
+  })
+
+  test('does not move a live season when the archives folder is an outside symlink', async () => {
+    await makeTree(root, {
+      'monday/Mens Triples/2022-23/Rules.docx': 'oldest',
+      'monday/Mens Triples/2023-24/Rules.docx': 'older',
+      'monday/Mens Triples/2024-25/Rules.docx': 'previous'
+    })
+    await symlink(outside, join(root, '_archives'))
+
+    await expect(
+      createSeason({
+        root,
+        day: 'monday',
+        leagueFolder: 'Mens Triples',
+        seasonName: '2025-26',
+        source: 'empty',
+        archiveOldest: true
+      })
+    ).rejects.toEqual(new UserFacingError('Reserved folder “_archives” can’t be a symbolic link'))
+    expect((await readdir(join(root, 'monday/Mens Triples'))).sort()).toEqual([
+      '2022-23',
+      '2023-24',
+      '2024-25'
+    ])
+    expect(await readdir(outside)).toEqual([])
   })
 
   test('leaves three seasons live when archiving is declined', async () => {
