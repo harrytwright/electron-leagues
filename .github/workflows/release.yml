@@ -1,0 +1,124 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  # Runs first and cheaply: a mismatched version or a missing secret should fail
+  # before we spend ~15 minutes of matrix build and notarisation time.
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag matches package.json version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME implies version $tag but package.json says $pkg."
+            echo "::error::Use 'npm run version' so the bump commit and the tag stay in step."
+            exit 1
+          fi
+          echo "Releasing $pkg"
+
+      - name: Required secrets are present
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          missing=()
+          for name in SENTRY_AUTH_TOKEN CSC_LINK CSC_KEY_PASSWORD \
+                      APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing repository secrets: ${missing[*]}"
+            echo "::error::A release without these ships unsigned or without sourcemaps; see README."
+            exit 1
+          fi
+
+  checks:
+    needs: verify
+    uses: ./.github/workflows/checks.yml
+
+  # Each leg publishes into the same draft release (electron-builder.yml sets
+  # releaseType: draft). Nothing is visible - and no update feed is live - until
+  # the promote job below flips it, so a failed leg can never leave users with a
+  # latest.yml pointing at an installer that was never uploaded.
+  build:
+    name: build (${{ matrix.os }})
+    needs: [verify, checks]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: --linux
+          - os: macos-latest
+            platform: --mac
+          - os: windows-latest
+            platform: --win
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+
+      # notarytool wants the App Store Connect key as a file on disk. Written
+      # under RUNNER_TEMP rather than the workspace so it can never be swept
+      # into the packaged app.
+      - name: Stage App Store Connect API key
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        env:
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          key_path="$RUNNER_TEMP/asc-api-key.p8"
+          printf '%s' "$APPLE_API_KEY_BASE64" | base64 --decode > "$key_path"
+          echo "APPLE_API_KEY=$key_path" >> "$GITHUB_ENV"
+
+      # Typechecks, bundles, and uploads sourcemaps to Sentry under the release
+      # name gobowling-leagues@<version>.
+      - name: Build
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+        run: npm run build
+
+      - name: Package and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: npx electron-builder ${{ matrix.platform }} --publish always
+
+  promote:
+    name: promote release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Publish the draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false
