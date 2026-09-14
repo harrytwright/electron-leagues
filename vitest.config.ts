@@ -10,7 +10,7 @@ export default defineConfig({
       {
         test: {
           name: 'node',
-          include: ['src/{main,shared,preload}/**/*.spec.ts'],
+          include: ['src/{main,shared,preload}/**/*.spec.ts', 'tools/**/*.spec.ts'],
           environment: 'node'
         }
       },
