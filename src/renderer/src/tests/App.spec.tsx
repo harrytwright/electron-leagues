@@ -533,6 +533,42 @@ it('switching location restores that location’s memory without touching the ot
   expect(localStorage.getItem('leagues:/a:selection')).toBe(storedA)
 })
 
+it('refetches a previously visited folder after switching away and back', async () => {
+  const seasonPath = '/a/monday/Pairs/2025-26'
+  const scan = vi
+    .fn()
+    .mockResolvedValueOnce(treeWithMondayLeagues('/a', 'Pairs'))
+    .mockResolvedValueOnce(treeWithMondayLeagues('/b', 'Trios'))
+    .mockResolvedValueOnce(treeWithMondayLeagues('/a', 'Pairs'))
+  const listDir = vi.fn().mockResolvedValue([])
+  installMockApi({
+    scan,
+    listDir,
+    recentRoots: vi.fn().mockResolvedValue(['/a', '/b'])
+  })
+  const user = userEvent.setup()
+  renderApp()
+
+  await user.click(await screen.findByRole('button', { name: 'Pairs' }))
+  await user.dblClick(screen.getByRole('row', { name: /^2025-26/ }))
+  await waitFor(() =>
+    expect(listDir.mock.calls.filter(([path]) => path === seasonPath)).toHaveLength(1)
+  )
+
+  await user.click(screen.getByRole('button', { name: 'Location: a' }))
+  let menu = await screen.findByRole('menu')
+  await user.click(await within(menu).findByRole('menuitemradio', { name: /^b/ }))
+  await screen.findByRole('heading', { name: 'Home' })
+  menu = await screen.findByRole('menu')
+  fireEvent.click(await within(menu).findByRole('menuitemradio', { name: /^a/ }))
+  await screen.findByRole('heading', { name: 'Pairs' })
+  await user.dblClick(screen.getByRole('row', { name: /^2025-26/ }))
+
+  await waitFor(() =>
+    expect(listDir.mock.calls.filter(([path]) => path === seasonPath)).toHaveLength(2)
+  )
+})
+
 it('unsubscribes from tree changes on unmount', async () => {
   const unsubscribe = vi.fn()
   installMockApi({

@@ -1,8 +1,9 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
-import { afterEach } from 'vitest'
+import { afterEach, beforeEach } from 'vitest'
 import { onlineManager } from '@tanstack/react-query'
 import { clearTestQueryClients } from './query-clients'
+import { installMockApi } from './mock-api'
 
 let systemDark = false
 
@@ -97,6 +98,10 @@ export function setSystemDark(dark: boolean): void {
   systemDark = dark
   darkQueryList.emitChange()
 }
+
+beforeEach(() => {
+  installMockApi()
+})
 
 afterEach(() => {
   cleanup()

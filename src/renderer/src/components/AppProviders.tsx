@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { ToastProvider } from '@cloudflare/kumo'
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
+import { QueryRefreshProvider } from './QueryRefreshProvider'
 
 const ReactQueryDevtools = import.meta.env.DEV
   ? lazy(() =>
@@ -20,7 +21,7 @@ export function AppProviders({
   return (
     <ToastProvider>
       <QueryClientProvider client={queryClient}>
-        {children}
+        <QueryRefreshProvider>{children}</QueryRefreshProvider>
         {ReactQueryDevtools ? (
           <Suspense fallback={null}>
             <ReactQueryDevtools initialIsOpen={false} />

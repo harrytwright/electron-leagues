@@ -12,6 +12,10 @@ export function emitTreeChanged(): void {
   for (const listener of treeChangedListeners) listener()
 }
 
+export function treeChangedListenerCount(): number {
+  return treeChangedListeners.length
+}
+
 export function emitAppCommand(event: AppCommandEvent): void {
   for (const listener of appCommandListeners) listener(event)
 }

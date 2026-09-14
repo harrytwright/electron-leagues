@@ -205,7 +205,8 @@ it('resets navigation, filter, and selection when tabs switch', async () => {
   expect(screen.getByRole('textbox', { name: 'Filter loaded files' })).toHaveValue('')
   expect(screen.getByRole('row', { name: /^Admin/ })).toHaveAttribute('aria-selected', 'false')
   expect(onCurrentDirChange).toHaveBeenLastCalledWith('/root/_shared')
-  expect(api.listDir).toHaveBeenLastCalledWith('/root/_shared')
+  expect(api.listDir).toHaveBeenCalledWith('/root/_shared')
+  expect(api.listDir).toHaveBeenCalledTimes(3)
 })
 
 it('imports into the currently navigated Home directory', async () => {

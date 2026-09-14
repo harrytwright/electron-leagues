@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { QueryClient } from '@tanstack/react-query'
+import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { AppProviders } from './components/AppProviders'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
 import { PaneErrorBoundary } from './components/PaneErrorBoundary'
@@ -20,6 +20,7 @@ import { useAppCommandHandler, useAppCommands } from './hooks/use-app-commands'
 import { useLocationOperation, type RefreshResult } from './hooks/use-location-operation'
 import { useOperationFeedback } from './hooks/use-operation-feedback'
 import { useDiagnosticsCommands } from './hooks/use-diagnostics-preference'
+import { DIR_QUERY_PREFIX } from './queries/dir'
 
 type Phase = 'loading' | 'no-root' | 'ready' | 'error'
 type ScanResult = { status: 'error'; message: string } | { status: Exclude<RefreshResult, 'error'> }
@@ -103,6 +104,7 @@ function ScanError({ message, onRetry, onChooseAnother }: ScanErrorProps): React
 function AppContent(): React.JSX.Element {
   useAppCommands()
   useDiagnosticsCommands()
+  const queryClient = useQueryClient()
   const [phase, setPhase] = useState<Phase>('loading')
   const [tree, setTree] = useState<LeaguesTree | null>(null)
   const [scanError, setScanError] = useState<string | null>(null)
@@ -125,6 +127,8 @@ function AppContent(): React.JSX.Element {
         setTree(scanned)
         setPhase('ready')
         if (restoredRoot.current !== scanned.root) {
+          // Phase 2 adapter: removed in phase 3a when the location coordinator owns root changes.
+          void queryClient.invalidateQueries({ queryKey: DIR_QUERY_PREFIX, refetchType: 'none' })
           restoredRoot.current = scanned.root
           setHomeNavigation(null)
           setLeagueNavigation(null)
@@ -147,7 +151,7 @@ function AppContent(): React.JSX.Element {
       setPhase('error')
       return { status: 'error', message }
     }
-  }, [])
+  }, [queryClient])
 
   const refresh = useCallback(async (): Promise<RefreshResult> => {
     return (await scanLocation()).status
@@ -166,11 +170,13 @@ function AppContent(): React.JSX.Element {
 
   const forgetAndRestart = useCallback(async () => {
     await window.api.forgetRoot()
+    // Phase 2 adapter: removed in phase 3a when the location coordinator owns root changes.
+    await queryClient.invalidateQueries({ queryKey: DIR_QUERY_PREFIX, refetchType: 'none' })
     restoredRoot.current = null
     setScanError(null)
     setTree(null)
     setPhase('no-root')
-  }, [])
+  }, [queryClient])
 
   // Remembered per location, but only what the user chose: a league that is
   // merely missing from one scan (sync lag, mid-rename) must not erase it.
