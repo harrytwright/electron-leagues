@@ -39,7 +39,7 @@ P=$(mktemp); cat >"$P" <<'EOF'
 <goal, repo + key paths, constraints ("don't touch X"), non-goals, proof expected, output shape>
 EOF
 command codex exec --yolo -C <repo> \
-  -c model_reasoning_effort="high" -m gpt-6-astra \
+  -c model_reasoning_effort="high" -m <model> \
   -o /tmp/codex-last.md - <"$P" 2>/dev/null
 ```
 
@@ -50,6 +50,8 @@ command codex exec --yolo -C <repo> \
 - long runs: Bash run_in_background, read `-o` file on exit; don't kill quiet runs <30 min
 - parallel independent tasks OK: separate repos/dirs, separate `-o` files
 - outside a git repo add `--skip-git-repo-check`
+- `<model>`: Check before use. Default offer to use `gpt-6-astra` for heavy workloads and idea validation, but be
+  aware of the cost. Use `gpt-5.6-sol` for pure code implementation
 
 Follow-up fixes — cheaper than fresh runs, keeps context. `resume` has no `-C`/`--yolo`: run from the repo dir, spell the long flag:
 

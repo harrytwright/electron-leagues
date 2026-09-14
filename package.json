@@ -1,5 +1,5 @@
 {
-  "name": "gobowling-leagues",
+  "name": "@gobowling/leagues",
   "version": "0.1.0",
   "description": "Organiser for bowling league documents stored in OneDrive",
   "main": "./out/main/index.js",
