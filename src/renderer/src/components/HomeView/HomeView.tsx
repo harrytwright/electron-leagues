@@ -12,13 +12,7 @@ function isHomeTab(value: string): value is HomeTab {
   return value === 'shared' || value === 'templates' || value === 'other'
 }
 
-export function HomeView({
-  tree,
-  onSelect,
-  onChanged,
-  onRefresh,
-  onCurrentDirChange
-}: Props): React.JSX.Element {
+export function HomeView({ tree, onSelect, onCurrentDirChange }: Props): React.JSX.Element {
   const [creating, setCreating] = useState(false)
   const [active, setActive] = useState<HomeTab>('shared')
   const tabs = [
@@ -78,8 +72,6 @@ export function HomeView({
           baseDir={tree.sharedPath}
           label="Shared documents"
           present={tree.hasShared}
-          onChanged={onChanged}
-          onRefresh={onRefresh}
           onCurrentDirChange={onCurrentDirChange}
         />
       ) : activeTab === 'templates' ? (
@@ -88,15 +80,12 @@ export function HomeView({
           baseDir={tree.templatesPath}
           label="Templates"
           present={tree.hasTemplates}
-          onChanged={onChanged}
-          onRefresh={onRefresh}
           onCurrentDirChange={onCurrentDirChange}
         />
       ) : (
         <OtherPane
           entries={tree.unrecognisedRootEntries}
           root={tree.root}
-          onRefresh={onRefresh}
           onCurrentDirChange={onCurrentDirChange}
         />
       )}
@@ -106,10 +95,7 @@ export function HomeView({
         onOpenChange={setCreating}
         onCreated={(day, folderName) => {
           setCreating(false)
-          void (async () => {
-            await onRefresh()
-            onSelect({ kind: 'league', day, folderName })
-          })()
+          onSelect({ kind: 'league', day, folderName })
         }}
       />
     </div>

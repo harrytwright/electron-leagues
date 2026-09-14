@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react'
 import { useCrumbs } from '@renderer/hooks/use-crumbs'
 import { useDirListing } from '@renderer/hooks/use-dir-listing'
 import { useImportFiles } from '@renderer/hooks/use-import-files'
+import { useQueryRefresh } from '@renderer/hooks/use-query-refresh'
 import { useTreeFolders } from '@renderer/hooks/use-tree-folders'
 import { ImportFilesButton } from '@renderer/components/FileBrowser/components/ImportFilesButton'
 import { CrumbTrail } from '@renderer/components/CrumbTrail'
@@ -14,8 +15,6 @@ export function FolderPane({
   baseDir,
   label,
   present,
-  onChanged,
-  onRefresh,
   onCurrentDirChange
 }: Props): React.JSX.Element {
   const trail = useCrumbs(baseDir, onCurrentDirChange)
@@ -23,10 +22,8 @@ export function FolderPane({
   const tree = useTreeFolders(trail.currentDir)
   const [sort, setSort] = useState<Sort>({ column: 'name', direction: 'ascending' })
   const pendingFocusDir = useRef<string | null>(null)
-  const importer = useImportFiles(present ? trail.currentDir : undefined, async () => {
-    listing.reload()
-    await onChanged()
-  })
+  const importer = useImportFiles(present ? trail.currentDir : undefined)
+  const coordinator = useQueryRefresh()
 
   const consumeFocusRequest = useCallback((currentDir: string): boolean => {
     if (pendingFocusDir.current !== currentDir) return false
@@ -77,7 +74,7 @@ export function FolderPane({
           rows={[]}
           metadataColumn="modified"
           readOnly={false}
-          onRefresh={() => void onRefresh()}
+          onRefresh={() => void coordinator.refresh()}
           onNavigate={() => {}}
           emptyTitle={`No ${label.toLocaleLowerCase()} folder`}
           emptyDescription="Use Repair location… in the location menu to restore this folder."

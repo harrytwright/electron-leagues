@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useKumoToastManager } from '@cloudflare/kumo'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
-import { useOperationFeedback } from './use-operation-feedback'
+import { useWriteOperation } from './use-write-operation'
+
+interface ImportVariables {
+  destination: string
+  paths: string[]
+}
 
 export interface FileImporter {
   importing: boolean
@@ -12,15 +17,16 @@ export interface FileImporter {
 }
 
 /** Shared import flow (toasts, busy state) for drop targets and "Add files…" buttons. */
-export function useImportFiles(
-  dest: string | undefined,
-  onImported?: () => void | Promise<void>
-): FileImporter {
+export function useImportFiles(dest: string | undefined): FileImporter {
   const [importing, setImporting] = useState(false)
   const running = useRef(false)
   const lifecycle = useRef({ dest, generation: 0, mounted: true })
   const { add } = useKumoToastManager()
-  const feedback = useOperationFeedback()
+  const operation = useWriteOperation({
+    label: ({ paths }: ImportVariables) =>
+      `Importing ${paths.length} file${paths.length === 1 ? '' : 's'}`,
+    write: ({ destination, paths }) => window.api.importFiles(destination, paths)
+  })
 
   useEffect(() => {
     const current = lifecycle.current
@@ -46,32 +52,25 @@ export function useImportFiles(
     setImporting(true)
     const destination = dest
     const generation = lifecycle.current.generation
-    const operationId = feedback.begin(
-      `Importing ${usable.length} file${usable.length === 1 ? '' : 's'}`
-    )
     try {
       // Main reports what it actually copied — count that, not the request.
-      const copied = await window.api.importFiles(destination, usable)
+      const outcome = await operation.run({ destination, paths: usable })
+      const copied = outcome.result
       const message =
         copied.length === usable.length
           ? `Imported ${copied.length} file${copied.length === 1 ? '' : 's'}`
           : `Imported ${copied.length} of ${usable.length} files`
-      // A navigated-away pane no longer owns this destination; don't refresh its replacement.
-      if (lifecycle.current.generation === generation) {
-        try {
-          await onImported?.()
-        } catch (caught) {
-          const refreshMessage = `${message}, but the folder could not be refreshed: ${ipcErrorMessage(caught)}`
-          add({ title: refreshMessage, variant: 'error' })
-          return
-        }
+      if (outcome.status === 'refresh-failed' && lifecycle.current.generation === generation) {
+        add({
+          title: `${message}, but the folder could not be refreshed: ${outcome.refreshError}`,
+          variant: 'error'
+        })
+        return
       }
       add({ title: message, variant: 'success' })
     } catch (caught) {
       add({ title: ipcErrorMessage(caught), variant: 'error' })
     } finally {
-      // Completion follows refresh so a successful write is never reported as a plain failure.
-      feedback.finish(operationId)
       running.current = false
       setImporting(false)
     }

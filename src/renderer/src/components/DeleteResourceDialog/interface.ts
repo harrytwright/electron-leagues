@@ -11,5 +11,4 @@ export interface Props {
   target: DeleteTarget | null
   open: boolean
   onOpenChange: (open: boolean) => void
-  onDeleted: (target: DeleteTarget) => void | Promise<void>
 }

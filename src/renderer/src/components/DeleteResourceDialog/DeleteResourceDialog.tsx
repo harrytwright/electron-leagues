@@ -4,7 +4,7 @@ import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { trashLabel } from '@renderer/lib/trash-label'
 import { TaskDialog } from '../TaskDialog'
 import type { Props } from './interface'
-import { useOperationFeedback } from '@renderer/hooks/use-operation-feedback'
+import { useWriteOperation } from '@renderer/hooks/use-write-operation'
 
 /** Names on disk may be NFD (macOS) and display names may carry stray spaces. */
 function comparable(value: string): string {
@@ -16,12 +16,7 @@ function comparable(value: string): string {
  * but honest about what happens: the folder moves to the OS trash rather than
  * being destroyed, and unmanaged files inside it go along.
  */
-export function DeleteResourceDialog({
-  target,
-  open,
-  onOpenChange,
-  onDeleted
-}: Props): React.JSX.Element {
+export function DeleteResourceDialog({ target, open, onOpenChange }: Props): React.JSX.Element {
   const [typed, setTyped] = useState('')
   const [busy, setBusy] = useState(false)
   const [moved, setMoved] = useState(false)
@@ -32,8 +27,11 @@ export function DeleteResourceDialog({
   // is reported globally so closing it cannot hide the result of a disk write.
   const submission = useRef(0)
   const pendingErrorToast = useRef<string | null>(null)
-  const feedback = useOperationFeedback()
   const { add } = useKumoToastManager()
+  const operation = useWriteOperation({
+    label: (deleting: NonNullable<Props['target']>) => `Deleting ${deleting.name}`,
+    write: (deleting) => window.api.trashFolder(deleting.path)
+  })
   // Kumo may replace this callback as its manager updates; that is not a dialog
   // lifecycle boundary and must not reset confirmation state.
   const addToast = useRef(add)
@@ -72,19 +70,16 @@ export function DeleteResourceDialog({
     if (!target || !confirmed || busy || moved) return
     const ticket = submission.current
     const movedMessage = `Moved “${target.name}” to the ${trash}`
-    const operationId = feedback.begin(`Deleting ${target.name}`)
     pendingErrorToast.current = null
     setBusy(true)
     setError(null)
     try {
-      await window.api.trashFolder(target.path)
+      const outcome = await operation.run(target)
       // The target is already gone after this point, so retrying would turn a
       // refresh problem into a misleading second delete failure.
       if (submission.current === ticket) setMoved(true)
-      try {
-        await onDeleted(target)
-      } catch (caught) {
-        const message = `${movedMessage}, but the folder could not be refreshed: ${ipcErrorMessage(caught)}`
+      if (outcome.status === 'refresh-failed') {
+        const message = `${movedMessage}, but the folder could not be refreshed: ${outcome.refreshError}`
         if (submission.current === ticket) {
           pendingErrorToast.current = message
           setError(message)
@@ -106,8 +101,6 @@ export function DeleteResourceDialog({
         add({ title: `Couldn’t delete “${target.name}”: ${message}`, variant: 'error' })
       }
     } finally {
-      // Completion follows refresh so a successful move is never reported as a plain failure.
-      feedback.finish(operationId)
       if (submission.current === ticket) setBusy(false)
     }
   }

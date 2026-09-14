@@ -5,6 +5,7 @@ import { isWeekday, WEEKDAYS, type Weekday } from '@shared/weekday'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { pathBasename } from '@renderer/lib/path-basename'
 import { sentenceCase } from '@renderer/lib/sentence-case'
+import { useWriteOperation } from '@renderer/hooks/use-write-operation'
 import { TaskDialog } from '../TaskDialog'
 import type { Props } from './interface'
 
@@ -12,6 +13,11 @@ const DAY_ITEMS = WEEKDAYS.map((weekday) => ({
   value: weekday,
   label: sentenceCase(weekday)
 }))
+
+interface CreateLeagueVariables {
+  day: Weekday
+  name: string
+}
 
 export function NewLeagueDialog({ open, onOpenChange, onCreated }: Props): React.JSX.Element {
   const [day, setDay] = useState<Weekday>('monday')
@@ -22,6 +28,11 @@ export function NewLeagueDialog({ open, onOpenChange, onCreated }: Props): React
   // Bumped on every open so a create left pending across close/reopen can
   // never write its stale outcome onto the fresh form.
   const submission = useRef(0)
+  const operation = useWriteOperation({
+    label: () => 'Creating league',
+    write: ({ day: selectedDay, name: leagueName }: CreateLeagueVariables) =>
+      window.api.createLeague(selectedDay, leagueName)
+  })
 
   useEffect(() => {
     if (!open) return
@@ -49,12 +60,20 @@ export function NewLeagueDialog({ open, onOpenChange, onCreated }: Props): React
     setBusy(true)
     setError(null)
     try {
-      const createdPath = await window.api.createLeague(day, name)
+      const outcome = await operation.run({ day, name })
       if (submission.current !== ticket) return
+      if (outcome.status === 'refresh-failed') {
+        setError(
+          `Created “${name.trim()}”, but the leagues folder could not be refreshed: ${outcome.refreshError}`
+        )
+        setBusy(false)
+        nameRef.current?.focus()
+        return
+      }
       setBusy(false)
       // Main owns the real folder name (normalisation, collisions) — read it
       // back from the created path rather than trusting our local guess.
-      onCreated(day, pathBasename(createdPath) || folderName)
+      onCreated(day, pathBasename(outcome.result) || folderName)
     } catch (caught) {
       if (submission.current !== ticket) return
       setError(ipcErrorMessage(caught))

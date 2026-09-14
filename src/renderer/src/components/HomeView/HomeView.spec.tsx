@@ -1,4 +1,5 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
+import { useQuery } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import { HomeView } from './index'
@@ -6,22 +7,19 @@ import { makeDirEntry, makeTree } from '../../tests/fixtures'
 import { installMockApi } from '../../tests/mock-api'
 import { renderWithProviders } from '../../tests/render-helpers'
 import { revealLabel } from '../../lib/reveal-label'
+import { createQueryClient } from '../../lib/query-client'
+import { ROOT_QUERY_KEY } from '../../queries/root'
+import { treeQuery, treeQueryKey } from '../../queries/tree'
 
-function renderHome(
-  tree = makeTree(),
-  onCurrentDirChange = vi.fn(),
-  onChanged = vi.fn(),
-  onSelect = vi.fn()
-): void {
+function renderHome(tree = makeTree(), onCurrentDirChange = vi.fn(), onSelect = vi.fn()): void {
   renderWithProviders(
-    <HomeView
-      tree={tree}
-      onSelect={onSelect}
-      onChanged={onChanged}
-      onRefresh={onChanged}
-      onCurrentDirChange={onCurrentDirChange}
-    />
+    <HomeView tree={tree} onSelect={onSelect} onCurrentDirChange={onCurrentDirChange} />
   )
+}
+
+function ActiveTree(): null {
+  useQuery(treeQuery('/root'))
+  return null
 }
 
 it('starts on one full-height Shared documents browser and lazily opens Templates', async () => {
@@ -228,13 +226,28 @@ it('imports into the currently navigated Home directory', async () => {
 })
 
 it('creates a league, then selects it only after the rescan', async () => {
+  let finishScan!: () => void
   const api = installMockApi({
-    createLeague: vi.fn().mockResolvedValue('/root/monday/Summer pairs')
+    createLeague: vi.fn().mockResolvedValue('/root/monday/Summer pairs'),
+    scan: vi.fn(
+      () =>
+        new Promise<Awaited<ReturnType<typeof window.api.scan>>>((resolve) => {
+          finishScan = () => resolve(makeTree())
+        })
+    )
   })
-  const onChanged = vi.fn()
   const onSelect = vi.fn()
+  const queryClient = createQueryClient()
+  queryClient.setQueryData(ROOT_QUERY_KEY, '/root')
+  queryClient.setQueryData(treeQueryKey('/root'), makeTree())
   const user = userEvent.setup()
-  renderHome(makeTree(), vi.fn(), onChanged, onSelect)
+  renderWithProviders(
+    <>
+      <ActiveTree />
+      <HomeView tree={makeTree()} onSelect={onSelect} onCurrentDirChange={vi.fn()} />
+    </>,
+    { queryClient }
+  )
 
   await user.click(screen.getByRole('button', { name: 'New league…' }))
   expect(screen.getByRole('dialog', { name: 'New league' })).toBeInTheDocument()
@@ -242,13 +255,13 @@ it('creates a league, then selects it only after the rescan', async () => {
   await user.click(screen.getByRole('button', { name: 'Create league' }))
 
   expect(api.createLeague).toHaveBeenCalledWith('monday', 'Summer pairs')
-  await waitFor(() => {
-    expect(onChanged).toHaveBeenCalledTimes(1)
-    expect(onSelect).toHaveBeenCalledWith({
-      kind: 'league',
-      day: 'monday',
-      folderName: 'Summer pairs'
-    })
+  await waitFor(() => expect(api.scan).toHaveBeenCalledOnce())
+  expect(onSelect).not.toHaveBeenCalled()
+
+  await act(async () => finishScan())
+  expect(onSelect).toHaveBeenCalledWith({
+    kind: 'league',
+    day: 'monday',
+    folderName: 'Summer pairs'
   })
-  expect(onChanged.mock.invocationCallOrder[0]).toBeLessThan(onSelect.mock.invocationCallOrder[0])
 })

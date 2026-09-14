@@ -1,12 +1,16 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { useQuery } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import type { DirEntry, LeagueNode, SeasonNode } from '@shared/tree'
 import { LeagueView } from './index'
 import { revealLabel } from '../../lib/reveal-label'
-import { makeDirEntry, makeLeague } from '../../tests/fixtures'
+import { makeDirEntry, makeLeague, makeTree } from '../../tests/fixtures'
 import { emitTreeChanged, installMockApi } from '../../tests/mock-api'
 import { renderWithProviders } from '../../tests/render-helpers'
+import { createQueryClient } from '../../lib/query-client'
+import { ROOT_QUERY_KEY } from '../../queries/root'
+import { treeQuery, treeQueryKey } from '../../queries/tree'
 
 const LEAGUE_PATH = '/root/monday/Mixed triples'
 const ARCHIVE_PATH = '/root/_archives/Mixed triples'
@@ -46,20 +50,8 @@ const ARCHIVE_LISTING = {
   ]
 }
 
-function renderLeague(
-  league: LeagueNode = fullLeague(),
-  onCurrentDirChange = vi.fn()
-): ReturnType<typeof vi.fn> {
-  const onChanged = vi.fn()
-  renderWithProviders(
-    <LeagueView
-      league={league}
-      onChanged={onChanged}
-      onRefresh={onChanged}
-      onCurrentDirChange={onCurrentDirChange}
-    />
-  )
-  return onChanged
+function renderLeague(league: LeagueNode = fullLeague(), onCurrentDirChange = vi.fn()): void {
+  renderWithProviders(<LeagueView league={league} onCurrentDirChange={onCurrentDirChange} />)
 }
 
 async function openRowMenu(
@@ -75,6 +67,24 @@ function dropZone(): HTMLElement {
   const zone = table.closest<HTMLElement>('[data-file-drop-target]')
   if (!zone) throw new Error('No drop zone around the table')
   return zone
+}
+
+function ActiveTree(): null {
+  useQuery(treeQuery('/root'))
+  return null
+}
+
+function renderLeagueWithActiveTree(league: LeagueNode = fullLeague()): void {
+  const queryClient = createQueryClient()
+  queryClient.setQueryData(ROOT_QUERY_KEY, '/root')
+  queryClient.setQueryData(treeQueryKey('/root'), makeTree())
+  renderWithProviders(
+    <>
+      <ActiveTree />
+      <LeagueView league={league} onCurrentDirChange={vi.fn()} />
+    </>,
+    { queryClient }
+  )
 }
 
 it('shows the league header with its running state', () => {
@@ -107,21 +117,12 @@ it('shows the archive row for zipped-only archives and hides it when empty', () 
   const view = renderWithProviders(
     <LeagueView
       league={makeLeague({ archivedSeasons: [], archiveItemCount: 1 })}
-      onChanged={vi.fn()}
-      onRefresh={vi.fn()}
       onCurrentDirChange={vi.fn()}
     />
   )
   expect(screen.getByRole('row', { name: /Archive/ })).toHaveTextContent('1 item')
 
-  view.rerender(
-    <LeagueView
-      league={makeLeague()}
-      onChanged={vi.fn()}
-      onRefresh={vi.fn()}
-      onCurrentDirChange={vi.fn()}
-    />
-  )
+  view.rerender(<LeagueView league={makeLeague()} onCurrentDirChange={vi.fn()} />)
   expect(screen.queryByRole('row', { name: /^Archive/ })).not.toBeInTheDocument()
 })
 
@@ -312,6 +313,7 @@ it('opens the new-season dialog from the header', async () => {
 
 it('syncs missing templates only from a live season root and refreshes both views', async () => {
   const api = installMockApi({
+    scan: vi.fn().mockResolvedValue(makeTree()),
     listDir: vi.fn(
       listingFor({
         [`${LEAGUE_PATH}/2025-26`]: [
@@ -325,7 +327,7 @@ it('syncs missing templates only from a live season root and refreshes both view
     })
   })
   const user = userEvent.setup()
-  const onChanged = renderLeague()
+  renderLeagueWithActiveTree()
 
   expect(screen.queryByRole('menuitem', { name: 'Sync with templates' })).not.toBeInTheDocument()
   await user.dblClick(screen.getByRole('row', { name: /^2025-26/ }))
@@ -338,7 +340,8 @@ it('syncs missing templates only from a live season root and refreshes both view
     leagueFolder: 'Mixed triples',
     seasonName: '2025-26'
   })
-  await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
+  await waitFor(() => expect(api.listDir).toHaveBeenCalledTimes(2))
+  expect(api.scan).toHaveBeenCalledOnce()
   expect(api.listDir).toHaveBeenCalledTimes(2)
   expect(await screen.findByText('Added 1 template')).toBeInTheDocument()
 })
@@ -355,7 +358,7 @@ it('disables template sync while pending and reports errors', async () => {
     )
   })
   const user = userEvent.setup()
-  const onChanged = renderLeague()
+  renderLeague()
 
   await user.dblClick(screen.getByRole('row', { name: /^2025-26/ }))
   await screen.findByText('This folder is empty')
@@ -370,39 +373,33 @@ it('disables template sync while pending and reports errors', async () => {
 
   expect(await screen.findByText('Templates locked')).toBeInTheDocument()
   expect(api.syncSeasonTemplates).toHaveBeenCalledOnce()
-  expect(onChanged).not.toHaveBeenCalled()
+  expect(api.listDir).toHaveBeenCalledOnce()
+  expect(api.scan).not.toHaveBeenCalled()
 })
 
 it('keeps template sync pending through refresh and names both outcomes when refresh fails', async () => {
   let rejectRefresh!: (reason: Error) => void
   const api = installMockApi({
     listDir: vi.fn(listingFor({ [`${LEAGUE_PATH}/2025-26`]: [] })),
+    scan: vi.fn(
+      () =>
+        new Promise<Awaited<ReturnType<typeof window.api.scan>>>((_resolve, reject) => {
+          rejectRefresh = reject
+        })
+    ),
     syncSeasonTemplates: vi.fn().mockResolvedValue({
       added: ['Sign-In Sheet.docx'],
       skipped: ['Rules.docx']
     })
   })
-  const onChanged = vi.fn(
-    () =>
-      new Promise<void>((_resolve, reject) => {
-        rejectRefresh = reject
-      })
-  )
   const user = userEvent.setup()
-  renderWithProviders(
-    <LeagueView
-      league={fullLeague()}
-      onChanged={onChanged}
-      onRefresh={vi.fn()}
-      onCurrentDirChange={vi.fn()}
-    />
-  )
+  renderLeagueWithActiveTree()
 
   await user.dblClick(screen.getByRole('row', { name: '2025-26 Active' }))
   await screen.findByText('This folder is empty')
   await user.click(screen.getByRole('button', { name: 'League actions' }))
   await user.click(await screen.findByRole('menuitem', { name: 'Sync with templates' }))
-  await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
+  await waitFor(() => expect(api.scan).toHaveBeenCalledOnce())
 
   await user.click(screen.getByRole('button', { name: 'League actions' }))
   expect(await screen.findByRole('menuitem', { name: 'Syncing templates…' })).toHaveAttribute(
@@ -455,7 +452,7 @@ it('imports picked files into the folder being viewed', async () => {
     pickFiles: vi.fn().mockResolvedValue(['/tmp/a.pdf'])
   })
   const user = userEvent.setup()
-  const onChanged = renderLeague()
+  renderLeague()
 
   await user.click(screen.getByRole('button', { name: 'Add files…' }))
   await waitFor(() => expect(api.importFiles).toHaveBeenCalledWith(LEAGUE_PATH, ['/tmp/a.pdf']))
@@ -467,7 +464,7 @@ it('imports picked files into the folder being viewed', async () => {
   await waitFor(() =>
     expect(api.importFiles).toHaveBeenCalledWith(`${LEAGUE_PATH}/2025-26`, ['/tmp/a.pdf'])
   )
-  expect(onChanged).toHaveBeenCalledTimes(2)
+  expect(api.importFiles).toHaveBeenCalledTimes(2)
 })
 
 it('drops files into the folder being viewed, but never into the archive', async () => {
@@ -521,11 +518,12 @@ it('keeps the archive read-only at every depth', async () => {
 it('offers to zip archived seasons, once at a time, and reports the outcome', async () => {
   let finish!: (zips: string[]) => void
   const api = installMockApi({
+    scan: vi.fn().mockResolvedValue(makeTree()),
     listDir: vi.fn(listingFor(ARCHIVE_LISTING)),
     zipArchive: vi.fn(() => new Promise<string[]>((resolve) => (finish = resolve)))
   })
   const user = userEvent.setup()
-  const onChanged = renderLeague()
+  renderLeagueWithActiveTree()
 
   await user.dblClick(screen.getByRole('row', { name: /^Archive/ }))
   await screen.findByRole('row', { name: /^2023-24/ })
@@ -545,7 +543,8 @@ it('offers to zip archived seasons, once at a time, and reports the outcome', as
   await user.keyboard('{Escape}')
   finish([`${ARCHIVE_PATH}/2023-24.zip`])
 
-  await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
+  await waitFor(() => expect(api.listDir).toHaveBeenCalledTimes(2))
+  expect(api.scan).toHaveBeenCalledOnce()
   expect(api.zipArchive).toHaveBeenCalledTimes(1)
   expect(await screen.findByText('Zipped 2023-24')).toBeInTheDocument()
 
@@ -557,29 +556,22 @@ it('keeps zipping pending through refresh and names both outcomes when refresh f
   let rejectRefresh!: (reason: Error) => void
   const api = installMockApi({
     listDir: vi.fn(listingFor(ARCHIVE_LISTING)),
+    scan: vi.fn(
+      () =>
+        new Promise<Awaited<ReturnType<typeof window.api.scan>>>((_resolve, reject) => {
+          rejectRefresh = reject
+        })
+    ),
     zipArchive: vi.fn().mockResolvedValue([`${ARCHIVE_PATH}/2023-24.zip`])
   })
-  const onChanged = vi.fn(
-    () =>
-      new Promise<void>((_resolve, reject) => {
-        rejectRefresh = reject
-      })
-  )
   const user = userEvent.setup()
-  renderWithProviders(
-    <LeagueView
-      league={fullLeague()}
-      onChanged={onChanged}
-      onRefresh={vi.fn()}
-      onCurrentDirChange={vi.fn()}
-    />
-  )
+  renderLeagueWithActiveTree()
 
   await user.dblClick(screen.getByRole('row', { name: 'Archive Read-only' }))
   await screen.findByRole('row', { name: '2023-24' })
   const menu = await openRowMenu(user, '2023-24')
   await user.click(within(menu).getByRole('menuitem', { name: 'Zip season' }))
-  await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
+  await waitFor(() => expect(api.scan).toHaveBeenCalledOnce())
 
   expect(screen.getByRole('row', { name: '2023-24 Zipping…' })).toHaveTextContent('Zipping…')
   rejectRefresh(new Error('Scan failed'))
@@ -594,7 +586,7 @@ it('keeps zipping pending through refresh and names both outcomes when refresh f
 })
 
 it('shows an error toast when zipping fails', async () => {
-  installMockApi({
+  const api = installMockApi({
     listDir: vi.fn(listingFor(ARCHIVE_LISTING)),
     zipArchive: vi
       .fn()
@@ -603,7 +595,7 @@ it('shows an error toast when zipping fails', async () => {
       )
   })
   const user = userEvent.setup()
-  const onChanged = renderLeague()
+  renderLeague()
 
   await user.dblClick(screen.getByRole('row', { name: /^Archive/ }))
   await screen.findByRole('row', { name: /^2023-24/ })
@@ -611,13 +603,14 @@ it('shows an error toast when zipping fails', async () => {
   await user.click(within(menu).getByRole('menuitem', { name: 'Zip season' }))
 
   expect(await screen.findByText('Archive is locked')).toBeInTheDocument()
-  expect(onChanged).not.toHaveBeenCalled()
+  expect(api.listDir).toHaveBeenCalledOnce()
+  expect(api.scan).not.toHaveBeenCalled()
 })
 
 it('deletes a season only after its name is typed', async () => {
   const api = installMockApi()
   const user = userEvent.setup()
-  const onChanged = renderLeague()
+  renderLeague()
 
   const menu = await openRowMenu(user, '2024-25')
   await user.click(within(menu).getByRole('menuitem', { name: 'Delete season…' }))
@@ -629,14 +622,13 @@ it('deletes a season only after its name is typed', async () => {
   await user.click(confirm)
 
   expect(api.trashFolder).toHaveBeenCalledWith(`${LEAGUE_PATH}/2024-25`)
-  await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
   expect(await screen.findByText(/Moved “2024-25” to the/)).toBeInTheDocument()
 })
 
 it('deletes the league from the header menu, warning about archives', async () => {
   const api = installMockApi()
   const user = userEvent.setup()
-  const onChanged = renderLeague()
+  renderLeague()
 
   await user.click(screen.getByRole('button', { name: 'League actions' }))
   await user.click(await screen.findByRole('menuitem', { name: 'Delete league…' }))
@@ -647,7 +639,7 @@ it('deletes the league from the header menu, warning about archives', async () =
   await user.click(within(dialog).getByRole('button', { name: 'Delete league' }))
 
   expect(api.trashFolder).toHaveBeenCalledWith(LEAGUE_PATH)
-  await waitFor(() => expect(onChanged).toHaveBeenCalledOnce())
+  expect(await screen.findByText(/Moved “Mixed triples” to the/)).toBeInTheDocument()
 })
 
 it('reveals the folder being viewed from the header menu', async () => {

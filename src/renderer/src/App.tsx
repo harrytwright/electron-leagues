@@ -140,12 +140,6 @@ function LocationContent({ root }: { root: UseQueryResult<string | null> }): Rea
     }
   }
 
-  const refreshAfterWrite = useCallback(
-    () => coordinator.refresh({ throwOnError: true }),
-    [coordinator]
-  )
-  const refreshForReading = useCallback(() => coordinator.refresh(), [coordinator])
-
   // Remember user choices without erasing a league that is temporarily missing from a scan.
   const select = useCallback(
     (next: Selection) => {
@@ -252,8 +246,6 @@ function LocationContent({ root }: { root: UseQueryResult<string | null> }): Rea
                 <LeagueView
                   key={selectedLeague.path}
                   league={selectedLeague}
-                  onChanged={refreshAfterWrite}
-                  onRefresh={refreshForReading}
                   onCurrentDirChange={(currentDir) =>
                     setLeagueNavigation({ ownerPath: selectedLeague.path, currentDir })
                   }
@@ -263,8 +255,6 @@ function LocationContent({ root }: { root: UseQueryResult<string | null> }): Rea
                   key={scanned.root}
                   tree={scanned}
                   onSelect={select}
-                  onChanged={refreshAfterWrite}
-                  onRefresh={refreshForReading}
                   onCurrentDirChange={updateHomeCurrentDir}
                 />
               )}

@@ -3,17 +3,14 @@ import { CrumbTrail } from '@renderer/components/CrumbTrail'
 import { DirectoryBrowser } from '@renderer/components/DirectoryBrowser'
 import { useCrumbs } from '@renderer/hooks/use-crumbs'
 import { useDirListing } from '@renderer/hooks/use-dir-listing'
+import { useQueryRefresh } from '@renderer/hooks/use-query-refresh'
 import type { Props } from './interface'
 
-export function OtherPane({
-  entries,
-  root,
-  onRefresh,
-  onCurrentDirChange
-}: Props): React.JSX.Element {
+export function OtherPane({ entries, root, onCurrentDirChange }: Props): React.JSX.Element {
   const trail = useCrumbs(root, onCurrentDirChange)
   const listing = useDirListing(trail.currentDir)
   const pendingFocusDir = useRef<string | null>(null)
+  const coordinator = useQueryRefresh()
   const visibleEntries = useMemo(() => {
     if (!trail.atBase) return listing.entries
     const rootPaths = new Set(entries.map((entry) => entry.path))
@@ -35,8 +32,7 @@ export function OtherPane({
     trail.jumpTo(depth)
   }
   const refresh = (): void => {
-    listing.reload()
-    void onRefresh()
+    void coordinator.refresh()
   }
 
   return (

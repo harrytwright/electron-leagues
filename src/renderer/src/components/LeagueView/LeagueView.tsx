@@ -8,8 +8,9 @@ import { sentenceCase } from '@renderer/lib/sentence-case'
 import { useCrumbs } from '@renderer/hooks/use-crumbs'
 import { useDirListing } from '@renderer/hooks/use-dir-listing'
 import { useImportFiles } from '@renderer/hooks/use-import-files'
-import { useOperationFeedback } from '@renderer/hooks/use-operation-feedback'
+import { useQueryRefresh } from '@renderer/hooks/use-query-refresh'
 import { useTreeFolders } from '@renderer/hooks/use-tree-folders'
+import { useWriteOperation } from '@renderer/hooks/use-write-operation'
 import { ImportFilesButton } from '../FileBrowser/components/ImportFilesButton'
 import { CrumbTrail } from '../CrumbTrail'
 import { DeleteResourceDialog, type DeleteTarget } from '../DeleteResourceDialog'
@@ -30,12 +31,7 @@ function seasonBadgeVariant(status: SeasonNode['status']): 'success' | 'info' {
   }
 }
 
-export function LeagueView({
-  league,
-  onChanged,
-  onRefresh,
-  onCurrentDirChange
-}: Props): React.JSX.Element {
+export function LeagueView({ league, onCurrentDirChange }: Props): React.JSX.Element {
   const trail = useCrumbs(league.path, onCurrentDirChange)
   const [newSeason, setNewSeason] = useState(false)
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null)
@@ -45,7 +41,20 @@ export function LeagueView({
   const tree = useTreeFolders(trail.currentDir)
   const pendingFocusDir = useRef<string | null>(null)
   const { add } = useKumoToastManager()
-  const feedback = useOperationFeedback()
+  const coordinator = useQueryRefresh()
+  const zipOperation = useWriteOperation({
+    label: (name: string) => `Zipping ${name}`,
+    write: (name) => window.api.zipArchive(league.folderName, [name])
+  })
+  const syncTemplatesOperation = useWriteOperation({
+    label: () => 'Syncing templates',
+    write: (seasonName: string) =>
+      window.api.syncSeasonTemplates({
+        day: league.day,
+        leagueFolder: league.folderName,
+        seasonName
+      })
+  })
 
   // The league's own folder is presented from the scan (seasons carry status
   // badges, the archive lives elsewhere on disk); everything below it is listed
@@ -58,10 +67,7 @@ export function LeagueView({
   const liveSeason = league.seasons.find((season) => season.path === trail.currentDir)
   const atLiveSeasonRoot = trail.crumbs.length === 1 && liveSeason !== undefined
   const listing = useDirListing(trail.atBase ? null : trail.currentDir)
-  const importer = useImportFiles(inArchive ? undefined : trail.currentDir, async () => {
-    listing.reload()
-    await onChanged()
-  })
+  const importer = useImportFiles(inArchive ? undefined : trail.currentDir)
 
   const consumeFocusRequest = useCallback((currentDir: string): boolean => {
     if (pendingFocusDir.current !== currentDir) return false
@@ -88,16 +94,12 @@ export function LeagueView({
   const zip = async (name: string): Promise<void> => {
     if (zipping) return
     setZipping(name)
-    const operationId = feedback.begin(`Zipping ${name}`)
     try {
-      await window.api.zipArchive(league.folderName, [name])
+      const outcome = await zipOperation.run(name)
       const message = `Zipped ${name}`
-      listing.reload()
-      try {
-        await onChanged()
-      } catch (caught) {
+      if (outcome.status === 'refresh-failed') {
         add({
-          title: `${message}, but the league could not be refreshed: ${ipcErrorMessage(caught)}`,
+          title: `${message}, but the league could not be refreshed: ${outcome.refreshError}`,
           variant: 'error'
         })
         return
@@ -106,8 +108,6 @@ export function LeagueView({
     } catch (caught) {
       add({ title: ipcErrorMessage(caught), variant: 'error' })
     } finally {
-      // Completion follows refresh so a successful write is never reported as a plain failure.
-      feedback.finish(operationId)
       setZipping(null)
     }
   }
@@ -115,23 +115,16 @@ export function LeagueView({
   const syncTemplates = async (): Promise<void> => {
     if (!atLiveSeasonRoot || syncingTemplates) return
     setSyncingTemplates(true)
-    const operationId = feedback.begin('Syncing templates')
     try {
-      const result = await window.api.syncSeasonTemplates({
-        day: league.day,
-        leagueFolder: league.folderName,
-        seasonName: liveSeason.name
-      })
+      const outcome = await syncTemplatesOperation.run(liveSeason.name)
+      const result = outcome.result
       const message =
         result.added.length === 0
           ? 'Templates already up to date'
           : `Added ${result.added.length} template${result.added.length === 1 ? '' : 's'}`
-      listing.reload()
-      try {
-        await onChanged()
-      } catch (caught) {
+      if (outcome.status === 'refresh-failed') {
         add({
-          title: `${message}, but the league could not be refreshed: ${ipcErrorMessage(caught)}`,
+          title: `${message}, but the league could not be refreshed: ${outcome.refreshError}`,
           variant: 'error'
         })
         return
@@ -140,8 +133,6 @@ export function LeagueView({
     } catch (caught) {
       add({ title: ipcErrorMessage(caught), variant: 'error' })
     } finally {
-      // Completion follows refresh so a successful write is never reported as a plain failure.
-      feedback.finish(operationId)
       setSyncingTemplates(false)
     }
   }
@@ -321,10 +312,7 @@ export function LeagueView({
             rows={trail.atBase ? topRows : listedRows}
             metadataColumn={trail.atBase ? 'contents' : 'modified'}
             readOnly={inArchive}
-            onRefresh={() => {
-              if (trail.atBase) void onRefresh()
-              else listing.reload()
-            }}
+            onRefresh={() => void coordinator.refresh()}
             onNavigate={enter}
             consumeFocusRequest={consumeFocusRequest}
             onDropFiles={inArchive ? undefined : importer.importPaths}
@@ -339,10 +327,7 @@ export function LeagueView({
         league={league}
         open={newSeason}
         onOpenChange={setNewSeason}
-        onCreated={() => {
-          setNewSeason(false)
-          void onRefresh()
-        }}
+        onCreated={() => setNewSeason(false)}
       />
 
       <DeleteResourceDialog
@@ -350,9 +335,6 @@ export function LeagueView({
         open={deleting !== null}
         onOpenChange={(open) => {
           if (!open) setDeleting(null)
-        }}
-        onDeleted={async () => {
-          await onChanged()
         }}
       />
     </div>

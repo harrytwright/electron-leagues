@@ -1,9 +1,14 @@
 import { act, screen, waitFor } from '@testing-library/react'
+import { useQuery } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi, type Mock } from 'vitest'
 import { NewLeagueDialog, type NewLeagueDialogProps } from './index'
 import { installMockApi, type RendererApi } from '../../tests/mock-api'
 import { renderWithProviders } from '../../tests/render-helpers'
+import { makeTree } from '../../tests/fixtures'
+import { createQueryClient } from '../../lib/query-client'
+import { ROOT_QUERY_KEY } from '../../queries/root'
+import { treeQuery, treeQueryKey } from '../../queries/tree'
 
 interface DialogHarness {
   onCreated: Mock<NewLeagueDialogProps['onCreated']>
@@ -18,6 +23,11 @@ function renderDialog(props: Partial<NewLeagueDialogProps> = {}): DialogHarness 
     <NewLeagueDialog open onOpenChange={onOpenChange} onCreated={onCreated} {...props} />
   )
   return { onCreated, onOpenChange, view }
+}
+
+function ActiveTree(): null {
+  useQuery(treeQuery('/root'))
+  return null
 }
 
 it('is a real dialog with a form that submits on Enter', async () => {
@@ -83,6 +93,33 @@ it('surfaces createLeague failure inline, focuses the name, and keeps the dialog
   expect(nameInput).toHaveFocus()
   expect(screen.getByRole('dialog')).toBeInTheDocument()
   expect(onOpenChange).not.toHaveBeenCalledWith(false)
+})
+
+it('keeps a completed league open with a qualified scan failure', async () => {
+  const api = installMockApi({ scan: vi.fn().mockRejectedValue(new Error('Scan failed')) })
+  const queryClient = createQueryClient()
+  queryClient.setQueryData(ROOT_QUERY_KEY, '/root')
+  queryClient.setQueryData(treeQueryKey('/root'), makeTree())
+  const onCreated = vi.fn<NewLeagueDialogProps['onCreated']>()
+  renderWithProviders(
+    <>
+      <ActiveTree />
+      <NewLeagueDialog open onOpenChange={vi.fn()} onCreated={onCreated} />
+    </>,
+    { queryClient }
+  )
+  const user = userEvent.setup()
+  const nameInput = screen.getByLabelText(/league name/i)
+
+  await user.type(nameInput, 'Pairs{Enter}')
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Created “Pairs”, but the leagues folder could not be refreshed: Scan failed'
+  )
+  expect(api.createLeague).toHaveBeenCalledOnce()
+  expect(onCreated).not.toHaveBeenCalled()
+  expect(nameInput).toHaveFocus()
+  expect(screen.getByRole('dialog')).toBeInTheDocument()
 })
 
 it('reports an unusable folder name inline and focuses the name', async () => {

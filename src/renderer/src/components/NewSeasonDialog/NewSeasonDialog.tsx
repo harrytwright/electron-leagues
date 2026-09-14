@@ -8,6 +8,7 @@ import {
   WORKFLOWS
 } from '@shared/workflows'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
+import { useWriteOperation } from '@renderer/hooks/use-write-operation'
 import { TaskDialog } from '../TaskDialog'
 import type { Props, SeasonTypeOption, Source } from './interface'
 
@@ -43,6 +44,8 @@ function isSource(value: string): value is Source {
   return isWorkflowId(value)
 }
 
+type CreateSeasonRequest = Parameters<typeof window.api.createSeason>[0]
+
 export function NewSeasonDialog({
   league,
   open,
@@ -63,6 +66,10 @@ export function NewSeasonDialog({
   // Bumped on every open so a create left pending across close/reopen can
   // never write its stale outcome onto the fresh form.
   const submission = useRef(0)
+  const operation = useWriteOperation({
+    label: () => 'Creating season',
+    write: (request: CreateSeasonRequest) => window.api.createSeason(request)
+  })
 
   useEffect(() => {
     // Reset only on the closed→open transition — a tree refresh while the
@@ -105,7 +112,7 @@ export function NewSeasonDialog({
     setBusy(true)
     setError(null)
     try {
-      await window.api.createSeason({
+      const outcome = await operation.run({
         day: league.day,
         leagueFolder: league.folderName,
         seasonName: parsed.name,
@@ -114,6 +121,14 @@ export function NewSeasonDialog({
         archiveOldest: willArchive ? archiveOldest : false
       })
       if (submission.current !== ticket) return
+      if (outcome.status === 'refresh-failed') {
+        setError(
+          `Created “${parsed.name}”, but the league could not be refreshed: ${outcome.refreshError}`
+        )
+        setBusy(false)
+        nameRef.current?.focus()
+        return
+      }
       setBusy(false)
       onCreated()
     } catch (caught) {

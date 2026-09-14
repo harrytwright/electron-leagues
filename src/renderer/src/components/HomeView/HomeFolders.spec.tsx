@@ -44,13 +44,7 @@ it('drills into folders and back out through the breadcrumbs', async () => {
   installMockApi({ listDir: vi.fn(listingFor(tree)) })
   const user = userEvent.setup()
   renderWithProviders(
-    <HomeView
-      tree={makeTree()}
-      onSelect={vi.fn()}
-      onCurrentDirChange={vi.fn()}
-      onChanged={vi.fn()}
-      onRefresh={vi.fn()}
-    />
+    <HomeView tree={makeTree()} onSelect={vi.fn()} onCurrentDirChange={vi.fn()} />
   )
 
   expect(await screen.findByRole('row', { name: /^Opening times.docx/ })).toBeInTheDocument()
@@ -74,13 +68,7 @@ it('re-lists the current folder when the tree changes on disk', async () => {
     .mockResolvedValue([makeDirEntry({ name: 'New.docx' })])
   installMockApi({ listDir })
   renderWithProviders(
-    <HomeView
-      tree={makeTree()}
-      onSelect={vi.fn()}
-      onCurrentDirChange={vi.fn()}
-      onChanged={vi.fn()}
-      onRefresh={vi.fn()}
-    />
+    <HomeView tree={makeTree()} onSelect={vi.fn()} onCurrentDirChange={vi.fn()} />
   )
 
   expect(await screen.findByRole('row', { name: /^Old.docx/ })).toBeInTheDocument()
@@ -95,13 +83,7 @@ it('offers a way back when the folder being viewed can no longer be read', async
   installMockApi({ listDir })
   const user = userEvent.setup()
   renderWithProviders(
-    <HomeView
-      tree={makeTree()}
-      onSelect={vi.fn()}
-      onCurrentDirChange={vi.fn()}
-      onChanged={vi.fn()}
-      onRefresh={vi.fn()}
-    />
+    <HomeView tree={makeTree()} onSelect={vi.fn()} onCurrentDirChange={vi.fn()} />
   )
 
   await user.dblClick(await screen.findByRole('row', { name: /^Forms/ }))
@@ -120,20 +102,14 @@ it('offers a way back when the folder being viewed can no longer be read', async
 })
 
 it('imports picked files into the folder being viewed', async () => {
+  const listDir = vi.fn(listingFor(tree))
   const api = installMockApi({
-    listDir: vi.fn(listingFor(tree)),
+    listDir,
     pickFiles: vi.fn().mockResolvedValue(['/tmp/a.pdf'])
   })
-  const onImported = vi.fn()
   const user = userEvent.setup()
   renderWithProviders(
-    <HomeView
-      tree={makeTree()}
-      onSelect={vi.fn()}
-      onCurrentDirChange={vi.fn()}
-      onChanged={onImported}
-      onRefresh={vi.fn()}
-    />
+    <HomeView tree={makeTree()} onSelect={vi.fn()} onCurrentDirChange={vi.fn()} />
   )
 
   await user.dblClick(await screen.findByRole('row', { name: /^Forms/ }))
@@ -143,5 +119,7 @@ it('imports picked files into the folder being viewed', async () => {
   await waitFor(() =>
     expect(api.importFiles).toHaveBeenCalledWith(`${SHARED}/Forms`, ['/tmp/a.pdf'])
   )
-  expect(onImported).toHaveBeenCalledOnce()
+  await waitFor(() =>
+    expect(listDir.mock.calls.filter(([path]) => path === `${SHARED}/Forms`)).toHaveLength(2)
+  )
 })

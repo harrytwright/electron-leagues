@@ -1,11 +1,15 @@
 import { act, screen, waitFor } from '@testing-library/react'
+import { useQuery } from '@tanstack/react-query'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi, type Mock } from 'vitest'
 import type { SeasonNode } from '@shared/tree'
 import { NewSeasonDialog, type NewSeasonDialogProps } from './index'
-import { makeLeague } from '../../tests/fixtures'
+import { makeLeague, makeTree } from '../../tests/fixtures'
 import { installMockApi, type RendererApi } from '../../tests/mock-api'
 import { renderWithProviders } from '../../tests/render-helpers'
+import { createQueryClient } from '../../lib/query-client'
+import { ROOT_QUERY_KEY } from '../../queries/root'
+import { treeQuery, treeQueryKey } from '../../queries/tree'
 
 function makeSeason(name: string, status: SeasonNode['status'] = 'active'): SeasonNode {
   return { name, status, path: `/root/monday/Mixed triples/${name}`, files: [] }
@@ -46,6 +50,11 @@ function renderDialog(props: Partial<NewSeasonDialogProps> = {}): DialogHarness 
     />
   )
   return { league, onCreated, onOpenChange, view }
+}
+
+function ActiveTree(): null {
+  useQuery(treeQuery('/root'))
+  return null
 }
 
 it('is a real dialog with labelled fields and a form that submits on Enter', async () => {
@@ -130,6 +139,33 @@ it('surfaces createSeason failure inline, focuses the name, and keeps the dialog
   expect(nameInput).toHaveFocus()
   expect(screen.getByRole('dialog')).toBeInTheDocument()
   expect(onOpenChange).not.toHaveBeenCalledWith(false)
+})
+
+it('keeps a completed season open with a qualified scan failure', async () => {
+  const api = installMockApi({ scan: vi.fn().mockRejectedValue(new Error('Scan failed')) })
+  const queryClient = createQueryClient()
+  queryClient.setQueryData(ROOT_QUERY_KEY, '/root')
+  queryClient.setQueryData(treeQueryKey('/root'), makeTree())
+  const onCreated = vi.fn<NewSeasonDialogProps['onCreated']>()
+  renderWithProviders(
+    <>
+      <ActiveTree />
+      <NewSeasonDialog league={makeLeague()} open onOpenChange={vi.fn()} onCreated={onCreated} />
+    </>,
+    { queryClient }
+  )
+  const user = userEvent.setup()
+  const nameInput = screen.getByLabelText(/season name/i)
+
+  await user.click(screen.getByRole('button', { name: 'Create season' }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Created “2026-27”, but the league could not be refreshed: Scan failed'
+  )
+  expect(api.createSeason).toHaveBeenCalledOnce()
+  expect(onCreated).not.toHaveBeenCalled()
+  expect(nameInput).toHaveFocus()
+  expect(screen.getByRole('dialog')).toBeInTheDocument()
 })
 
 it('disables copy from previous season when the league is not running', async () => {
