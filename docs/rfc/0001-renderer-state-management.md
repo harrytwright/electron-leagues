@@ -498,15 +498,21 @@ filter and retry specs; test that abandoning a branch preserves another consumer
 collapsed data outlives the collection interval. Exactly one watcher remains after mount,
 rerender and Strict Mode cleanup.
 
-**Phase 4 — mutations and feedback.** Convert the writes to `useMutation` with `meta.label` and
-route `begin` / `finish` through a `MutationCache`. Point the `refresh` and location app-command
-handlers at the query client. Remove the drilled `onChanged` props once no caller needs them.
-_Settled, so do not relitigate:_ the four write flows that report "succeeded, but could not be
-refreshed" adopt the `useWriteOperation` hook from the cleanup catalogue rather than keeping
-their own `try`/`catch`. A `MutationCache` alone cannot express that outcome, so build the hook
-first and convert the four onto it. See the risk below for why the naive shape is wrong.
-_Done when:_ location-scoped feedback still clears on a location switch while application-scoped
-feedback survives, which an existing spec pins.
+**Phase 4: mutations and feedback.** Convert writes to `useWriteOperation` with `meta.label`.
+_Settled, so do not relitigate:_ all four refresh-failure flows adopt the hook rather than
+keeping their own `try`/`catch`; a `MutationCache` alone cannot express their outcome, so build
+the hook first and convert the four onto it. Keep write and refresh inside the operation and
+return a typed result for "write succeeded, refresh failed"; write failures throw. Use
+`MutationCache` only to begin activity and finish it once on settlement. Capture the original
+root and affected paths; if that root is no longer active, mark its caches stale and defer refresh
+until it is active again. Point refresh commands at the refresh coordinator and location commands
+at the location-operation provider. Remove refresh-only callbacks once no caller needs them.
+_Done when:_ the four flows cover failed writes, successful writes and successful writes with
+failed refresh, without relying on watcher events. Activity stays pending through refresh,
+completed deletes cannot repeat, and feedback is presented once. Location-scoped feedback still
+clears on a location switch while application-scoped feedback survives. Query ships through this
+phase as a complete increment. Each PR introducing the refresh coordinator, location-operation
+provider or write-operation hook compares it against the hand-rolled code it deletes.
 
 **Phase 5: workspace store.** Install `zustand@^5.0.15` here, with its own review of the remaining
 shared UI state. Introduce `createWorkspaceStore` for selection, current folder and collapsed
@@ -550,17 +556,20 @@ names where that cost falls.
 
 ## Risks
 
-- **Offline pause.** Covered by `networkMode: 'always'`; a test in phase 1 should assert the
-  client is built with it.
-- **A successful write whose refresh fails is a third outcome, and the cache cannot express
-  it.** Four flows today report "zipped, but the league could not be refreshed", which means the
-  write succeeded and the invalidation did not. A rejected `invalidateQueries` inside `onSuccess`
-  does not reject the mutation, so it never reaches `MutationCache.onError` and the user would
-  see a plain success. `DeleteResourceDialog` is the sharpest case: it must keep its `moved` flag
-  so the delete is not retried, and promote the message to a toast if the dialog has closed.
-  Either these four keep their own `try`/`catch` with only `begin` and `finish` moving into the
-  cache, or they adopt the `useWriteOperation` hook instead. This is settled in favour of the
-  hook; the risk is recorded because the naive shape looks correct and silently is not.
+- **Offline pause.** Covered by `networkMode: 'always'`; phase 1 tests that a local read and a
+  write run while Query's online manager reports offline and restores that global state in test
+  cleanup.
+- **A successful write whose refresh fails is a third outcome.** Four flows today qualify a
+  completed write when its refresh fails. Query v5 awaits both cache-level and per-mutation
+  `onSuccess` inside its try block. A rejected `invalidateQueries` there enters error handling,
+  including `MutationCache.onError`, and the mutation reports an error. Global success callbacks
+  run before per-mutation success callbacks, so finishing activity in global `onSuccess` could
+  also precede refresh. Keep refresh inside `useWriteOperation` and return "write succeeded,
+  refresh failed" as a typed result rather than an error. Use `MutationCache` only to begin
+  activity and finish it on settlement. `DeleteResourceDialog` keeps its `moved` flag so the
+  delete is not retried and promotes the message to a toast if the dialog has closed. This is
+  settled in favour of the hook; the risk is recorded because the naive shape looks correct and
+  silently is not.
 - **Operation feedback is location-scoped and Query is not.** `OperationFeedbackProvider` drops
   pending location-scoped operations when the location changes while keeping application-scoped
   ones, and a spec pins that. A `MutationCache` feeding the same context has no notion of that
