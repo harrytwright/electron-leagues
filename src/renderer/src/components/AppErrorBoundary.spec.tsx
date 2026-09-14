@@ -8,23 +8,19 @@ function BrokenChild(): never {
 }
 
 it('shows an accessible fallback and reloads through the injected action', async () => {
-  const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-  try {
-    const onReload = vi.fn()
-    const user = userEvent.setup()
-    render(
-      <AppErrorBoundary onReload={onReload}>
-        <BrokenChild />
-      </AppErrorBoundary>
-    )
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  const onReload = vi.fn()
+  const user = userEvent.setup()
+  render(
+    <AppErrorBoundary onReload={onReload}>
+      <BrokenChild />
+    </AppErrorBoundary>
+  )
 
-    expect(screen.getByRole('alert')).toHaveTextContent('App render failed')
-    expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Reload' }))
-    expect(onReload).toHaveBeenCalledExactlyOnceWith()
-  } finally {
-    consoleError.mockRestore()
-  }
+  expect(screen.getByRole('alert')).toHaveTextContent('App render failed')
+  expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Reload' }))
+  expect(onReload).toHaveBeenCalledExactlyOnceWith()
 })
 
 it('renders a healthy child normally', () => {

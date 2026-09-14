@@ -1,9 +1,10 @@
-import { useCallback, useRef, useState } from 'react'
+import { useState } from 'react'
 import { Badge, Button, DropdownMenu, Text, useKumoToastManager } from '@cloudflare/kumo'
 import { DotsThreeIcon } from '@phosphor-icons/react'
 import type { SeasonNode } from '@shared/tree'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
-import { revealLabel } from '@renderer/lib/reveal-label'
+import { plural } from '@renderer/lib/plural'
+import { revealLabel } from '@renderer/lib/os-labels'
 import { sentenceCase } from '@renderer/lib/sentence-case'
 import { useCrumbs } from '@renderer/hooks/use-crumbs'
 import { useDirListing } from '@renderer/hooks/use-dir-listing'
@@ -39,7 +40,6 @@ export function LeagueView({ league, onCurrentDirChange }: Props): React.JSX.Ele
   const [syncingTemplates, setSyncingTemplates] = useState(false)
   const [treeSort, setTreeSort] = useState<Sort>({ column: 'name', direction: 'ascending' })
   const tree = useTreeFolders(trail.currentDir)
-  const pendingFocusDir = useRef<string | null>(null)
   const { add } = useKumoToastManager()
   const coordinator = useQueryRefresh()
   const zipOperation = useWriteOperation({
@@ -68,28 +68,6 @@ export function LeagueView({ league, onCurrentDirChange }: Props): React.JSX.Ele
   const atLiveSeasonRoot = trail.crumbs.length === 1 && liveSeason !== undefined
   const listing = useDirListing(trail.atBase ? null : trail.currentDir)
   const importer = useImportFiles(inArchive ? undefined : trail.currentDir)
-
-  const consumeFocusRequest = useCallback((currentDir: string): boolean => {
-    if (pendingFocusDir.current !== currentDir) return false
-    pendingFocusDir.current = null
-    return true
-  }, [])
-  const enter = (row: BrowserRow, focusFirstRow: boolean): void => {
-    pendingFocusDir.current = focusFirstRow ? row.path : null
-    trail.enter(row)
-  }
-  const enterMany = (
-    folders: Parameters<typeof trail.enterMany>[0],
-    focusFirstRow: boolean
-  ): void => {
-    const destination = folders.at(-1)
-    pendingFocusDir.current = focusFirstRow && destination ? destination.path : null
-    trail.enterMany(folders)
-  }
-  const jumpTo = (depth: number): void => {
-    pendingFocusDir.current = depth === 0 ? league.path : trail.crumbs[depth - 1].path
-    trail.jumpTo(depth)
-  }
 
   const zip = async (name: string): Promise<void> => {
     if (zipping) return
@@ -121,7 +99,7 @@ export function LeagueView({ league, onCurrentDirChange }: Props): React.JSX.Ele
       const message =
         result.added.length === 0
           ? 'Templates already up to date'
-          : `Added ${result.added.length} template${result.added.length === 1 ? '' : 's'}`
+          : `Added ${plural(result.added.length, 'template')}`
       if (outcome.status === 'refresh-failed') {
         add({
           title: `${message}, but the league could not be refreshed: ${outcome.refreshError}`,
@@ -144,7 +122,7 @@ export function LeagueView({ league, onCurrentDirChange }: Props): React.JSX.Ele
       kind: 'folder' as const,
       path: season.path,
       typeLabel: 'Season',
-      contents: `${season.files.length} item${season.files.length === 1 ? '' : 's'}`,
+      contents: plural(season.files.length, 'item'),
       badge: (
         <Badge variant={seasonBadgeVariant(season.status)}>{sentenceCase(season.status)}</Badge>
       ),
@@ -170,7 +148,7 @@ export function LeagueView({ league, onCurrentDirChange }: Props): React.JSX.Ele
             kind: 'folder' as const,
             path: league.archivePath,
             typeLabel: 'Archive folder',
-            contents: `${league.archiveItemCount} item${league.archiveItemCount === 1 ? '' : 's'}`,
+            contents: plural(league.archiveItemCount, 'item'),
             badge: <Badge variant="secondary">Read-only</Badge>
           }
         ]
@@ -231,7 +209,7 @@ export function LeagueView({ league, onCurrentDirChange }: Props): React.JSX.Ele
           <div className="flex items-center justify-between gap-4">
             <CrumbTrail
               names={[league.meta.name, ...trail.crumbs.map((c) => c.name)]}
-              onNavigate={jumpTo}
+              onNavigate={trail.jumpTo}
             />
             <div className="flex shrink-0 items-center gap-2">
               <ImportFilesButton
@@ -296,10 +274,10 @@ export function LeagueView({ league, onCurrentDirChange }: Props): React.JSX.Ele
             sort={treeSort}
             onSortChange={setTreeSort}
             readOnly={inArchive}
-            onNavigate={enterMany}
-            consumeFocusRequest={consumeFocusRequest}
+            onNavigate={trail.enterMany}
+            consumeFocusRequest={trail.consumeFocusRequest}
             onDropFiles={inArchive ? undefined : importer.importPaths}
-            onBack={{ label: `Back to ${league.meta.name}`, action: () => jumpTo(0) }}
+            onBack={{ label: `Back to ${league.meta.name}`, action: () => trail.jumpTo(0) }}
           />
         ) : (
           <DirectoryBrowser
@@ -313,10 +291,10 @@ export function LeagueView({ league, onCurrentDirChange }: Props): React.JSX.Ele
             metadataColumn={trail.atBase ? 'contents' : 'modified'}
             readOnly={inArchive}
             onRefresh={() => void coordinator.refresh()}
-            onNavigate={enter}
-            consumeFocusRequest={consumeFocusRequest}
+            onNavigate={trail.enter}
+            consumeFocusRequest={trail.consumeFocusRequest}
             onDropFiles={inArchive ? undefined : importer.importPaths}
-            onBack={{ label: `Back to ${league.meta.name}`, action: () => jumpTo(0) }}
+            onBack={{ label: `Back to ${league.meta.name}`, action: () => trail.jumpTo(0) }}
             emptyTitle={trail.atBase ? 'No seasons yet' : 'This folder is empty'}
             emptyDescription={trail.atBase ? 'Create a season to start this league.' : undefined}
           />

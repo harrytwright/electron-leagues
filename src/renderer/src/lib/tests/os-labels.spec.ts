@@ -1,7 +1,5 @@
 import { afterEach, expect, test } from 'vitest'
-import { revealLabel } from '../reveal-label'
-import { trashLabel } from '../trash-label'
-import { appShortcutAria, appShortcutLabel } from '../app-shortcut-label'
+import { appShortcutAria, appShortcutLabel, revealLabel, trashLabel } from '../os-labels'
 
 function pretendPlatform(platform: string): void {
   Object.defineProperty(window, 'electron', {

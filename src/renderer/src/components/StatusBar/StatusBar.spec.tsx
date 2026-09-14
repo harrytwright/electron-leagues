@@ -10,7 +10,6 @@ import { useDiagnosticsCommands } from '@renderer/hooks/use-diagnostics-preferen
 
 afterEach(() => {
   vi.useRealTimers()
-  vi.unstubAllEnvs()
   Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
 })
 
@@ -151,7 +150,6 @@ it('polls only while enabled and visible, and cleans up', async () => {
   expect(api.getRendererMetrics).toHaveBeenCalledTimes(initialPolls + 2)
   view.unmount()
   expect(clearInterval).toHaveBeenCalled()
-  clearInterval.mockRestore()
 })
 
 it('shares diagnostics preference between app commands and the status checkbox', async () => {

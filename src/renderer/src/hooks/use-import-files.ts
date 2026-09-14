@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useKumoToastManager } from '@cloudflare/kumo'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
+import { plural } from '@renderer/lib/plural'
 import { useWriteOperation } from './use-write-operation'
 
 interface ImportVariables {
@@ -23,8 +24,7 @@ export function useImportFiles(dest: string | undefined): FileImporter {
   const lifecycle = useRef({ dest, generation: 0, mounted: true })
   const { add } = useKumoToastManager()
   const operation = useWriteOperation({
-    label: ({ paths }: ImportVariables) =>
-      `Importing ${paths.length} file${paths.length === 1 ? '' : 's'}`,
+    label: ({ paths }: ImportVariables) => `Importing ${plural(paths.length, 'file')}`,
     write: ({ destination, paths }) => window.api.importFiles(destination, paths)
   })
 
@@ -58,7 +58,7 @@ export function useImportFiles(dest: string | undefined): FileImporter {
       const copied = outcome.result
       const message =
         copied.length === usable.length
-          ? `Imported ${copied.length} file${copied.length === 1 ? '' : 's'}`
+          ? `Imported ${plural(copied.length, 'file')}`
           : `Imported ${copied.length} of ${usable.length} files`
       if (outcome.status === 'refresh-failed' && lifecycle.current.generation === generation) {
         add({

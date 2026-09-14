@@ -25,7 +25,10 @@ export default defineConfig({
           name: 'renderer',
           include: ['src/renderer/**/*.spec.{ts,tsx}'],
           environment: 'jsdom',
-          setupFiles: ['src/renderer/src/tests/setup.ts']
+          setupFiles: ['src/renderer/src/tests/setup.ts'],
+          restoreMocks: true,
+          unstubEnvs: true,
+          unstubGlobals: true
         }
       }
     ]

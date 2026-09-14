@@ -9,12 +9,11 @@ import {
 } from '@phosphor-icons/react'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { pathBasename } from '@renderer/lib/path-basename'
-import { revealLabel } from '@renderer/lib/reveal-label'
+import { appShortcutLabel, revealLabel } from '@renderer/lib/os-labels'
 import { useLocationOperation } from '@renderer/hooks/use-location-operation'
 import { LocationRow } from '../LocationRow/LocationRow'
 import { useRecentRoots } from '@renderer/hooks/use-recent-roots'
 import type { Props } from './interface'
-import { appShortcutLabel } from '@renderer/lib/app-shortcut-label'
 
 /** Select-styled menu of the current and recent leagues folders. */
 export function LocationSwitcher({ root }: Props): React.JSX.Element {

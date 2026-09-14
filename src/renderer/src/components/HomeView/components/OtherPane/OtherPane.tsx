@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { useMemo } from 'react'
 import { CrumbTrail } from '@renderer/components/CrumbTrail'
 import { DirectoryBrowser } from '@renderer/components/DirectoryBrowser'
 import { useCrumbs } from '@renderer/hooks/use-crumbs'
@@ -9,7 +9,6 @@ import type { Props } from './interface'
 export function OtherPane({ entries, root, onCurrentDirChange }: Props): React.JSX.Element {
   const trail = useCrumbs(root, onCurrentDirChange)
   const listing = useDirListing(trail.currentDir)
-  const pendingFocusDir = useRef<string | null>(null)
   const coordinator = useQueryRefresh()
   const visibleEntries = useMemo(() => {
     if (!trail.atBase) return listing.entries
@@ -18,19 +17,6 @@ export function OtherPane({ entries, root, onCurrentDirChange }: Props): React.J
   }, [entries, listing.entries, trail.atBase])
   const visibleListing = { ...listing, entries: visibleEntries ?? null }
 
-  const consumeFocusRequest = useCallback((currentDir: string): boolean => {
-    if (pendingFocusDir.current !== currentDir) return false
-    pendingFocusDir.current = null
-    return true
-  }, [])
-  const enter = (row: Parameters<typeof trail.enter>[0], focusFirstRow: boolean): void => {
-    pendingFocusDir.current = focusFirstRow ? row.path : null
-    trail.enter(row)
-  }
-  const jumpTo = (depth: number): void => {
-    pendingFocusDir.current = depth === 0 ? root : trail.crumbs[depth - 1].path
-    trail.jumpTo(depth)
-  }
   const refresh = (): void => {
     void coordinator.refresh()
   }
@@ -40,7 +26,7 @@ export function OtherPane({ entries, root, onCurrentDirChange }: Props): React.J
       <div className="flex min-h-10 shrink-0 items-center border-b border-kumo-line px-4 py-1">
         <CrumbTrail
           names={['Other items', ...trail.crumbs.map((crumb) => crumb.name)]}
-          onNavigate={jumpTo}
+          onNavigate={trail.jumpTo}
         />
       </div>
       <DirectoryBrowser
@@ -53,10 +39,10 @@ export function OtherPane({ entries, root, onCurrentDirChange }: Props): React.J
         readOnly
         listing={visibleListing}
         onRefresh={refresh}
-        onNavigate={enter}
-        consumeFocusRequest={consumeFocusRequest}
+        onNavigate={trail.enter}
+        consumeFocusRequest={trail.consumeFocusRequest}
         onBack={
-          trail.atBase ? undefined : { label: 'Back to Other items', action: () => jumpTo(0) }
+          trail.atBase ? undefined : { label: 'Back to Other items', action: () => trail.jumpTo(0) }
         }
         emptyTitle="No other items"
         emptyDescription={

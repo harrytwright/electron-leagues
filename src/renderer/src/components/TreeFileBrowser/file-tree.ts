@@ -9,7 +9,7 @@ const names = new Intl.Collator('en-GB', { numeric: true, sensitivity: 'base' })
 export function fileRows(
   entries: DirEntry[],
   branches: Map<string, Branch>,
-  expanded: Set<string>,
+  expanded: ReadonlySet<string>,
   sort: Sort,
   query: string,
   ancestors: DirEntry[] = []

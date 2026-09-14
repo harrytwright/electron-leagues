@@ -1,14 +1,10 @@
-import { BrowserError } from '../FileBrowser/components/BrowserError'
-import { BrowserLoading } from '../FileBrowser/components/BrowserLoading'
-import { BrowserEmpty } from '../FileBrowser/components/BrowserEmpty'
-import { BrowserNoMatches } from '../FileBrowser/components/BrowserNoMatches'
-import { BrowserMessageRow } from '../FileBrowser/components/BrowserMessageRow'
+import { BrowserState } from '../FileBrowser/components/BrowserState'
 import { FileActionsMenu } from '../FileBrowser/components/FileActionsMenu'
 import { FileActionsButton } from '../FileBrowser/components/FileActionsButton'
 import { FileModified } from '../FileBrowser/components/FileModified'
+import { useBrowserGrid } from '@renderer/hooks/use-browser-grid'
 import { useFileActions } from '@renderer/hooks/use-file-actions'
-import { useFileSelection } from '@renderer/hooks/use-file-selection'
-import { useEffect, useId, useRef, useState } from 'react'
+import { useKeyedState } from '@renderer/hooks/use-keyed-state'
 import { Table } from '@cloudflare/kumo'
 import { FileBrowserFrame } from '../FileBrowser/components/FileBrowserFrame'
 import { FileEntryIcon } from '../FileBrowser/components/FileEntryIcon'
@@ -16,8 +12,8 @@ import { fileType } from '../FileBrowser/file-type'
 import { FILE_ROW_CLASS, FILE_TABLE_CLASS } from '../FileBrowser/styles'
 import type { BrowserRow, Props } from './interface'
 import type { RowMenuItem } from '../FileBrowser/row'
-import { revealLabel } from '@renderer/lib/reveal-label'
-import { useRowActionsMenu } from '@renderer/hooks/use-row-actions-menu'
+import { plural } from '@renderer/lib/plural'
+import { revealLabel } from '@renderer/lib/os-labels'
 
 /** Flat directory pane for the league overview and its archive, preserving scan order. */
 export function DirectoryBrowser({
@@ -36,33 +32,20 @@ export function DirectoryBrowser({
   emptyTitle,
   emptyDescription
 }: Props): React.JSX.Element {
-  const [queryState, setQueryState] = useState({ dir: currentDir, value: '' })
-  if (queryState.dir !== currentDir) setQueryState({ dir: currentDir, value: '' })
-  const query = queryState.dir === currentDir ? queryState.value : ''
-  const setQuery = (value: string): void => setQueryState({ dir: currentDir, value })
-  const instructions = useId()
-  // Explicit row names exclude the action button's label from selection announcements.
-  const rowNames = useId()
-  const filterRef = useRef<HTMLInputElement>(null)
-  // rowMenu.target has already been cleared when the close effect restores focus.
-  const menuTarget = useRef<string | null>(null)
+  const [query, setQuery] = useKeyedState(currentDir, '')
   const { openFile, revealFile } = useFileActions()
   const filter = query.trim().toLocaleLowerCase()
   const visible = rows.filter((row) => row.name.toLocaleLowerCase().includes(filter))
-  const rowMenu = useRowActionsMenu(visible.map((row) => row.path))
-  const selection = useFileSelection(
+  const grid = useBrowserGrid({
     currentDir,
-    visible.map((row) => row.path)
-  )
+    paths: visible.map((row) => row.path),
+    loaded: listing?.entries !== null,
+    consumeFocusRequest
+  })
+  const { selection, rowMenu } = grid
   const selectedRow = visible.find((row) => row.path === selection.selected)
   const loading = listing?.entries === null
   const error = listing?.error
-
-  useEffect(() => {
-    if (listing?.entries !== null && consumeFocusRequest?.(currentDir)) {
-      selection.focusFirstRow()
-    }
-  }, [consumeFocusRequest, currentDir, listing?.entries, selection])
 
   const open = async (row: BrowserRow, focusFirstRow = false): Promise<void> => {
     if (row.kind === 'folder') onNavigate(row, focusFirstRow)
@@ -82,23 +65,6 @@ export function DirectoryBrowser({
         ]
       : []
 
-  const openContextMenu = (
-    event: React.MouseEvent<HTMLTableRowElement> | React.KeyboardEvent<HTMLTableRowElement>,
-    row: BrowserRow
-  ): void => {
-    event.preventDefault()
-    selection.focus(row.path)
-    menuTarget.current = row.path
-    const bounds = event.currentTarget.getBoundingClientRect()
-    const pointer = 'clientX' in event && event.clientX > 0
-    rowMenu.openAt(
-      row.path,
-      pointer
-        ? { left: event.clientX, top: event.clientY }
-        : { left: bounds.right - 24, top: bounds.top }
-    )
-  }
-
   return (
     <FileBrowserFrame
       name={name}
@@ -106,7 +72,7 @@ export function DirectoryBrowser({
       readOnly={readOnly}
       query={query}
       filterLabel="Filter this folder"
-      filterRef={filterRef}
+      filterRef={grid.filterRef}
       onQueryChange={setQuery}
       onRefresh={onRefresh}
       onDropFiles={onDropFiles}
@@ -116,17 +82,17 @@ export function DirectoryBrowser({
           ? '—'
           : filter
             ? `${visible.length} of ${rows.length} items`
-            : `${rows.length} item${rows.length === 1 ? '' : 's'}`
+            : plural(rows.length, 'item')
       }
     >
-      <p id={instructions} className="sr-only">
+      <p id={grid.instructions} className="sr-only">
         Use the up and down arrow keys to select an item, and Enter to open. Double-click a row to
         open it.
       </p>
       <Table
         role="grid"
         aria-label={name}
-        aria-describedby={instructions}
+        aria-describedby={grid.instructions}
         layout="fixed"
         className={FILE_TABLE_CLASS}
       >
@@ -146,25 +112,23 @@ export function DirectoryBrowser({
         </Table.Header>
         <Table.Body>
           {error || loading || visible.length === 0 ? (
-            <BrowserMessageRow>
-              {error ? (
-                <BrowserError message={error} onRetry={onRefresh} onBack={onBack} />
-              ) : loading ? (
-                <BrowserLoading />
-              ) : filter ? (
-                <BrowserNoMatches
-                  title="No matching items"
-                  description="Try a different name or clear the filter."
-                  onClear={() => setQuery('')}
-                />
-              ) : (
-                <BrowserEmpty title={emptyTitle} description={emptyDescription} />
-              )}
-            </BrowserMessageRow>
+            <BrowserState
+              error={error}
+              loading={loading}
+              filter={filter}
+              onRetry={onRefresh}
+              onBack={onBack}
+              onClearFilter={() => setQuery('')}
+              noMatches={{
+                title: 'No matching items',
+                description: 'Try a different name or clear the filter.'
+              }}
+              empty={{ title: emptyTitle, description: emptyDescription }}
+            />
           ) : (
             visible.map((row, index) => {
-              const nameId = `${rowNames}-${index}-name`
-              const badgeId = row.badge ? `${rowNames}-${index}-badge` : undefined
+              const nameId = `${grid.rowNames}-${index}-name`
+              const badgeId = row.badge ? `${grid.rowNames}-${index}-badge` : undefined
               return (
                 <Table.Row
                   key={row.key}
@@ -172,10 +136,10 @@ export function DirectoryBrowser({
                   aria-labelledby={[nameId, badgeId].filter(Boolean).join(' ')}
                   className={FILE_ROW_CLASS}
                   onDoubleClick={() => void open(row)}
-                  onContextMenu={(event) => openContextMenu(event, row)}
+                  onContextMenu={(event) => grid.openContextMenu(event, row.path)}
                   onKeyDown={(event) => {
                     if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
-                      openContextMenu(event, row)
+                      grid.openContextMenu(event, row.path)
                       return
                     }
                     selection.onKeyDown(event, index, () => void open(row, true))
@@ -206,12 +170,7 @@ export function DirectoryBrowser({
                     name={row.name}
                     menuId={rowMenu.id}
                     expanded={rowMenu.target === row.path}
-                    onClick={(event) => {
-                      selection.focus(row.path)
-                      menuTarget.current = row.path
-                      const bounds = event.currentTarget.getBoundingClientRect()
-                      rowMenu.openAt(row.path, { left: bounds.right, top: bounds.bottom })
-                    }}
+                    onClick={(event) => grid.openActionsMenu(event, row.path)}
                   />
                 </Table.Row>
               )
@@ -227,11 +186,7 @@ export function DirectoryBrowser({
         actions={actions(visible.find((row) => row.path === rowMenu.target))}
         focusScope={currentDir}
         onOpenChange={rowMenu.onOpenChange}
-        onRestoreFocus={() => {
-          if (selection.focus(menuTarget.current ?? undefined)) return
-          if (selection.focusFirstRow()) return
-          filterRef.current?.focus()
-        }}
+        onRestoreFocus={grid.restoreFocus}
       />
     </FileBrowserFrame>
   )

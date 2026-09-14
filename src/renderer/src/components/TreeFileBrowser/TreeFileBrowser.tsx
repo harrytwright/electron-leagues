@@ -1,14 +1,11 @@
-import { BrowserError } from '../FileBrowser/components/BrowserError'
-import { BrowserLoading } from '../FileBrowser/components/BrowserLoading'
-import { BrowserEmpty } from '../FileBrowser/components/BrowserEmpty'
-import { BrowserNoMatches } from '../FileBrowser/components/BrowserNoMatches'
-import { BrowserMessageRow } from '../FileBrowser/components/BrowserMessageRow'
+import { BrowserState } from '../FileBrowser/components/BrowserState'
 import { FileActionsMenu } from '../FileBrowser/components/FileActionsMenu'
 import { FileActionsButton } from '../FileBrowser/components/FileActionsButton'
 import { FileModified } from '../FileBrowser/components/FileModified'
+import { useBrowserGrid } from '@renderer/hooks/use-browser-grid'
 import { useFileActions } from '@renderer/hooks/use-file-actions'
-import { useFileSelection } from '@renderer/hooks/use-file-selection'
-import { Fragment, useEffect, useId, useRef, useState } from 'react'
+import { useKeyedState } from '@renderer/hooks/use-keyed-state'
+import { Fragment } from 'react'
 import { Button, cn, Loader, Table } from '@cloudflare/kumo'
 import { ArrowDownIcon } from '@phosphor-icons/react/dist/csr/ArrowDown'
 import { ArrowUpIcon } from '@phosphor-icons/react/dist/csr/ArrowUp'
@@ -22,8 +19,8 @@ import { fileType } from '../FileBrowser/file-type'
 import { FILE_ROW_CLASS, FILE_TABLE_CLASS } from '../FileBrowser/styles'
 import { fileRows } from './file-tree'
 import type { FileRow, Props, SortColumn } from './interface'
-import { revealLabel } from '@renderer/lib/reveal-label'
-import { useRowActionsMenu } from '@renderer/hooks/use-row-actions-menu'
+import { plural } from '@renderer/lib/plural'
+import { revealLabel } from '@renderer/lib/os-labels'
 import type { RowMenuItem } from '../FileBrowser/row'
 
 export function TreeFileBrowser({
@@ -39,33 +36,20 @@ export function TreeFileBrowser({
   onDropFiles,
   onBack
 }: Props): React.JSX.Element {
-  const [queryState, setQueryState] = useState({ dir: currentDir, value: '' })
-  if (queryState.dir !== currentDir) setQueryState({ dir: currentDir, value: '' })
-  const query = queryState.dir === currentDir ? queryState.value : ''
-  const setQuery = (value: string): void => setQueryState({ dir: currentDir, value })
-  const instructions = useId()
-  // Explicit row names exclude the action button's label from selection announcements.
-  const rowNames = useId()
-  const filterRef = useRef<HTMLInputElement>(null)
-  // rowMenu.target has already been cleared when the close effect restores focus.
-  const menuTarget = useRef<string | null>(null)
+  const [query, setQuery] = useKeyedState(currentDir, '')
   const { openFile, revealFile } = useFileActions()
   const filter = query.trim().toLocaleLowerCase()
   const rows = fileRows(listing.entries ?? [], tree.branches, tree.expanded, sort, filter)
-  const rowMenu = useRowActionsMenu(rows.map((row) => row.entry.path))
-  const selection = useFileSelection(
+  const grid = useBrowserGrid({
     currentDir,
-    rows.map((row) => row.entry.path)
-  )
+    paths: rows.map((row) => row.entry.path),
+    loaded: listing.entries !== null,
+    consumeFocusRequest
+  })
+  const { selection, rowMenu } = grid
   const selectedRow = rows.find((row) => row.entry.path === selection.selected)
   const folderCount = listing.entries?.filter((entry) => entry.kind === 'folder').length ?? 0
   const fileCount = (listing.entries?.length ?? 0) - folderCount
-
-  useEffect(() => {
-    if (listing.entries !== null && consumeFocusRequest?.(currentDir)) {
-      selection.focusFirstRow()
-    }
-  }, [consumeFocusRequest, currentDir, listing.entries, selection])
 
   const focus = (row: FileRow | undefined): void => {
     if (row) selection.focus(row.entry.path)
@@ -88,23 +72,6 @@ export function TreeFileBrowser({
         ]
       : []
 
-  const openContextMenu = (
-    event: React.MouseEvent<HTMLTableRowElement> | React.KeyboardEvent<HTMLTableRowElement>,
-    row: FileRow
-  ): void => {
-    event.preventDefault()
-    selection.focus(row.entry.path)
-    menuTarget.current = row.entry.path
-    const bounds = event.currentTarget.getBoundingClientRect()
-    const pointer = 'clientX' in event && event.clientX > 0
-    rowMenu.openAt(
-      row.entry.path,
-      pointer
-        ? { left: event.clientX, top: event.clientY }
-        : { left: bounds.right - 24, top: bounds.top }
-    )
-  }
-
   const onKeyDown = (
     event: React.KeyboardEvent<HTMLTableRowElement>,
     row: FileRow,
@@ -112,7 +79,7 @@ export function TreeFileBrowser({
   ): void => {
     if (event.target !== event.currentTarget) return
     if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
-      openContextMenu(event, row)
+      grid.openContextMenu(event, row.entry.path)
       return
     }
     switch (event.key) {
@@ -157,7 +124,7 @@ export function TreeFileBrowser({
       readOnly={readOnly}
       query={query}
       filterLabel="Filter loaded files"
-      filterRef={filterRef}
+      filterRef={grid.filterRef}
       onQueryChange={setQuery}
       onRefresh={refresh}
       onDropFiles={onDropFiles}
@@ -165,8 +132,8 @@ export function TreeFileBrowser({
       summary={
         listing.entries
           ? filter
-            ? `${rows.length} item${rows.length === 1 ? '' : 's'} shown · Loaded folders only`
-            : `${folderCount} folder${folderCount === 1 ? '' : 's'}, ${fileCount} file${fileCount === 1 ? '' : 's'}`
+            ? `${plural(rows.length, 'item')} shown · Loaded folders only`
+            : `${plural(folderCount, 'folder')}, ${plural(fileCount, 'file')}`
           : '—'
       }
       actions={
@@ -182,7 +149,7 @@ export function TreeFileBrowser({
         </Button>
       }
     >
-      <p id={instructions} className="sr-only">
+      <p id={grid.instructions} className="sr-only">
         Use the up and down arrow keys to select files, right and left to expand or collapse
         folders, and Enter to open. Double-click a row to open it. Filtering searches only folders
         already loaded.
@@ -190,7 +157,7 @@ export function TreeFileBrowser({
       <Table
         role="treegrid"
         aria-label={name}
-        aria-describedby={instructions}
+        aria-describedby={grid.instructions}
         layout="fixed"
         className={FILE_TABLE_CLASS}
       >
@@ -225,30 +192,30 @@ export function TreeFileBrowser({
         </Table.Header>
         <Table.Body>
           {listing.error || listing.entries === null || rows.length === 0 ? (
-            <BrowserMessageRow level={1}>
-              {listing.error ? (
-                <BrowserError message={listing.error} onRetry={refresh} onBack={onBack} />
-              ) : listing.entries === null ? (
-                <BrowserLoading />
-              ) : filter ? (
-                <BrowserNoMatches
-                  title="No matching files"
-                  description="Only loaded folders are included. Try a different name or clear the filter."
-                  onClear={() => setQuery('')}
-                />
-              ) : (
-                <BrowserEmpty
-                  title="This folder is empty"
-                  description={
-                    readOnly ? undefined : 'Drop files here or use Add files to import them.'
-                  }
-                />
-              )}
-            </BrowserMessageRow>
+            <BrowserState
+              level={1}
+              error={listing.error}
+              loading={listing.entries === null}
+              filter={filter}
+              onRetry={refresh}
+              onBack={onBack}
+              onClearFilter={() => setQuery('')}
+              noMatches={{
+                title: 'No matching files',
+                description:
+                  'Only loaded folders are included. Try a different name or clear the filter.'
+              }}
+              empty={{
+                title: 'This folder is empty',
+                description: readOnly
+                  ? undefined
+                  : 'Drop files here or use Add files to import them.'
+              }}
+            />
           ) : (
             rows.map((row, index) => {
               const { entry, ancestors, expanded } = row
-              const nameId = `${rowNames}-${index}-name`
+              const nameId = `${grid.rowNames}-${index}-name`
               const branch = tree.branches.get(entry.path)
               const branchMessage =
                 expanded &&
@@ -265,7 +232,7 @@ export function TreeFileBrowser({
                     aria-expanded={entry.kind === 'folder' ? expanded : undefined}
                     className={FILE_ROW_CLASS}
                     onDoubleClick={() => void open(row)}
-                    onContextMenu={(event) => openContextMenu(event, row)}
+                    onContextMenu={(event) => grid.openContextMenu(event, row.entry.path)}
                     onKeyDown={(event) => onKeyDown(event, row, index)}
                   >
                     <Table.Cell className="relative">
@@ -329,12 +296,7 @@ export function TreeFileBrowser({
                       name={entry.name}
                       menuId={rowMenu.id}
                       expanded={rowMenu.target === entry.path}
-                      onClick={(event) => {
-                        selection.focus(entry.path)
-                        menuTarget.current = entry.path
-                        const bounds = event.currentTarget.getBoundingClientRect()
-                        rowMenu.openAt(entry.path, { left: bounds.right, top: bounds.bottom })
-                      }}
+                      onClick={(event) => grid.openActionsMenu(event, entry.path)}
                     />
                   </Table.Row>
                   {branchMessage ? (
@@ -383,11 +345,7 @@ export function TreeFileBrowser({
         actions={actions(rows.find((row) => row.entry.path === rowMenu.target))}
         focusScope={currentDir}
         onOpenChange={rowMenu.onOpenChange}
-        onRestoreFocus={() => {
-          if (selection.focus(menuTarget.current ?? undefined)) return
-          if (selection.focusFirstRow()) return
-          filterRef.current?.focus()
-        }}
+        onRestoreFocus={grid.restoreFocus}
       />
     </FileBrowserFrame>
   )

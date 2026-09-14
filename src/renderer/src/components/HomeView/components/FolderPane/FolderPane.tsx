@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useState } from 'react'
 import { useCrumbs } from '@renderer/hooks/use-crumbs'
 import { useDirListing } from '@renderer/hooks/use-dir-listing'
 import { useImportFiles } from '@renderer/hooks/use-import-files'
@@ -21,34 +21,15 @@ export function FolderPane({
   const listing = useDirListing(present ? trail.currentDir : null)
   const tree = useTreeFolders(trail.currentDir)
   const [sort, setSort] = useState<Sort>({ column: 'name', direction: 'ascending' })
-  const pendingFocusDir = useRef<string | null>(null)
   const importer = useImportFiles(present ? trail.currentDir : undefined)
   const coordinator = useQueryRefresh()
-
-  const consumeFocusRequest = useCallback((currentDir: string): boolean => {
-    if (pendingFocusDir.current !== currentDir) return false
-    pendingFocusDir.current = null
-    return true
-  }, [])
-  const enterMany = (
-    folders: Parameters<typeof trail.enterMany>[0],
-    focusFirstRow: boolean
-  ): void => {
-    const destination = folders.at(-1)
-    pendingFocusDir.current = focusFirstRow && destination ? destination.path : null
-    trail.enterMany(folders)
-  }
-  const jumpTo = (depth: number): void => {
-    pendingFocusDir.current = depth === 0 ? baseDir : trail.crumbs[depth - 1].path
-    trail.jumpTo(depth)
-  }
 
   return (
     <div role="tabpanel" aria-label={label} className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-10 shrink-0 items-center justify-between gap-4 border-b border-kumo-line px-4 py-1">
         <CrumbTrail
           names={[label, ...trail.crumbs.map((crumb) => crumb.name)]}
-          onNavigate={jumpTo}
+          onNavigate={trail.jumpTo}
         />
         <ImportFilesButton importer={importer} disabled={!present} />
       </div>
@@ -61,10 +42,10 @@ export function FolderPane({
           sort={sort}
           onSortChange={setSort}
           readOnly={false}
-          onNavigate={enterMany}
-          consumeFocusRequest={consumeFocusRequest}
+          onNavigate={trail.enterMany}
+          consumeFocusRequest={trail.consumeFocusRequest}
           onDropFiles={importer.importPaths}
-          onBack={{ label: `Back to ${label}`, action: () => jumpTo(0) }}
+          onBack={{ label: `Back to ${label}`, action: () => trail.jumpTo(0) }}
         />
       ) : (
         <DirectoryBrowser

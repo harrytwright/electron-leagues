@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Button, Checkbox, Dialog, Input, Select, Text } from '@cloudflare/kumo'
 import { parseSeasonName, suggestSeasonName, type SeasonType } from '@shared/season'
 import {
@@ -8,6 +8,7 @@ import {
   WORKFLOWS
 } from '@shared/workflows'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
+import { useDialogTask } from '@renderer/hooks/use-dialog-task'
 import { useWriteOperation } from '@renderer/hooks/use-write-operation'
 import { TaskDialog } from '../TaskDialog'
 import type { Props, SeasonTypeOption, Source } from './interface'
@@ -59,34 +60,27 @@ export function NewSeasonDialog({
   const [name, setName] = useState(() => suggestSeasonName(initialType, current, new Date()))
   const [source, setSource] = useState<Source>(league.running ? 'previous' : 'templates')
   const [archiveOldest, setArchiveOldest] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [wasOpen, setWasOpen] = useState(open)
   const nameRef = useRef<HTMLInputElement>(null)
-  const wasOpen = useRef(false)
-  // Bumped on every open so a create left pending across close/reopen can
-  // never write its stale outcome onto the fresh form.
-  const submission = useRef(0)
   const operation = useWriteOperation({
     label: () => 'Creating season',
     write: (request: CreateSeasonRequest) => window.api.createSeason(request)
   })
+  const task = useDialogTask({ open, onOpenChange, fieldRef: nameRef })
 
-  useEffect(() => {
-    // Reset only on the closed→open transition — a tree refresh while the
-    // dialog is open must not wipe what the user has typed.
-    const justOpened = open && !wasOpen.current
-    wasOpen.current = open
-    if (!justOpened) return
-    submission.current += 1
-    const latest = latestSeasonName ? parseSeasonName(latestSeasonName) : null
-    const nextType = latest?.type ?? 'cross-year'
-    setType(nextType)
-    setName(suggestSeasonName(nextType, latest, new Date()))
-    setSource(league.running ? 'previous' : 'templates')
-    setArchiveOldest(true)
-    setError(null)
-    setBusy(false)
-  }, [league.running, latestSeasonName, open])
+  // Reset only on the closed→open transition — a tree refresh while the
+  // dialog is open must not wipe what the user has typed.
+  if (wasOpen !== open) {
+    setWasOpen(open)
+    if (open) {
+      const latest = latestSeasonName ? parseSeasonName(latestSeasonName) : null
+      const nextType = latest?.type ?? 'cross-year'
+      setType(nextType)
+      setName(suggestSeasonName(nextType, latest, new Date()))
+      setSource(league.running ? 'previous' : 'templates')
+      setArchiveOldest(true)
+    }
+  }
 
   const parsed = parseSeasonName(name)
   const oldest = league.seasons[0]
@@ -95,22 +89,19 @@ export function NewSeasonDialog({
   const changeType = (nextType: SeasonType): void => {
     setType(nextType)
     setName(suggestSeasonName(nextType, current, new Date()))
-    setError(null)
+    task.edited()
   }
 
   const submit = async (event: React.FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault()
-    if (busy) return
+    if (task.busy) return
     if (!parsed || parsed.type !== type) {
       const typeLabel = TYPES.find((item) => item.value === type)?.label.toLowerCase() ?? type
-      setError(`Not a valid ${typeLabel} season name`)
-      nameRef.current?.focus()
+      task.reject(`Not a valid ${typeLabel} season name`)
       return
     }
 
-    const ticket = (submission.current += 1)
-    setBusy(true)
-    setError(null)
+    const ticket = task.begin()
     try {
       const outcome = await operation.run({
         day: league.day,
@@ -120,32 +111,22 @@ export function NewSeasonDialog({
         // Never ask main to archive when the option was never shown.
         archiveOldest: willArchive ? archiveOldest : false
       })
-      if (submission.current !== ticket) return
       if (outcome.status === 'refresh-failed') {
-        setError(
-          `Created “${parsed.name}”, but the league could not be refreshed: ${outcome.refreshError}`
-        )
-        setBusy(false)
-        nameRef.current?.focus()
+        task.settle(ticket, {
+          type: 'failed',
+          error: `Created “${parsed.name}”, but the league could not be refreshed: ${outcome.refreshError}`
+        })
         return
       }
-      setBusy(false)
-      onCreated()
+      task.settle(ticket, { type: 'completed' })
+      if (task.isCurrent(ticket)) onCreated()
     } catch (caught) {
-      if (submission.current !== ticket) return
-      setError(ipcErrorMessage(caught))
-      setBusy(false)
-      nameRef.current?.focus()
+      task.settle(ticket, { type: 'failed', error: ipcErrorMessage(caught) })
     }
   }
 
-  const handleOpenChange = (next: boolean): void => {
-    if (busy && !next) return
-    onOpenChange(next)
-  }
-
   return (
-    <TaskDialog open={open} onOpenChange={handleOpenChange} size="lg">
+    <TaskDialog open={open} onOpenChange={task.handleOpenChange} size="lg">
       <TaskDialog.Header
         title={`New season — ${league.meta.name}`}
         description="Choose the season name and starting documents."
@@ -168,11 +149,11 @@ export function NewSeasonDialog({
           autoComplete="off"
           autoFocus
           value={name}
-          aria-invalid={error ? true : undefined}
-          aria-describedby={error ? 'new-season-error' : undefined}
+          aria-invalid={task.error ? true : undefined}
+          aria-describedby={task.error ? 'new-season-error' : undefined}
           onChange={(event) => {
             setName(event.target.value)
-            if (error) setError(null)
+            if (task.error) task.edited()
           }}
         />
 
@@ -193,22 +174,22 @@ export function NewSeasonDialog({
           />
         ) : null}
 
-        {error ? (
+        {task.error ? (
           <Text id="new-season-error" variant="error" role="alert">
-            {error}
+            {task.error}
           </Text>
         ) : null}
 
         <TaskDialog.Actions>
           <Dialog.Close
             render={(props) => (
-              <Button {...props} type="button" variant="secondary" disabled={busy}>
+              <Button {...props} type="button" variant="secondary" disabled={task.busy}>
                 Cancel
               </Button>
             )}
           />
-          <Button type="submit" variant="primary" disabled={busy || !name.trim()}>
-            {busy ? 'Creating…' : 'Create season'}
+          <Button type="submit" variant="primary" disabled={task.busy || !name.trim()}>
+            {task.busy ? 'Creating…' : 'Create season'}
           </Button>
         </TaskDialog.Actions>
       </TaskDialog.Body>

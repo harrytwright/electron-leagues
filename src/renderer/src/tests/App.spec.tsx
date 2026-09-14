@@ -20,7 +20,7 @@ import {
 } from '../lib/workspace-store'
 import { createLocalStorageWorkspaceStorage } from './local-storage-workspace-storage'
 import { parseWorkspaceEnvelope } from './workspace-envelope'
-import { trashLabel } from '../lib/trash-label'
+import { trashLabel } from '../lib/os-labels'
 import { makeDirEntry, makeLeague, makeTree } from './fixtures'
 import {
   emitAppCommand,
@@ -702,27 +702,23 @@ it('unsubscribes from tree changes on unmount', async () => {
 })
 
 it('keeps the sidebar and location control usable after a pane render fails', async () => {
-  const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-  try {
-    const api = installScannedRoot('/root', {
-      scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs')),
-      listDir: vi.fn().mockResolvedValue([null])
-    })
-    const user = userEvent.setup()
-    renderApp()
+  vi.spyOn(console, 'error').mockImplementation(() => {})
+  const api = installScannedRoot('/root', {
+    scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs')),
+    listDir: vi.fn().mockResolvedValue([null])
+  })
+  const user = userEvent.setup()
+  renderApp()
 
-    expect(await screen.findByRole('alert')).toBeInTheDocument()
-    expect(screen.getByRole('navigation', { name: 'Leagues' })).toBeInTheDocument()
-    expect(screen.getByRole('contentinfo', { name: 'Application status' })).toBeInTheDocument()
-    act(() => emitAppCommand({ command: 'open-location', repeat: false, composing: false }))
-    await waitFor(() => expect(api.chooseRoot).toHaveBeenCalledExactlyOnceWith('select'))
+  expect(await screen.findByRole('alert')).toBeInTheDocument()
+  expect(screen.getByRole('navigation', { name: 'Leagues' })).toBeInTheDocument()
+  expect(screen.getByRole('contentinfo', { name: 'Application status' })).toBeInTheDocument()
+  act(() => emitAppCommand({ command: 'open-location', repeat: false, composing: false }))
+  await waitFor(() => expect(api.chooseRoot).toHaveBeenCalledExactlyOnceWith('select'))
 
-    await user.click(screen.getByRole('button', { name: 'Pairs' }))
-    expect(await screen.findByRole('heading', { name: 'Pairs' })).toBeInTheDocument()
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
-  } finally {
-    consoleError.mockRestore()
-  }
+  await user.click(screen.getByRole('button', { name: 'Pairs' }))
+  expect(await screen.findByRole('heading', { name: 'Pairs' })).toBeInTheDocument()
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 })
 
 it('keeps B displayed when a slow A scan settles after switching', async () => {

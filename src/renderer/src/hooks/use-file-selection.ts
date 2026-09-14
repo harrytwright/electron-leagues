@@ -1,4 +1,5 @@
-import { useRef, useState, type ComponentPropsWithRef, type KeyboardEvent } from 'react'
+import { useRef, type ComponentPropsWithRef, type KeyboardEvent } from 'react'
+import { useKeyedState } from './use-keyed-state'
 
 interface Selection {
   selected: string | null
@@ -10,13 +11,8 @@ interface Selection {
 
 /** Roving row focus shared by flat and tree grids; tree-specific keys stay with the tree. */
 export function useFileSelection(currentDir: string, paths: readonly string[]): Selection {
-  const [state, setState] = useState<{ dir: string; selected: string | null }>({
-    dir: currentDir,
-    selected: null
-  })
-  if (state.dir !== currentDir) setState({ dir: currentDir, selected: null })
+  const [selected, setSelected] = useKeyedState<string, string | null>(currentDir, null)
   const elements = useRef(new Map<string, HTMLTableRowElement>())
-  const selected = state.dir === currentDir ? state.selected : null
   const focusPath = selected !== null && paths.includes(selected) ? selected : paths[0]
   const focus = (path: string | undefined): boolean => {
     const element = path === undefined ? undefined : elements.current.get(path)
@@ -34,7 +30,7 @@ export function useFileSelection(currentDir: string, paths: readonly string[]): 
       },
       'aria-selected': selected === path,
       tabIndex: focusPath === path ? 0 : -1,
-      onFocus: () => setState({ dir: currentDir, selected: path }),
+      onFocus: () => setSelected(path),
       onClick: () => focus(path)
     }),
     onKeyDown: (event, index, open) => {

@@ -9,7 +9,7 @@ import { XIcon } from '@phosphor-icons/react/dist/csr/X'
 import { IconButton } from '../../../IconButton'
 import type { Props } from './interface'
 import { useAppCommandHandler } from '@renderer/hooks/use-app-commands'
-import { appShortcutAria, appShortcutLabel } from '@renderer/lib/app-shortcut-label'
+import { appShortcutAria, appShortcutLabel } from '@renderer/lib/os-labels'
 
 /** Shared desktop pane: fixed controls and status, with a scrolling file area. */
 export function FileBrowserFrame({
