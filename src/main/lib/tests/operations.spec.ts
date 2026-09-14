@@ -657,7 +657,8 @@ describe('zipArchivedSeasons', () => {
     expect(await exists(join(root, '_archives/Mens Triples/2025-26.zip'))).toBe(false)
   })
 
-  test.skipIf(process.getuid?.() === 0)(
+  // Root ignores mode bits, and Windows ignores them on directories altogether.
+  test.skipIf(process.getuid?.() === 0 || process.platform === 'win32')(
     'settles with a user-facing error when the zip destination is read-only',
     async () => {
       const archiveDir = join(root, '_archives/Mens Triples')

@@ -82,9 +82,13 @@ test('metadata skips hidden names before statting and tolerates vanished childre
   ])
 })
 
-test('metadata errors other than a vanished child are still surfaced', async () => {
-  await writeFile(join(root, 'Rules.docx'), 'rules')
-  await expect(readEntryMetadata(join(root, 'Rules.docx'), ['child'])).rejects.toMatchObject({
-    code: 'ENOTDIR'
-  })
-})
+// Windows reports a path through a regular file as ENOENT, which is a vanished child.
+test.skipIf(process.platform === 'win32')(
+  'metadata errors other than a vanished child are still surfaced',
+  async () => {
+    await writeFile(join(root, 'Rules.docx'), 'rules')
+    await expect(readEntryMetadata(join(root, 'Rules.docx'), ['child'])).rejects.toMatchObject({
+      code: 'ENOTDIR'
+    })
+  }
+)

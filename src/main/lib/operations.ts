@@ -18,7 +18,7 @@ import { compareSeasonNames, parseSeasonName, type SeasonName } from '../../shar
 import { sanitiseFolderName } from '../../shared/sanitise'
 import type { Weekday } from '../../shared/weekday'
 import type { SeasonCreateRequest, SeasonSyncRequest } from '../../shared/season-create'
-import { isAlreadyExists, toUserFacing, UserFacingError } from './fs-errors'
+import { isAlreadyExists, isMissing, toUserFacing, UserFacingError } from './fs-errors'
 import { META_FILE, writeLeagueMeta } from './league-meta'
 import {
   ARCHIVES_FOLDER,
@@ -414,8 +414,21 @@ export async function importFiles(dest: string, sources: string[]): Promise<stri
     while (true) {
       const name = suffix === 1 ? `${stem}${ext}` : `${stem} (${suffix})${ext}`
       const target = join(dest, name)
+      // Anything already at the name is taken, a dangling link included: Windows would copy
+      // through such a link rather than refuse it, where POSIX refuses under the exclusive flag.
+      const occupied = await lstat(target).then(
+        () => true,
+        (err) => {
+          if (isMissing(err)) return false
+          throw err
+        }
+      )
+      if (occupied) {
+        suffix += 1
+        continue
+      }
       try {
-        // The exclusive flag closes the exists/copy race and refuses dangling links as destinations.
+        // The exclusive flag still closes the exists/copy race between the check and the copy.
         await copyFile(source, target, constants.COPYFILE_EXCL)
         copied.push(target)
         break
