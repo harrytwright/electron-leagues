@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
+import { useQueries, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import type { DirEntry } from '@shared/tree'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
+import { dirListingQuery, dirQueryKey } from '@renderer/queries/dir'
+import { useQueryRefresh } from './use-query-refresh'
 
 export interface Branch {
   entries: DirEntry[] | null
@@ -22,63 +25,63 @@ function isInside(path: string, directory: string): boolean {
 }
 
 export function useTreeFolders(currentDir: string): TreeFolders {
-  const [branches, setBranches] = useState(new Map<string, Branch>())
+  const queryClient = useQueryClient()
+  const coordinator = useQueryRefresh()
+  const [visited, setVisited] = useState(new Set<string>())
   const [expanded, setExpanded] = useState(new Set<string>())
-  const requests = useRef(new Map<string, object>())
-  const scope = useRef(currentDir)
-  const reloadScope = useRef({ currentDir, expanded })
+  const [scope, setScope] = useState(currentDir)
 
-  if (scope.current !== currentDir) {
-    scope.current = currentDir
-    // Navigation drops unrelated branches so filesystem events cannot keep polling abandoned paths.
-    for (const path of requests.current.keys()) {
-      if (!isInside(path, currentDir)) requests.current.delete(path)
-    }
-    setBranches((current) => new Map([...current].filter(([path]) => isInside(path, currentDir))))
+  if (scope !== currentDir) {
+    setScope(currentDir)
+    setVisited((current) => new Set([...current].filter((path) => isInside(path, currentDir))))
     setExpanded((current) => new Set([...current].filter((path) => isInside(path, currentDir))))
   }
-  useEffect(() => {
-    // Commit the latest reload inputs after render so the watcher never observes an abandoned render.
-    reloadScope.current = { currentDir, expanded }
+
+  const visitedPaths = useMemo(() => [...visited].sort(), [visited])
+  const combineBranches = useCallback(
+    (results: UseQueryResult<DirEntry[], Error>[]): Map<string, Branch> =>
+      new Map(
+        results.map((result, index) => [
+          visitedPaths[index],
+          {
+            entries: result.data ?? null,
+            error: result.error ? ipcErrorMessage(result.error) : null
+          }
+        ])
+      ),
+    [visitedPaths]
+  )
+  // A collapsed branch keeps a disabled observer. With staleTime Infinity and the default gcTime,
+  // that subscription is the only thing keeping its rows alive for the loaded-files filter; drop
+  // it and the data is collected five minutes after collapse.
+  const branches = useQueries({
+    queries: visitedPaths.map((path) => ({
+      ...dirListingQuery(path),
+      enabled: expanded.has(path)
+    })),
+    combine: combineBranches
   })
 
-  const load = useCallback(async (path: string): Promise<void> => {
-    const ticket = {}
-    requests.current.set(path, ticket)
-    setBranches((current) =>
-      new Map(current).set(path, {
-        entries: current.get(path)?.entries ?? null,
-        error: null
+  const load = useCallback(
+    async (path: string): Promise<void> => {
+      setVisited((current) => {
+        if (current.has(path)) return current
+        return new Set(current).add(path)
       })
-    )
-    try {
-      const entries = await window.api.listDir(path)
-      if (requests.current.get(path) !== ticket) return
-      setBranches((current) => new Map(current).set(path, { entries, error: null }))
-    } catch (caught) {
-      if (requests.current.get(path) !== ticket) return
-      setBranches((current) =>
-        new Map(current).set(path, { entries: null, error: ipcErrorMessage(caught) })
-      )
-    }
-  }, [])
+      try {
+        await queryClient.fetchQuery({ ...dirListingQuery(path), staleTime: 0 })
+      } catch {
+        // The observer exposes the error and load has never rejected.
+      }
+    },
+    [queryClient]
+  )
 
   const reload = useCallback(() => {
-    // Collapsed caches do not drive watcher I/O; reopening refreshes their contents instead.
-    const current = reloadScope.current
-    for (const path of current.expanded) {
-      if (isInside(path, current.currentDir)) void load(path)
+    for (const path of expanded) {
+      if (isInside(path, currentDir)) void coordinator.refresh({ queryKey: dirQueryKey(path) })
     }
-  }, [load])
-
-  useEffect(() => {
-    const pending = requests.current
-    const unsubscribe = window.api.onTreeChanged(reload)
-    return () => {
-      unsubscribe()
-      pending.clear()
-    }
-  }, [reload])
+  }, [coordinator, currentDir, expanded])
 
   return {
     branches,

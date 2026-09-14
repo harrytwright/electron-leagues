@@ -722,11 +722,11 @@ it('reconciles a rejected switch with getRoot and keeps the old location', async
   expect(screen.getByRole('button', { name: 'Pairs' })).toBeInTheDocument()
 })
 
-it('keeps two tree watcher subscribers for a mounted ready App', async () => {
+it('keeps one tree watcher subscriber for a mounted ready App', async () => {
   installScannedRoot('/root', { scan: vi.fn().mockResolvedValue(makeTree()) })
   const view = renderApp()
   await screen.findByRole('heading', { name: 'Home' })
-  expect(treeChangedListenerCount()).toBe(2)
+  expect(treeChangedListenerCount()).toBe(1)
   view.unmount()
   expect(treeChangedListenerCount()).toBe(0)
 })
