@@ -19,12 +19,7 @@ interface ToolbarHarness {
 function ToolbarFixture({ isHome, onHome }: ToolbarHarnessProps): React.JSX.Element {
   return (
     <KumoSidebar.Provider contained defaultOpen collapsible="icon" className="flex-col">
-      <Toolbar
-        root="/root/My leagues"
-        isHome={isHome}
-        onHome={onHome}
-        onLocationChanged={vi.fn()}
-      />
+      <Toolbar root="/root/My leagues" isHome={isHome} onHome={onHome} />
       <KumoSidebar>Leagues</KumoSidebar>
     </KumoSidebar.Provider>
   )

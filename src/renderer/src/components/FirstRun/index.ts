@@ -1,2 +1,2 @@
 export { FirstRun } from './FirstRun'
-export type { Mode, Props } from './interface'
+export type { Mode } from './interface'

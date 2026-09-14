@@ -1,49 +1,27 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { Button, Text } from '@cloudflare/kumo'
 import { FolderIcon } from '@phosphor-icons/react/dist/csr/Folder'
-import { pathBasename } from '@renderer/lib/path-basename'
-import { ipcErrorMessage } from '@renderer/lib/ipc-error'
+import { LocationRow } from '../LocationRow/LocationRow'
+import { useRecentRoots } from '@renderer/hooks/use-recent-roots'
 import { useLocationOperation } from '@renderer/hooks/use-location-operation'
-import type { Mode, Props } from './interface'
+import type { Mode } from './interface'
 
-export function FirstRun({ onChosen }: Props): React.JSX.Element {
+export function FirstRun(): React.JSX.Element {
   const [mode, setMode] = useState<Mode | null>(null)
   const [openedPath, setOpenedPath] = useState<string | null>(null)
-  const [recents, setRecents] = useState<string[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const loads = useRef(0)
+  const { roots: recents, error } = useRecentRoots({ enabled: true })
   // Context owns operation concurrency; this ref only keeps a rejected second click
   // from clearing the first click's row-specific loading indicator.
   const showingOperation = useRef(false)
-
-  const loadRecents = async (): Promise<void> => {
-    const ticket = (loads.current += 1)
-    try {
-      const roots = await window.api.recentRoots()
-      if (ticket === loads.current) setRecents(roots)
-    } catch (caught) {
-      if (ticket === loads.current) setError(ipcErrorMessage(caught))
-    }
-  }
-
-  useEffect(() => {
-    // The async call only updates state after its IPC promise settles.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void loadRecents()
-    return () => {
-      loads.current += 1
-    }
-  }, [])
 
   const locationOperation = useLocationOperation()
 
   const choose = async (mode: Mode): Promise<void> => {
     if (locationOperation.busy || showingOperation.current) return
     showingOperation.current = true
-    setError(null)
     setMode(mode)
     try {
-      await locationOperation.choose(mode, onChosen)
+      await locationOperation.choose(mode)
     } finally {
       showingOperation.current = false
       setMode(null)
@@ -53,14 +31,9 @@ export function FirstRun({ onChosen }: Props): React.JSX.Element {
   const openRecent = async (path: string): Promise<void> => {
     if (locationOperation.busy || showingOperation.current) return
     showingOperation.current = true
-    setError(null)
     setOpenedPath(path)
     try {
-      await locationOperation.switchTo(path, {
-        root: '',
-        onChanged: onChosen,
-        onMissingRecent: loadRecents
-      })
+      await locationOperation.switchTo(path)
     } finally {
       showingOperation.current = false
       setOpenedPath(null)
@@ -96,7 +69,7 @@ export function FirstRun({ onChosen }: Props): React.JSX.Element {
             {mode === 'init' ? 'Creating…' : 'New location…'}
           </Button>
         </div>
-        {recents.length > 0 ? (
+        {recents && recents.length > 0 ? (
           <div className="grid min-h-0 gap-1.5 overflow-hidden border-t border-kumo-line pt-3">
             <Text as="h2" variant="heading">
               Recent locations
@@ -114,10 +87,7 @@ export function FirstRun({ onChosen }: Props): React.JSX.Element {
                   <span className="flex h-lh items-center">
                     <FolderIcon aria-hidden className="shrink-0" />
                   </span>
-                  <span className="grid min-w-0 gap-0.5">
-                    <span className="truncate">{pathBasename(path)}</span>
-                    <span className="truncate text-base text-kumo-subtle">{path}</span>
-                  </span>
+                  <LocationRow path={path} />
                 </Button>
               ))}
             </div>

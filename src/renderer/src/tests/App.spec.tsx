@@ -15,17 +15,29 @@ import { createQueryClient } from '../lib/query-client'
 import { registerTestQueryClient } from './query-clients'
 import { trashLabel } from '../lib/trash-label'
 import { makeDirEntry, makeLeague, makeTree } from './fixtures'
-import { emitAppCommand, emitTreeChanged, installMockApi } from './mock-api'
+import {
+  emitAppCommand,
+  emitTreeChanged,
+  installMockApi,
+  treeChangedListenerCount,
+  type RendererApi
+} from './mock-api'
 
 function renderApp(): RenderResult {
   const queryClient = registerTestQueryClient(createQueryClient())
   return render(<App queryClient={queryClient} />)
 }
 
+function installScannedRoot(root: string, overrides: Partial<RendererApi> = {}): RendererApi {
+  return installMockApi({ getRoot: vi.fn().mockResolvedValue(root), ...overrides })
+}
+
 function treeWithMondayLeagues(root = '/root', ...folderNames: string[]): LeaguesTree {
   const names = folderNames.length > 0 ? folderNames : ['Mixed triples']
   return makeTree({
     root,
+    templatesPath: `${root}/_templates`,
+    sharedPath: `${root}/_shared`,
     days: {
       ...makeTree().days,
       monday: names.map((folderName) =>
@@ -41,7 +53,7 @@ function remember(root: string, day: string, folderName: string): string {
   return stored
 }
 
-it('shows loading, then FirstRun when scan returns null', async () => {
+it('shows loading, then FirstRun when getRoot returns null', async () => {
   installMockApi({ scan: vi.fn().mockResolvedValue(null) })
 
   renderApp()
@@ -55,7 +67,7 @@ it('shows loading, then FirstRun when scan returns null', async () => {
 
 it('shows a scan error without confirming an opened location', async () => {
   installMockApi({
-    scan: vi.fn().mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('Scan failed')),
+    scan: vi.fn().mockRejectedValue(new Error('Scan failed')),
     chooseRoot: vi.fn().mockResolvedValue('/chosen/leagues')
   })
   const user = userEvent.setup()
@@ -70,7 +82,7 @@ it('shows a scan error without confirming an opened location', async () => {
 
 it('shows a scan error without confirming a recent location', async () => {
   installMockApi({
-    scan: vi.fn().mockResolvedValueOnce(null).mockRejectedValueOnce(new Error('Scan failed')),
+    scan: vi.fn().mockRejectedValue(new Error('Scan failed')),
     recentRoots: vi.fn().mockResolvedValue(['/recent/leagues']),
     setRoot: vi.fn().mockResolvedValue('/recent/leagues')
   })
@@ -99,7 +111,6 @@ it('keeps opening status visible through a recent-location scan, then confirms c
   let finishScan!: (tree: LeaguesTree) => void
   const scan = vi
     .fn()
-    .mockResolvedValueOnce(null)
     .mockImplementationOnce(() => new Promise<LeaguesTree>((resolve) => (finishScan = resolve)))
   installMockApi({
     scan,
@@ -134,7 +145,6 @@ it('does not confirm a superseded location scan when the winning watcher scan fa
   let finishLocationScan!: (tree: LeaguesTree) => void
   const scan = vi
     .fn()
-    .mockResolvedValueOnce(null)
     .mockImplementationOnce(
       () => new Promise<LeaguesTree>((resolve) => (finishLocationScan = resolve))
     )
@@ -147,7 +157,7 @@ it('does not confirm a superseded location scan when the winning watcher scan fa
   await screen.findByRole('button', { name: /open location/i })
 
   act(() => emitAppCommand({ command: 'open-location', repeat: false, composing: false }))
-  await waitFor(() => expect(scan).toHaveBeenCalledTimes(2))
+  await waitFor(() => expect(scan).toHaveBeenCalledTimes(1))
   act(() => emitTreeChanged())
   expect(
     await screen.findByRole('heading', { name: 'Couldn’t read the leagues folder' })
@@ -181,7 +191,7 @@ it('shares one location-operation guard between FirstRun rows and app commands',
 })
 
 it('shows Home on Shared documents and reports that directory in the status bar', async () => {
-  installMockApi({ scan: vi.fn().mockResolvedValue(makeTree()) })
+  installScannedRoot('/root', { scan: vi.fn().mockResolvedValue(makeTree()) })
 
   renderApp()
 
@@ -195,7 +205,7 @@ it('shows Home on Shared documents and reports that directory in the status bar'
 
 it('routes application commands to the visible browser and location control', async () => {
   const scan = vi.fn().mockResolvedValue(makeTree())
-  const api = installMockApi({ scan })
+  const api = installScannedRoot('/root', { scan })
   renderApp()
   await screen.findByRole('heading', { name: 'Home' })
 
@@ -213,14 +223,14 @@ it('routes application commands to the visible browser and location control', as
   act(() => emitAppCommand({ command: 'refresh', repeat: false, composing: false }))
   await waitFor(() => expect(api.listDir).toHaveBeenCalledTimes(listCalls + 1))
   act(() => emitAppCommand({ command: 'open-location', repeat: false, composing: false }))
-  expect(api.chooseRoot).toHaveBeenCalledExactlyOnceWith('select')
+  await waitFor(() => expect(api.chooseRoot).toHaveBeenCalledExactlyOnceWith('select'))
 })
 
 it('updates the status path from the location root through league navigation', async () => {
   const leaguePath = '/root/monday/Pairs'
   const seasonPath = `${leaguePath}/2025-26`
   const weekPath = `${seasonPath}/Week 1`
-  installMockApi({
+  installScannedRoot('/root', {
     scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs', 'Trios')),
     listDir: vi.fn((path: string) =>
       Promise.resolve(
@@ -250,7 +260,9 @@ it('updates the status path from the location root through league navigation', a
 })
 
 it('tracks Home tabs and resets Home to Shared documents after league navigation', async () => {
-  installMockApi({ scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs')) })
+  installScannedRoot('/root', {
+    scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs'))
+  })
   const user = userEvent.setup()
 
   renderApp()
@@ -272,7 +284,7 @@ it('tracks Home tabs and resets Home to Shared documents after league navigation
 
 it('keeps the current Home pane and status in sync on a redundant Home click', async () => {
   const folder = makeDirEntry({ name: 'Admin', kind: 'folder', path: '/root/_templates/Admin' })
-  installMockApi({
+  installScannedRoot('/root', {
     scan: vi.fn().mockResolvedValue(makeTree()),
     listDir: vi.fn((dir: string) => Promise.resolve(dir === '/root/_templates' ? [folder] : []))
   })
@@ -301,7 +313,7 @@ it('resets Home and its status directory when the location changes', async () =>
         sharedPath: '/b/_shared'
       })
     )
-  installMockApi({ scan })
+  installScannedRoot('/a', { scan, chooseRoot: vi.fn().mockResolvedValue('/b') })
   const user = userEvent.setup()
 
   renderApp()
@@ -310,7 +322,7 @@ it('resets Home and its status directory when the location changes', async () =>
   await user.click(screen.getByRole('tab', { name: 'Templates' }))
   expect(within(status).getByTitle('/a/_templates')).toBeInTheDocument()
 
-  act(() => emitTreeChanged())
+  act(() => emitAppCommand({ command: 'open-location', repeat: false, composing: false }))
 
   await waitFor(() => {
     expect(screen.getByRole('tab', { name: 'Shared documents' })).toHaveAttribute(
@@ -322,15 +334,15 @@ it('resets Home and its status directory when the location changes', async () =>
 })
 
 it('rescans when the tree changes on disk', async () => {
-  const scan = vi.fn().mockResolvedValueOnce(null).mockResolvedValue(makeTree())
-  installMockApi({ scan })
-
+  const scan = vi
+    .fn()
+    .mockResolvedValueOnce(treeWithMondayLeagues('/root', 'Pairs'))
+    .mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs', 'Trios'))
+  installScannedRoot('/root', { scan })
   renderApp()
-  expect(await screen.findByRole('button', { name: /open location/i })).toBeInTheDocument()
-
+  await screen.findByRole('button', { name: 'Pairs' })
   act(() => emitTreeChanged())
-
-  expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
+  expect(await screen.findByRole('button', { name: 'Trios' })).toBeInTheDocument()
 })
 
 it('shows a recoverable error when the scan fails, and retries', async () => {
@@ -338,7 +350,7 @@ it('shows a recoverable error when the scan fails, and retries', async () => {
     .fn()
     .mockRejectedValueOnce(new Error("Error invoking remote method 'leagues:scan': Error: EPERM"))
     .mockResolvedValue(makeTree())
-  installMockApi({ scan })
+  installScannedRoot('/root', { scan })
   const user = userEvent.setup()
 
   renderApp()
@@ -359,7 +371,7 @@ it('shows one scan error when a league overview refresh fails', async () => {
     .fn()
     .mockResolvedValueOnce(treeWithMondayLeagues('/root', 'Pairs'))
     .mockRejectedValueOnce(new Error('Scan failed'))
-  installMockApi({ scan })
+  installScannedRoot('/root', { scan })
   const user = userEvent.setup()
   renderApp()
 
@@ -377,7 +389,7 @@ it('keeps the completed-delete context when its refresh replaces the dialog with
     .fn()
     .mockResolvedValueOnce(treeWithMondayLeagues('/root', 'Pairs'))
     .mockRejectedValueOnce(new Error('Scan failed'))
-  const api = installMockApi({ scan })
+  const api = installScannedRoot('/root', { scan })
   const user = userEvent.setup()
   renderApp()
 
@@ -404,7 +416,7 @@ it('shows one scan error when refreshing a missing Home folder fails', async () 
     .fn()
     .mockResolvedValueOnce(makeTree({ hasShared: false }))
     .mockRejectedValueOnce(new Error('Scan failed'))
-  installMockApi({ scan })
+  installScannedRoot('/root', { scan })
   const user = userEvent.setup()
   renderApp()
 
@@ -419,7 +431,7 @@ it('shows one scan error when refreshing a missing Home folder fails', async () 
 
 it('keeps offering retry when the rescan fails again', async () => {
   const scan = vi.fn().mockRejectedValue(new Error('still broken'))
-  installMockApi({ scan })
+  installScannedRoot('/root', { scan })
   const user = userEvent.setup()
 
   renderApp()
@@ -436,7 +448,7 @@ it('keeps offering retry when the rescan fails again', async () => {
 
 it('escapes a broken folder by choosing another', async () => {
   const scan = vi.fn().mockRejectedValue(new Error('unreadable'))
-  const api = installMockApi({ scan })
+  const api = installScannedRoot('/root', { scan })
   const user = userEvent.setup()
 
   renderApp()
@@ -450,7 +462,7 @@ it('escapes a broken folder by choosing another', async () => {
 
 it('restores the remembered league for the location after the first scan', async () => {
   remember('/root', 'monday', 'Trios')
-  installMockApi({
+  installScannedRoot('/root', {
     scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs', 'Trios'))
   })
 
@@ -463,7 +475,7 @@ it('restores the remembered league for the location after the first scan', async
 it('falls back to home when the remembered league is not where it was, keeping the memory', async () => {
   // Same folder name, but remembered under a different day than the tree has it.
   const stored = remember('/root', 'tuesday', 'Trios')
-  installMockApi({
+  installScannedRoot('/root', {
     scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs', 'Trios'))
   })
 
@@ -475,7 +487,9 @@ it('falls back to home when the remembered league is not where it was, keeping t
 })
 
 it('remembers selections and returns to Home from the title bar', async () => {
-  installMockApi({ scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs')) })
+  installScannedRoot('/root', {
+    scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs'))
+  })
   const user = userEvent.setup()
 
   renderApp()
@@ -499,7 +513,7 @@ it('drops the selection to home when the selected league disappears from a resca
     .fn()
     .mockResolvedValueOnce(treeWithMondayLeagues('/root', 'Pairs', 'Trios'))
     .mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs'))
-  installMockApi({ scan })
+  installScannedRoot('/root', { scan })
   const user = userEvent.setup()
 
   renderApp()
@@ -520,13 +534,13 @@ it('switching location restores that location’s memory without touching the ot
     .fn()
     .mockResolvedValueOnce(treeWithMondayLeagues('/a', 'Pairs'))
     .mockResolvedValue(treeWithMondayLeagues('/b', 'Trios'))
-  installMockApi({ scan })
+  installScannedRoot('/a', { scan, chooseRoot: vi.fn().mockResolvedValue('/b') })
 
   renderApp()
   expect(await screen.findByRole('heading', { name: 'Pairs' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Monday' })).toHaveAttribute('aria-expanded', 'false')
 
-  act(() => emitTreeChanged())
+  act(() => emitAppCommand({ command: 'open-location', repeat: false, composing: false }))
 
   expect(await screen.findByRole('heading', { name: 'Trios' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Monday' })).toHaveAttribute('aria-expanded', 'true')
@@ -539,9 +553,9 @@ it('refetches a previously visited folder after switching away and back', async 
     .fn()
     .mockResolvedValueOnce(treeWithMondayLeagues('/a', 'Pairs'))
     .mockResolvedValueOnce(treeWithMondayLeagues('/b', 'Trios'))
-    .mockResolvedValueOnce(treeWithMondayLeagues('/a', 'Pairs'))
+    .mockResolvedValueOnce(treeWithMondayLeagues('/a', 'Pairs', 'Fours'))
   const listDir = vi.fn().mockResolvedValue([])
-  installMockApi({
+  installScannedRoot('/a', {
     scan,
     listDir,
     recentRoots: vi.fn().mockResolvedValue(['/a', '/b'])
@@ -559,9 +573,16 @@ it('refetches a previously visited folder after switching away and back', async 
   let menu = await screen.findByRole('menu')
   await user.click(await within(menu).findByRole('menuitemradio', { name: /^b/ }))
   await screen.findByRole('heading', { name: 'Home' })
+  // Radio items leave the menu open, so it is reused rather than reopened. Its items are
+  // disabled until the switch has finished, which the cleared activity region confirms.
+  await waitFor(() =>
+    expect(screen.getByRole('status', { name: 'Application activity' })).toBeEmptyDOMElement()
+  )
   menu = await screen.findByRole('menu')
-  fireEvent.click(await within(menu).findByRole('menuitemradio', { name: /^a/ }))
+  await user.click(await within(menu).findByRole('menuitemradio', { name: /^a/ }))
   await screen.findByRole('heading', { name: 'Pairs' })
+  expect(await screen.findByRole('button', { name: 'Fours' })).toBeInTheDocument()
+  expect(scan).toHaveBeenCalledTimes(3)
   await user.dblClick(screen.getByRole('row', { name: /^2025-26/ }))
 
   await waitFor(() =>
@@ -586,7 +607,7 @@ it('unsubscribes from tree changes on unmount', async () => {
 it('keeps the sidebar and location control usable after a pane render fails', async () => {
   const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
   try {
-    const api = installMockApi({
+    const api = installScannedRoot('/root', {
       scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/root', 'Pairs')),
       listDir: vi.fn().mockResolvedValue([null])
     })
@@ -597,7 +618,7 @@ it('keeps the sidebar and location control usable after a pane render fails', as
     expect(screen.getByRole('navigation', { name: 'Leagues' })).toBeInTheDocument()
     expect(screen.getByRole('contentinfo', { name: 'Application status' })).toBeInTheDocument()
     act(() => emitAppCommand({ command: 'open-location', repeat: false, composing: false }))
-    expect(api.chooseRoot).toHaveBeenCalledExactlyOnceWith('select')
+    await waitFor(() => expect(api.chooseRoot).toHaveBeenCalledExactlyOnceWith('select'))
 
     await user.click(screen.getByRole('button', { name: 'Pairs' }))
     expect(await screen.findByRole('heading', { name: 'Pairs' })).toBeInTheDocument()
@@ -605,4 +626,125 @@ it('keeps the sidebar and location control usable after a pane render fails', as
   } finally {
     consoleError.mockRestore()
   }
+})
+
+it('keeps B displayed when a slow A scan settles after switching', async () => {
+  let finishA!: (tree: LeaguesTree) => void
+  const scan = vi
+    .fn()
+    .mockImplementationOnce(() => new Promise<LeaguesTree>((resolve) => (finishA = resolve)))
+    .mockResolvedValue(treeWithMondayLeagues('/b', 'B league'))
+  installScannedRoot('/a', { scan, chooseRoot: vi.fn().mockResolvedValue('/b') })
+  renderApp()
+  await waitFor(() => expect(scan).toHaveBeenCalledOnce())
+  act(() => emitAppCommand({ command: 'open-location', repeat: false, composing: false }))
+  expect(await screen.findByRole('button', { name: 'B league' })).toBeInTheDocument()
+  await act(async () => finishA(treeWithMondayLeagues('/a', 'A league')))
+  expect(screen.queryByRole('button', { name: 'A league' })).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'B league' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Location: b' })).toBeInTheDocument()
+})
+
+it('leaves root, tree and status untouched when the picker is cancelled', async () => {
+  const api = installScannedRoot('/a', {
+    scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/a', 'Pairs'))
+  })
+  renderApp()
+  await screen.findByRole('button', { name: 'Pairs' })
+  const status = screen.getByRole('contentinfo', { name: 'Application status' })
+  act(() => emitAppCommand({ command: 'open-location', repeat: false, composing: false }))
+  await waitFor(() => expect(api.chooseRoot).toHaveBeenCalledOnce())
+  await waitFor(() =>
+    expect(screen.getByRole('status', { name: 'Application activity' })).toBeEmptyDOMElement()
+  )
+  expect(screen.getByRole('button', { name: 'Location: a' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Pairs' })).toBeInTheDocument()
+  expect(within(status).getByTitle('/a/_shared')).toBeInTheDocument()
+  expect(api.scan).toHaveBeenCalledOnce()
+  expect(screen.queryByText('Opened location')).not.toBeInTheDocument()
+})
+
+it('prunes a missing recent root and keeps the current location', async () => {
+  const api = installScannedRoot('/a', {
+    scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/a', 'Pairs')),
+    recentRoots: vi.fn().mockResolvedValueOnce(['/a', '/gone']).mockResolvedValue(['/a']),
+    setRoot: vi.fn().mockResolvedValue(null)
+  })
+  const user = userEvent.setup()
+  renderApp()
+  await user.click(await screen.findByRole('button', { name: 'Location: a' }))
+  await user.click(await screen.findByRole('menuitemradio', { name: /^gone/ }))
+  expect(await screen.findByText('“gone” is no longer available at /gone')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Location: a' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Pairs' })).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Location: a' }))
+  expect(screen.queryByRole('menuitemradio', { name: /^gone/ })).not.toBeInTheDocument()
+  expect(api.scan).toHaveBeenCalledOnce()
+})
+
+it('stays on FirstRun when a forgotten outstanding scan settles', async () => {
+  let finishScan!: (tree: LeaguesTree) => void
+  const scan = vi
+    .fn()
+    .mockResolvedValueOnce(treeWithMondayLeagues('/a', 'Pairs'))
+    .mockRejectedValueOnce(new Error('Unreadable'))
+    .mockImplementationOnce(() => new Promise<LeaguesTree>((resolve) => (finishScan = resolve)))
+  const api = installScannedRoot('/a', { scan })
+  const user = userEvent.setup()
+  renderApp()
+  await screen.findByRole('button', { name: 'Pairs' })
+  act(() => emitTreeChanged())
+  await screen.findByRole('button', { name: 'Choose another folder' })
+  act(() => emitTreeChanged())
+  await waitFor(() => expect(scan).toHaveBeenCalledTimes(3))
+  // A background retry retains the error screen while the scan is outstanding.
+  await user.click(screen.getByRole('button', { name: 'Choose another folder' }))
+  expect(api.forgetRoot).toHaveBeenCalledOnce()
+  await screen.findByRole('button', { name: /open location/i })
+  await act(async () => finishScan(treeWithMondayLeagues('/a', 'Pairs')))
+  expect(screen.getByRole('button', { name: /open location/i })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Pairs' })).not.toBeInTheDocument()
+})
+
+it('reconciles a rejected switch with getRoot and keeps the old location', async () => {
+  const api = installScannedRoot('/a', {
+    scan: vi.fn().mockResolvedValue(treeWithMondayLeagues('/a', 'Pairs')),
+    recentRoots: vi.fn().mockResolvedValue(['/a', '/b']),
+    setRoot: vi.fn().mockRejectedValue(new Error('Switch failed'))
+  })
+  const user = userEvent.setup()
+  renderApp()
+  await user.click(await screen.findByRole('button', { name: 'Location: a' }))
+  await user.click(await screen.findByRole('menuitemradio', { name: /^b/ }))
+  expect(await screen.findByText('Switch failed')).toBeInTheDocument()
+  expect(api.getRoot).toHaveBeenCalledTimes(2)
+  expect(screen.getByRole('button', { name: 'Location: a' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Pairs' })).toBeInTheDocument()
+})
+
+it('keeps two tree watcher subscribers for a mounted ready App', async () => {
+  installScannedRoot('/root', { scan: vi.fn().mockResolvedValue(makeTree()) })
+  const view = renderApp()
+  await screen.findByRole('heading', { name: 'Home' })
+  expect(treeChangedListenerCount()).toBe(2)
+  view.unmount()
+  expect(treeChangedListenerCount()).toBe(0)
+})
+
+it('retries a failed root bootstrap without scanning before the root is confirmed', async () => {
+  const api = installMockApi({
+    getRoot: vi
+      .fn()
+      .mockRejectedValueOnce(new Error('Root unavailable'))
+      .mockResolvedValue('/root'),
+    scan: vi.fn().mockResolvedValue(makeTree())
+  })
+  const user = userEvent.setup()
+  renderApp()
+  expect(await screen.findByRole('alert')).toHaveTextContent('Root unavailable')
+  expect(api.scan).not.toHaveBeenCalled()
+  await user.click(screen.getByRole('button', { name: 'Try again' }))
+  expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
+  expect(api.getRoot).toHaveBeenCalledTimes(2)
+  expect(api.scan).toHaveBeenCalledOnce()
 })

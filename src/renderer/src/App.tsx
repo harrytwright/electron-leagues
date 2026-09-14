@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useCallback, useEffect, useState } from 'react'
+import { skipToken, useQuery, type QueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { AppProviders } from './components/AppProviders'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
 import { PaneErrorBoundary } from './components/PaneErrorBoundary'
@@ -17,13 +17,12 @@ import { ipcErrorMessage } from './lib/ipc-error'
 import { loadSelection, saveSelection } from './lib/local-store'
 import { findLeague, HOME, restoreSelection, type Selection } from './lib/selection'
 import { useAppCommandHandler, useAppCommands } from './hooks/use-app-commands'
-import { useLocationOperation, type RefreshResult } from './hooks/use-location-operation'
+import { useLocationOperation } from './hooks/use-location-operation'
 import { useOperationFeedback } from './hooks/use-operation-feedback'
 import { useDiagnosticsCommands } from './hooks/use-diagnostics-preference'
-import { DIR_QUERY_PREFIX } from './queries/dir'
-
-type Phase = 'loading' | 'no-root' | 'ready' | 'error'
-type ScanResult = { status: 'error'; message: string } | { status: Exclude<RefreshResult, 'error'> }
+import { rootQuery } from './queries/root'
+import { treeQuery, treeQueryKey } from './queries/tree'
+import { useQueryRefresh } from './hooks/use-query-refresh'
 
 interface ScanErrorProps {
   message: string | null
@@ -41,10 +40,10 @@ interface HomeNavigation {
   currentDir: string
 }
 
-function AppCommandHandlers({ onChanged }: { onChanged: () => Promise<RefreshResult> }): null {
+function AppCommandHandlers(): null {
   const locationOperation = useLocationOperation()
-  useAppCommandHandler('open-location', () => void locationOperation.choose('select', onChanged))
-  useAppCommandHandler('new-location', () => void locationOperation.choose('init', onChanged))
+  useAppCommandHandler('open-location', () => void locationOperation.choose('select'))
+  useAppCommandHandler('new-location', () => void locationOperation.choose('init'))
   return null
 }
 
@@ -102,93 +101,64 @@ function ScanError({ message, onRetry, onChooseAnother }: ScanErrorProps): React
 }
 
 function AppContent(): React.JSX.Element {
+  const root = useQuery(rootQuery)
+  return (
+    <OperationFeedbackProvider locationKey={root.data ?? ''}>
+      <LocationOperationProvider>
+        <LocationContent root={root} />
+      </LocationOperationProvider>
+    </OperationFeedbackProvider>
+  )
+}
+
+function LocationContent({ root }: { root: UseQueryResult<string | null> }): React.JSX.Element {
   useAppCommands()
   useDiagnosticsCommands()
-  const queryClient = useQueryClient()
-  const [phase, setPhase] = useState<Phase>('loading')
-  const [tree, setTree] = useState<LeaguesTree | null>(null)
-  const [scanError, setScanError] = useState<string | null>(null)
+  const locationOperation = useLocationOperation()
+  const coordinator = useQueryRefresh()
+  const rootPath = root.data ?? null
+  const tree = useQuery({
+    ...treeQuery(rootPath ?? ''),
+    queryFn: rootPath !== null ? treeQuery(rootPath).queryFn : skipToken
+  })
+  const [seenTree, setSeenTree] = useState<LeaguesTree>()
   const [selection, setSelection] = useState<Selection>(HOME)
   const [leagueNavigation, setLeagueNavigation] = useState<LeagueNavigation | null>(null)
   const [homeNavigation, setHomeNavigation] = useState<HomeNavigation | null>(null)
 
-  // Concurrent refreshes (watcher + retry click) settle in any order; only the
-  // most recently started one may write state.
-  const scanGeneration = useRef(0)
-  // The location whose remembered selection has already been restored.
-  const restoredRoot = useRef<string | null>(null)
-
-  const scanLocation = useCallback(async (): Promise<ScanResult> => {
-    const ticket = (scanGeneration.current += 1)
-    try {
-      const scanned = await window.api.scan()
-      if (scanGeneration.current !== ticket) return { status: 'superseded' }
-      if (scanned) {
-        setTree(scanned)
-        setPhase('ready')
-        if (restoredRoot.current !== scanned.root) {
-          // Phase 2 adapter: removed in phase 3a when the location coordinator owns root changes.
-          void queryClient.invalidateQueries({ queryKey: DIR_QUERY_PREFIX, refetchType: 'none' })
-          restoredRoot.current = scanned.root
-          setHomeNavigation(null)
-          setLeagueNavigation(null)
-          setSelection(restoreSelection(scanned, loadSelection(scanned.root)))
-        } else {
-          // A league deleted or renamed on disk must not strand the selection.
-          setSelection((current) => restoreSelection(scanned, current))
-        }
-      } else {
-        setTree(null)
-        setPhase('no-root')
+  if (seenTree !== tree.data) {
+    setSeenTree(tree.data)
+    if (tree.data) {
+      const changedRoot = seenTree?.root !== tree.data.root
+      setSelection(
+        restoreSelection(tree.data, changedRoot ? loadSelection(tree.data.root) : selection)
+      )
+      if (changedRoot) {
+        setHomeNavigation(null)
+        setLeagueNavigation(null)
       }
-      setScanError(null)
-      return { status: scanned ? 'ready' : 'no-root' }
-    } catch (caught) {
-      if (scanGeneration.current !== ticket) return { status: 'superseded' }
-      // Without this, a failing scan strands the app on the spinner forever.
-      const message = ipcErrorMessage(caught) || 'Unknown error'
-      setScanError(message)
-      setPhase('error')
-      return { status: 'error', message }
     }
-  }, [queryClient])
+  }
 
-  const refresh = useCallback(async (): Promise<RefreshResult> => {
-    return (await scanLocation()).status
-  }, [scanLocation])
+  const refreshAfterWrite = useCallback(
+    () => coordinator.refresh({ throwOnError: true }),
+    [coordinator]
+  )
+  const refreshForReading = useCallback(() => coordinator.refresh(), [coordinator])
 
-  const refreshAfterWrite = useCallback(async (): Promise<void> => {
-    // Carry this scan's reason rather than reading mutable state another scan can replace.
-    const result = await scanLocation()
-    if (result.status === 'error') throw new Error(result.message)
-  }, [scanLocation])
+  // Remember user choices without erasing a league that is temporarily missing from a scan.
+  const select = useCallback(
+    (next: Selection) => {
+      setLeagueNavigation(null)
+      // A redundant Home click keeps the mounted pane and its reported directory together.
+      if (next.kind !== 'home') setHomeNavigation(null)
+      setSelection(next)
+      if (rootPath !== null) saveSelection(rootPath, next)
+    },
+    [rootPath]
+  )
 
-  const refreshForReading = useCallback(async (): Promise<void> => {
-    // Ordinary refresh has no write outcome to qualify; ScanError owns its failure feedback.
-    await refresh()
-  }, [refresh])
-
-  const forgetAndRestart = useCallback(async () => {
-    await window.api.forgetRoot()
-    // Phase 2 adapter: removed in phase 3a when the location coordinator owns root changes.
-    await queryClient.invalidateQueries({ queryKey: DIR_QUERY_PREFIX, refetchType: 'none' })
-    restoredRoot.current = null
-    setScanError(null)
-    setTree(null)
-    setPhase('no-root')
-  }, [queryClient])
-
-  // Remembered per location, but only what the user chose: a league that is
-  // merely missing from one scan (sync lag, mid-rename) must not erase it.
-  const select = useCallback((next: Selection) => {
-    setLeagueNavigation(null)
-    // A redundant Home click keeps the mounted pane and its reported directory together.
-    if (next.kind !== 'home') setHomeNavigation(null)
-    setSelection(next)
-    if (restoredRoot.current) saveSelection(restoredRoot.current, next)
-  }, [])
-
-  const homeRoot = tree?.root
+  const homeRoot = root.data
   const updateHomeCurrentDir = useCallback(
     (currentDir: string) => {
       if (
@@ -202,13 +172,6 @@ function AppContent(): React.JSX.Element {
     },
     [homeRoot]
   )
-
-  useEffect(() => {
-    // refresh() only touches state after awaiting the IPC scan, never synchronously
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refresh()
-    return window.api.onTreeChanged(() => void refresh())
-  }, [refresh])
 
   useEffect(() => {
     // A file dropped anywhere but a drop target would otherwise navigate the
@@ -227,33 +190,44 @@ function AppContent(): React.JSX.Element {
     }
   }, [])
 
-  let content: React.JSX.Element
-  if (phase === 'loading') {
+  let content: React.JSX.Element | null = null
+  if (root.isPending || (!root.isError && rootPath !== null && tree.isPending && !tree.data)) {
     content = (
       <div className="flex h-full items-center justify-center gap-2 bg-kumo-base">
         <Loader />
         <Text>Loading…</Text>
       </div>
     )
-  } else if (phase === 'error') {
+  } else if (root.isError) {
     content = (
       <ScanError
-        message={scanError}
-        onRetry={refreshForReading}
-        onChooseAnother={forgetAndRestart}
+        message={ipcErrorMessage(root.error)}
+        onRetry={async () => {
+          await root.refetch()
+        }}
+        onChooseAnother={locationOperation.forget}
       />
     )
-  } else if (phase === 'no-root' || !tree) {
-    content = <FirstRun onChosen={refresh} />
-  } else {
-    const selectedLeague = findLeague(tree, selection)
+  } else if (root.data === null) {
+    content = <FirstRun />
+  } else if (tree.isError) {
+    content = (
+      <ScanError
+        message={ipcErrorMessage(tree.error)}
+        onRetry={() => coordinator.refresh({ queryKey: treeQueryKey(rootPath ?? '') })}
+        onChooseAnother={locationOperation.forget}
+      />
+    )
+  } else if (tree.data) {
+    const scanned = tree.data
+    const selectedLeague = findLeague(scanned, selection)
     const statusPath = selectedLeague
       ? leagueNavigation?.ownerPath === selectedLeague.path
         ? leagueNavigation.currentDir
         : selectedLeague.path
-      : homeNavigation?.ownerRoot === tree.root
+      : homeNavigation?.ownerRoot === scanned.root
         ? homeNavigation.currentDir
-        : tree.sharedPath
+        : scanned.sharedPath
 
     // Keyed on the location / league so each view's local state starts fresh
     // when they change.
@@ -266,15 +240,14 @@ function AppContent(): React.JSX.Element {
         className="flex h-full flex-col"
       >
         <Toolbar
-          root={tree.root}
+          root={scanned.root}
           isHome={selection.kind === 'home'}
           onHome={() => select(HOME)}
-          onLocationChanged={refresh}
         />
         <div className="flex min-h-0 w-full flex-1">
-          <Sidebar key={tree.root} tree={tree} selection={selection} onSelect={select} />
+          <Sidebar key={scanned.root} tree={scanned} selection={selection} onSelect={select} />
           <main className="h-full min-w-0 flex-1 overflow-auto">
-            <PaneErrorBoundary resetKeys={[selectedLeague?.path ?? tree.root]}>
+            <PaneErrorBoundary resetKeys={[selectedLeague?.path ?? scanned.root]}>
               {selectedLeague ? (
                 <LeagueView
                   key={selectedLeague.path}
@@ -287,8 +260,8 @@ function AppContent(): React.JSX.Element {
                 />
               ) : (
                 <HomeView
-                  key={tree.root}
-                  tree={tree}
+                  key={scanned.root}
+                  tree={scanned}
                   onSelect={select}
                   onChanged={refreshAfterWrite}
                   onRefresh={refreshForReading}
@@ -304,13 +277,13 @@ function AppContent(): React.JSX.Element {
   }
 
   return (
-    <OperationFeedbackProvider locationKey={tree?.root ?? ''}>
-      <LocationOperationProvider>
-        <AppCommandHandlers onChanged={refresh} />
-        {content}
-        <ApplicationActivity visible={phase !== 'ready'} />
-      </LocationOperationProvider>
-    </OperationFeedbackProvider>
+    <>
+      <AppCommandHandlers />
+      {content}
+      <ApplicationActivity
+        visible={root.isPending || root.isError || root.data === null || !tree.data || tree.isError}
+      />
+    </>
   )
 }
 

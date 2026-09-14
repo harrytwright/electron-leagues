@@ -1,13 +1,15 @@
 import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
+import type { LeaguesTree } from '@shared/tree'
+import { makeTree } from '../../tests/fixtures'
 import { FirstRun } from './index'
 import { installMockApi } from '../../tests/mock-api'
 import { renderWithProviders } from '../../tests/render-helpers'
 
 it('explains OneDrive setup with semantic headings and standard-size recent paths', async () => {
   installMockApi({ recentRoots: vi.fn().mockResolvedValue(['/old/leagues']) })
-  renderWithProviders(<FirstRun onChosen={vi.fn()} />)
+  renderWithProviders(<FirstRun />)
 
   expect(screen.getByRole('heading', { level: 1, name: 'Bowling league documents' })).toHaveClass(
     'text-xl'
@@ -21,31 +23,33 @@ it('explains OneDrive setup with semantic headings and standard-size recent path
   expect(screen.getByText('/old/leagues')).toHaveClass('text-base')
 })
 
-it('choosing an existing folder calls chooseRoot and onChosen on success', async () => {
-  const api = installMockApi({ chooseRoot: vi.fn().mockResolvedValue('/root') })
-  const onChosen = vi.fn()
+it('choosing an existing folder calls chooseRoot and scans on success', async () => {
+  const api = installMockApi({
+    chooseRoot: vi.fn().mockResolvedValue('/root'),
+    scan: vi.fn().mockResolvedValue(makeTree())
+  })
   const user = userEvent.setup()
 
-  renderWithProviders(<FirstRun onChosen={onChosen} />)
+  renderWithProviders(<FirstRun />)
   await user.click(screen.getByRole('button', { name: /open location/i }))
 
   expect(api.chooseRoot).toHaveBeenCalledWith('select')
-  await waitFor(() => expect(onChosen).toHaveBeenCalled())
+  await waitFor(() => expect(api.scan).toHaveBeenCalledOnce())
+  expect(await screen.findByText('Opened location')).toBeInTheDocument()
 })
 
-it('does not fire onChosen when the folder dialog is cancelled', async () => {
+it('does not scan when the folder dialog is cancelled', async () => {
   const api = installMockApi({ chooseRoot: vi.fn().mockResolvedValue(null) })
-  const onChosen = vi.fn()
   const user = userEvent.setup()
 
-  renderWithProviders(<FirstRun onChosen={onChosen} />)
+  renderWithProviders(<FirstRun />)
   await user.click(screen.getByRole('button', { name: /new location/i }))
 
   expect(api.chooseRoot).toHaveBeenCalledWith('init')
   // Wait for the flow to settle (buttons re-enable) before asserting the negative,
   // otherwise the assertion races the pending promise and can never fail.
   await waitFor(() => expect(screen.getByRole('button', { name: /new location/i })).toBeEnabled())
-  expect(onChosen).not.toHaveBeenCalled()
+  expect(api.scan).not.toHaveBeenCalled()
 })
 
 it('shows a busy state on the button that was pressed', async () => {
@@ -60,7 +64,7 @@ it('shows a busy state on the button that was pressed', async () => {
   })
   const user = userEvent.setup()
 
-  renderWithProviders(<FirstRun onChosen={vi.fn()} />)
+  renderWithProviders(<FirstRun />)
   await user.click(screen.getByRole('button', { name: /new location/i }))
 
   expect(screen.getByText(/creating…/i)).toBeInTheDocument()
@@ -72,18 +76,18 @@ it('shows a busy state on the button that was pressed', async () => {
 })
 
 it('opens a recent location and waits for the resulting scan', async () => {
-  const api = installMockApi({ recentRoots: vi.fn().mockResolvedValue(['/old/leagues']) })
-  let finishScan!: () => void
-  const onChosen = vi.fn(
-    () => new Promise<'ready'>((resolve) => (finishScan = () => resolve('ready')))
-  )
+  let finishScan!: (tree: LeaguesTree) => void
+  const api = installMockApi({
+    recentRoots: vi.fn().mockResolvedValue(['/old/leagues']),
+    scan: vi.fn(() => new Promise<LeaguesTree>((resolve) => (finishScan = resolve)))
+  })
   const user = userEvent.setup()
-  renderWithProviders(<FirstRun onChosen={onChosen} />)
+  renderWithProviders(<FirstRun />)
 
   await user.click(await screen.findByRole('button', { name: /leagues.*\/old\/leagues/i }))
   expect(api.setRoot).toHaveBeenCalledWith('/old/leagues')
   expect(screen.getByRole('button', { name: /open location/i })).toBeDisabled()
-  await act(async () => finishScan())
+  await act(async () => finishScan(makeTree({ root: '/old/leagues' })))
   await waitFor(() => expect(screen.getByRole('button', { name: /open location/i })).toBeEnabled())
 })
 
@@ -94,7 +98,7 @@ it('shows loading only on the recent location being opened', async () => {
     setRoot: vi.fn(() => new Promise<string | null>((resolve) => (finishSwitch = resolve)))
   })
   const user = userEvent.setup()
-  renderWithProviders(<FirstRun onChosen={vi.fn()} />)
+  renderWithProviders(<FirstRun />)
   const chosen = await screen.findByRole('button', { name: /leagues.*\/old\/leagues/i })
   const other = screen.getByRole('button', { name: /leagues.*\/other\/leagues/i })
 
@@ -113,7 +117,7 @@ it('clears recent-location loading after a failed switch', async () => {
     setRoot: vi.fn().mockRejectedValue(new Error('Location unavailable'))
   })
   const user = userEvent.setup()
-  renderWithProviders(<FirstRun onChosen={vi.fn()} />)
+  renderWithProviders(<FirstRun />)
   const recent = await screen.findByRole('button', { name: /leagues.*\/old\/leagues/i })
 
   await user.click(recent)
@@ -127,7 +131,7 @@ it('reports a missing recent location as a toast and removes it', async () => {
   const recentRoots = vi.fn().mockResolvedValueOnce(['/gone/leagues']).mockResolvedValueOnce([])
   installMockApi({ recentRoots, setRoot: vi.fn().mockResolvedValue(null) })
   const user = userEvent.setup()
-  renderWithProviders(<FirstRun onChosen={vi.fn()} />)
+  renderWithProviders(<FirstRun />)
 
   const recent = await screen.findByRole('button', { name: /leagues.*\/gone\/leagues/i })
   await user.click(recent)
@@ -139,14 +143,14 @@ it('reports a missing recent location as a toast and removes it', async () => {
 
 it('shows recent-list failures inline and picker failures as toasts', async () => {
   installMockApi({ recentRoots: vi.fn().mockRejectedValue(new Error('Recents unavailable')) })
-  const view = renderWithProviders(<FirstRun onChosen={vi.fn()} />)
+  const view = renderWithProviders(<FirstRun />)
   expect(await screen.findByRole('alert')).toHaveTextContent('Recents unavailable')
 
   installMockApi({
     recentRoots: vi.fn().mockResolvedValue([]),
     chooseRoot: vi.fn().mockRejectedValue(new Error('Picker unavailable'))
   })
-  view.rerender(<FirstRun onChosen={vi.fn()} />)
+  view.rerender(<FirstRun />)
   await userEvent.setup().click(screen.getByRole('button', { name: /open location/i }))
   expect(await screen.findByText('Picker unavailable')).toBeInTheDocument()
 })
@@ -155,13 +159,13 @@ it('guards rapid recent activation synchronously', async () => {
   let finish!: (path: string | null) => void
   const setRoot = vi.fn(() => new Promise<string | null>((resolve) => (finish = resolve)))
   installMockApi({ recentRoots: vi.fn().mockResolvedValue(['/old/leagues']), setRoot })
-  renderWithProviders(<FirstRun onChosen={vi.fn()} />)
+  renderWithProviders(<FirstRun />)
   const recent = await screen.findByRole('button', { name: /leagues.*\/old\/leagues/i })
   act(() => {
     recent.click()
     recent.click()
   })
-  expect(setRoot).toHaveBeenCalledOnce()
+  await waitFor(() => expect(setRoot).toHaveBeenCalledOnce())
   expect(within(recent).getByLabelText('Loading')).toBeInTheDocument()
   await act(async () => finish(null))
 })
