@@ -2,6 +2,10 @@ import * as Sentry from '@sentry/electron/renderer'
 import posthog from 'posthog-js'
 import 'posthog-js/dist/recorder'
 
+export function reportRenderError(error: Error, componentStack: string | null | undefined): void {
+  Sentry.captureException(error, { contexts: { react: { componentStack } } })
+}
+
 export async function initAnalytics(): Promise<void> {
   // Synchronous and first: the renderer SDK inherits DSN/release/environment
   // from the main process (passing them here has no effect), so there is no

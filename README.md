@@ -2,8 +2,9 @@
 
 Desktop organiser for bowling league documents stored in a OneDrive folder. The folder tree is
 the source of truth — the app scans it (adopting folders you create by hand), opens documents in
-their default program, generates new season folders, and archives old seasons. It never modifies
-your documents; it only writes its own files (`meta.json`, zips).
+their default program, generates new season folders, and archives old seasons. Existing documents
+are never overwritten: template and import workflows only add new copies (`meta.json` and requested
+archive zips are app-owned output).
 
 ## Folder layout
 
@@ -22,10 +23,52 @@ your documents; it only writes its own files (`meta.json`, zips).
 Season naming: cross-year `2025-26`, full-year `2025`, quarter `2026-Q1`. Any folder that
 doesn't match is shown as a plain browsable folder, never guessed at.
 
-Season lifecycle: two live seasons per league (active + previous). Creating a new season copies
-starting documents from `_templates` or the previous season, and (pre-ticked in the wizard)
-moves the oldest live season into `_archives`. Archived seasons can be zipped on demand from
-the league's Archive section.
+Season lifecycle: two live seasons per league (active + previous). A template-based season copies
+every visible, direct file in `_templates`. A previous-season copy takes the previous season's
+direct files first, then fills missing names from templates; previous filenames always win. Start
+empty copies nothing. These are snapshots, not live links. The pre-ticked wizard option moves the
+oldest live season into `_archives`, where seasons can be zipped on demand.
+
+Scans may update app-owned `meta.json` files, but never create reserved folders, copy bundled
+templates, or touch user documents. **New location…** creates `_templates`, `_shared`, and
+`_archives` and seeds missing bundled `Rules.docx` and `Sign-In Sheet.docx`; **Repair location…**
+does the same on demand. Edited defaults and custom templates are left alone, and the selected root
+itself is never recreated if it has moved or become unavailable.
+
+## Using the app
+
+The startup panel opens existing leagues folders (“locations”), creates new ones, or returns you
+to a recent location. After startup, **Home** in the title bar returns you to shared documents and
+templates. Use the location switcher beside it to change, create, or reveal locations.
+
+Home is a single-pane browser with Shared documents, Templates, and (when needed) Other items tabs;
+changing tabs starts again at that tab's root. The sidebar holds the Leagues list grouped under
+collapsible days.
+
+A league opens as a file browser: seasons at the top (newest first, with their status), then any
+other files and the Archive folder. The league, archive and season panes share a desktop-style
+file browser: click to select and double-click to open. Breadcrumbs lead back. The league overview
+includes season status badges and item counts, with a filter for the current folder. Within a
+season, disclosure arrows expand folders
+in place and column headings sort each folder's contents. The season filter searches loaded
+folders and keeps matching files' parents visible. Drop files into league roots, Shared documents,
+Templates, or live season views to copy them in. Your last-opened league and collapsed days are
+remembered per location.
+
+Right-click a row to open the same actions shown in its `…` menu: browse folders, open documents in
+their default app, or reveal items in Finder or Explorer. Deleting a league or season asks you to
+type its name and moves the whole folder, including unmanaged files, to the OS trash. Archived
+seasons can also be zipped from these menus.
+
+On macOS, use ⇧⌘O to open a location, ⌘R to refresh, and ⌘F to focus the filter; on Windows, use
+Ctrl+Shift+O, Ctrl+R, and Ctrl+F. In file lists, press Enter to open the selected item and use the
+arrow keys to move between rows.
+
+The status bar shows the current path and any pending activity. Completion toasts report whether
+an action succeeded or failed.
+
+At the root of any live season, **Sync with templates** adds only template filenames that are
+missing. It never creates numbered duplicates and is unavailable in archives or subfolders.
 
 ## Development
 

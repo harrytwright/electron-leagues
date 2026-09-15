@@ -1,5 +1,15 @@
 import { parseSeasonName } from '@shared/season'
-import type { LeagueNode, LeaguesTree } from '@shared/tree'
+import type { DirEntry, LeagueNode, LeaguesTree } from '@shared/tree'
+
+export function makeDirEntry(overrides: Partial<DirEntry> = {}): DirEntry {
+  const name = overrides.name ?? 'Rules.docx'
+  return {
+    name,
+    path: overrides.path ?? `/root/_shared/${name}`,
+    kind: overrides.kind ?? 'file',
+    mtime: overrides.mtime ?? Date.UTC(2026, 0, 15)
+  }
+}
 
 export function makeLeague(overrides: Partial<LeagueNode> = {}): LeagueNode {
   const folderName = overrides.folderName ?? 'Mixed triples'
@@ -35,7 +45,9 @@ export function makeLeague(overrides: Partial<LeagueNode> = {}): LeagueNode {
     seasons,
     otherEntries: overrides.otherEntries ?? [],
     archivedSeasons,
-    archivePath: overrides.archivePath ?? `${path}/_archives`
+    archiveItemCount: overrides.archiveItemCount ?? archivedSeasons.length,
+    // Archives live beside the league nights, never inside the league folder.
+    archivePath: overrides.archivePath ?? `/root/_archives/${folderName}`
   }
 }
 
@@ -51,10 +63,10 @@ export function makeTree(overrides: Partial<LeaguesTree> = {}): LeaguesTree {
       saturday: [],
       sunday: []
     },
+    templatesPath: '/root/_templates',
+    sharedPath: '/root/_shared',
     hasTemplates: true,
     hasShared: true,
-    templateFiles: [],
-    sharedFiles: [],
     unrecognisedRootEntries: [],
     ...overrides
   }

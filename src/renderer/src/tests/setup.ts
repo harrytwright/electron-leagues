@@ -1,8 +1,38 @@
 import '@testing-library/jest-dom/vitest'
 import { cleanup } from '@testing-library/react'
-import { afterEach } from 'vitest'
+import { afterEach, beforeEach } from 'vitest'
+import { onlineManager } from '@tanstack/react-query'
+import { clearTestQueryClients } from './query-clients'
+import { installMockApi } from './mock-api'
 
 let systemDark = false
+
+class MockResizeObserver implements ResizeObserver {
+  observe(): void {
+    return undefined
+  }
+  unobserve(): void {
+    return undefined
+  }
+  disconnect(): void {
+    return undefined
+  }
+}
+
+Object.defineProperty(globalThis, 'ResizeObserver', {
+  configurable: true,
+  value: MockResizeObserver
+})
+
+Object.defineProperty(Element.prototype, 'scrollIntoView', {
+  configurable: true,
+  value: () => {}
+})
+
+Object.defineProperty(Element.prototype, 'getAnimations', {
+  configurable: true,
+  value: () => []
+})
 
 class MockMediaQueryListEvent extends Event implements MediaQueryListEvent {
   readonly matches: boolean
@@ -69,8 +99,15 @@ export function setSystemDark(dark: boolean): void {
   darkQueryList.emitChange()
 }
 
+beforeEach(() => {
+  installMockApi()
+})
+
 afterEach(() => {
   cleanup()
+  clearTestQueryClients()
+  onlineManager.setOnline(true)
+  localStorage.clear()
   systemDark = false
   darkQueryList.reset()
   document.documentElement.removeAttribute('data-mode')

@@ -1,42 +1,49 @@
 import { electronAPI } from '@electron-toolkit/preload'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import type { LeaguesTree } from '../shared/tree'
-import type { Weekday } from '../shared/weekday'
+import type { AppCommandEvent } from '../shared/app-command'
+import {
+  invokeDefinitions,
+  type InvokeApi,
+  type InvokeArguments,
+  type InvokeName,
+  type InvokeOutputs
+} from '../shared/ipc'
+import { getRendererMetrics } from './renderer-metrics'
 
-export interface SeasonCreateRequest {
-  day: Weekday
-  leagueFolder: string
-  seasonName: string
-  source: 'templates' | 'previous' | 'empty'
-  archiveOldest: boolean
+export type { RendererMetrics } from './renderer-metrics'
+
+export type { SeasonCreateRequest } from '../shared/season-create'
+
+function invokeMethod<Name extends InvokeName>(name: Name): InvokeApi[Name] {
+  const channel = invokeDefinitions[name].channel
+  const invoke = (...args: InvokeArguments<Name>): Promise<InvokeOutputs[Name]> =>
+    ipcRenderer.invoke(channel, ...args)
+  // SAFETY: InvokeApi maps this same method name to these arguments and output.
+  return invoke as InvokeApi[Name]
 }
 
+// SAFETY: every enumerable declaration key is an InvokeName by construction.
+const invokeNames = Object.keys(invokeDefinitions) as InvokeName[]
+// SAFETY: each entry retains the same name in its key and invokeMethod argument.
+const invokeApi = Object.fromEntries(
+  invokeNames.map((name) => [name, invokeMethod(name)])
+) as InvokeApi
+
 const api = {
-  getAnalyticsConfig: (): Promise<{ apiKey: string | null; distinctId: string }> =>
-    ipcRenderer.invoke('analytics:config'),
-  getRoot: (): Promise<string | null> => ipcRenderer.invoke('root:get'),
-  chooseRoot: (mode: 'select' | 'init'): Promise<string | null> =>
-    ipcRenderer.invoke('root:choose', mode),
-  forgetRoot: (): Promise<void> => ipcRenderer.invoke('root:forget'),
-  scan: (): Promise<LeaguesTree | null> => ipcRenderer.invoke('leagues:scan'),
-  createLeague: (day: Weekday, name: string): Promise<string> =>
-    ipcRenderer.invoke('league:create', day, name),
-  createSeason: (
-    opts: SeasonCreateRequest
-  ): Promise<{ seasonPath: string; archived: string | null }> =>
-    ipcRenderer.invoke('season:create', opts),
-  zipArchive: (leagueFolder: string, seasons: string[]): Promise<string[]> =>
-    ipcRenderer.invoke('archive:zip', leagueFolder, seasons),
-  openFile: (path: string): Promise<string> => ipcRenderer.invoke('file:open', path),
-  revealFile: (path: string): Promise<void> => ipcRenderer.invoke('file:reveal', path),
-  pickFiles: (): Promise<string[]> => ipcRenderer.invoke('files:pick'),
-  importFiles: (dest: string, sources: string[]): Promise<string[]> =>
-    ipcRenderer.invoke('file:import', dest, sources),
+  ...invokeApi,
+  getRendererMetrics,
+  diagnosticsChanged: (enabled: boolean): void => ipcRenderer.send('diagnostics:changed', enabled),
   pathForFile: (file: File): string => webUtils.getPathForFile(file),
   onTreeChanged: (listener: () => void): (() => void) => {
     const wrapped = (): void => listener()
     ipcRenderer.on('tree:changed', wrapped)
     return () => ipcRenderer.removeListener('tree:changed', wrapped)
+  },
+  onAppCommand: (listener: (event: AppCommandEvent) => void): (() => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, command: AppCommandEvent): void =>
+      listener(command)
+    ipcRenderer.on('app:command', wrapped)
+    return () => ipcRenderer.removeListener('app:command', wrapped)
   }
 }
 

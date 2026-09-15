@@ -1,26 +1,45 @@
-import { electronApp, is, optimizer } from '@electron-toolkit/utils'
+import { electronApp, is } from '@electron-toolkit/utils'
 import { watch, type FSWatcher } from 'chokidar'
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron'
 import Store from 'electron-store'
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
+import { stat } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
 import icon from '../../resources/icon.png?asset'
-import type { Weekday } from '../shared/weekday'
+import { updateDiagnosticsMenu } from './lib/diagnostics-menu'
+import {
+  buildAppMenuTemplate,
+  buildEditableContextMenuTemplate,
+  DIAGNOSTICS_MENU_ID
+} from './lib/app-menu'
 import { capture, initAnalytics, shutdownAnalytics } from './lib/analytics'
 import { oneDriveStatus } from './lib/onedrive'
 import {
   createLeague,
   createSeason,
   importFiles,
-  initialiseRoot,
-  zipArchivedSeasons,
-  type CreateSeasonOptions
+  prepareRootSelection,
+  repairReservedLocations,
+  syncSeasonWithTemplates,
+  zipArchivedSeasons
 } from './lib/operations'
-import { scanLeaguesRoot } from './lib/scanner'
+import { isMissing, toUserFacing } from './lib/fs-errors'
+import { registerInvokeHandler, type InvokeListener, type IpcErrorReporter } from './lib/ipc-handle'
+import type { InvokeName } from '../shared/ipc'
+import {
+  assertAbsolutePath,
+  assertInsideRoot,
+  planTrash,
+  resolveImportDestination
+} from './lib/paths'
+import { pruneRecents, seedRecents, updateRecents, type RootProbe } from './lib/recents'
+import { listDirEntries, scanLeaguesRoot } from './lib/scanner'
 import * as Sentry from '@sentry/electron/main'
 
 interface Settings {
   rootPath?: string
+  /** Most-recently-used first; the last activated root is at index 0. */
+  recentRoots?: string[]
   posthogKey?: string
   sentryDSN?: string
   machineId?: string
@@ -68,14 +87,23 @@ function bundledTemplatesDir(): string {
 
 let mainWindow: BrowserWindow | null = null
 let watcher: FSWatcher | null = null
+let watchTimer: NodeJS.Timeout | null = null
+
+function stopWatching(): void {
+  void watcher?.close()
+  watcher = null
+  if (watchTimer) clearTimeout(watchTimer)
+  watchTimer = null
+}
 
 function watchRoot(root: string): void {
-  void watcher?.close()
-  let timer: NodeJS.Timeout | null = null
-  watcher = watch(root, { ignoreInitial: true, depth: 5 })
+  stopWatching()
+  // Depth 6 reaches two levels below a season folder; edits deeper than that
+  // won't auto-refresh until the user navigates.
+  watcher = watch(root, { ignoreInitial: true, depth: 6 })
   watcher.on('all', () => {
-    if (timer) clearTimeout(timer)
-    timer = setTimeout(() => mainWindow?.webContents.send('tree:changed'), 500)
+    if (watchTimer) clearTimeout(watchTimer)
+    watchTimer = setTimeout(() => mainWindow?.webContents.send('tree:changed'), 500)
   })
   watcher.on('error', (err) => {
     console.error(err)
@@ -83,40 +111,83 @@ function watchRoot(root: string): void {
   })
 }
 
-/** LEAGUES_ROOT overrides the stored root — used for dev/test fixtures. */
+/**
+ * LEAGUES_ROOT overrides the stored root at launch — used for dev/test
+ * fixtures. Choosing or switching a location clears it so the switch sticks.
+ */
+let envRootOverride = process.env.LEAGUES_ROOT
+
 function currentRoot(): string | undefined {
-  return process.env.LEAGUES_ROOT ?? store.get('rootPath')
+  return envRootOverride ?? store.get('rootPath')
 }
 
-/** ipcMain.handle, but failures are reported to Sentry before rejecting the invoke. */
-function handle<Args extends unknown[], Result>(
-  channel: string,
-  listener: (event: Electron.IpcMainInvokeEvent, ...args: Args) => Result
-): void {
-  ipcMain.handle(channel, async (event, ...args) => {
-    try {
-      // SAFETY: ipcMain delivers whatever the renderer invoked with; the
-      // listener's parameter types document the expected shape, exactly as
-      // when these listeners were passed to ipcMain.handle directly.
-      return await listener(event, ...(args as Args))
-    } catch (err) {
-      Sentry.captureException(err, { tags: { ipc_channel: channel } })
-      throw err
-    }
-  })
+function requireRoot(): string {
+  const root = currentRoot()
+  if (!root) throw new Error('No leagues folder selected')
+  return root
+}
+
+function storedRecents(): string[] {
+  return seedRecents(store.get('recentRoots'), store.get('rootPath'))
+}
+
+/**
+ * Make `root` the current location: persist it, record it as recent, watch it.
+ * Roots only ever arrive here already `resolve()`d, so the exact-string dedupe
+ * in `updateRecents` holds without case-folding.
+ */
+function activateRoot(root: string): void {
+  envRootOverride = undefined
+  store.set({ rootPath: root, recentRoots: updateRecents(storedRecents(), root) })
+  watchRoot(root)
+}
+
+async function probeRoot(path: string): Promise<RootProbe> {
+  try {
+    return (await stat(path)).isDirectory() ? 'dir' : 'missing'
+  } catch (err) {
+    return isMissing(err) ? 'missing' : 'unavailable'
+  }
+}
+
+/** Recent roots minus any that are definitely gone; the stored list is pruned to match. */
+async function recentRoots(): Promise<string[]> {
+  const stored = storedRecents()
+  const alive = await pruneRecents(stored, probeRoot)
+  if (alive.length !== stored.length) store.set('recentRoots', alive)
+  return alive
+}
+
+const reportIpcError: IpcErrorReporter = (error, channel) =>
+  Sentry.captureException(error, { tags: { ipc_channel: channel } })
+
+function register<Name extends InvokeName>(name: Name, listener: InvokeListener<Name>): void {
+  registerInvokeHandler(ipcMain, name, listener, reportIpcError)
+}
+
+function diagnosticsMenuItem(): Electron.MenuItem | undefined {
+  return Menu.getApplicationMenu()?.getMenuItemById(DIAGNOSTICS_MENU_ID) ?? undefined
 }
 
 function registerIpc(): void {
+  ipcMain.on('diagnostics:changed', (event, enabled) => {
+    updateDiagnosticsMenu(
+      event.sender,
+      mainWindow?.webContents ?? null,
+      enabled,
+      diagnosticsMenuItem
+    )
+  })
   // The renderer's Sentry SDK inherits its config from the main process,
   // so only PostHog needs anything over IPC.
-  handle('analytics:config', () => ({
+  register('getAnalyticsConfig', () => ({
     apiKey: posthogKey() ?? null,
     distinctId: machineId()
   }))
 
-  handle('root:get', () => currentRoot() ?? null)
+  register('getRoot', () => currentRoot() ?? null)
 
-  handle('root:choose', async (_e, mode: 'select' | 'init') => {
+  register('chooseRoot', async (_e, mode) => {
     if (!mainWindow) return null
     const result = await dialog.showOpenDialog(mainWindow, {
       title:
@@ -126,55 +197,102 @@ function registerIpc(): void {
       properties: ['openDirectory', 'createDirectory']
     })
     if (result.canceled || result.filePaths.length === 0) return null
-    const root = result.filePaths[0]
+    const root = resolve(result.filePaths[0])
+    await prepareRootSelection(root, mode, bundledTemplatesDir())
     if (mode === 'init') {
-      await initialiseRoot(root, bundledTemplatesDir())
       capture('root_initialised')
     }
-    store.set('rootPath', root)
-    watchRoot(root)
+    activateRoot(root)
     capture('root_selected', { onedrive: (await oneDriveStatus(root)).underOneDrive })
     return root
   })
 
-  handle('root:forget', () => {
-    store.delete('rootPath')
-    void watcher?.close()
-    watcher = null
+  register('setRoot', async (_e, path) => {
+    assertAbsolutePath(path, 'Invalid location request')
+    const root = resolve(path)
+    const probe = await probeRoot(root)
+    if (probe !== 'dir') {
+      if (probe === 'missing') {
+        store.set(
+          'recentRoots',
+          storedRecents().filter((r) => r !== root)
+        )
+      }
+      return null
+    }
+    if (root === currentRoot() && envRootOverride === undefined) return root
+    activateRoot(root)
+    capture('root_switched')
+    return root
   })
 
-  handle('leagues:scan', async () => {
+  register('recentRoots', () => recentRoots())
+
+  register('repairLocation', () => repairReservedLocations(requireRoot(), bundledTemplatesDir()))
+
+  register('forgetRoot', () => {
+    envRootOverride = undefined
+    store.delete('rootPath')
+    stopWatching()
+  })
+
+  register('scan', async () => {
     const root = currentRoot()
     if (!root) return null
     if (!watcher) watchRoot(root)
     return scanLeaguesRoot(root, { heal: true })
   })
 
-  handle('league:create', async (_e, day: Weekday, name: string) => {
-    const root = currentRoot()
-    if (!root) throw new Error('No leagues folder selected')
-    const path = await createLeague(root, day, name)
+  register('listDir', async (_e, path) => {
+    assertAbsolutePath(path, 'Invalid file path')
+    const root = requireRoot()
+    try {
+      return await listDirEntries(await assertInsideRoot(root, path))
+    } catch (err) {
+      throw toUserFacing(err)
+    }
+  })
+
+  register('createLeague', async (_e, day, name) => {
+    const path = await createLeague(requireRoot(), day, name)
     capture('league_created', { day })
     return path
   })
 
-  handle('season:create', async (_e, opts: Omit<CreateSeasonOptions, 'root'>) => {
-    const root = currentRoot()
-    if (!root) throw new Error('No leagues folder selected')
-    const result = await createSeason({ ...opts, root })
+  register('createSeason', async (_e, opts) => {
+    const result = await createSeason({
+      ...opts,
+      root: requireRoot()
+    })
     capture('season_created', { source: opts.source, archived: result.archived !== null })
     return result
   })
 
-  handle('archive:zip', async (_e, leagueFolder: string, seasons: string[]) => {
-    const root = currentRoot()
-    if (!root) throw new Error('No leagues folder selected')
-    const zips = await zipArchivedSeasons(root, leagueFolder, seasons)
+  register('syncSeasonTemplates', async (_e, opts) => {
+    const result = await syncSeasonWithTemplates({
+      ...opts,
+      root: requireRoot()
+    })
+    capture('season_templates_synced', { added: result.added.length })
+    return result
+  })
+
+  register('zipArchive', async (_e, leagueFolder, seasons) => {
+    const zips = await zipArchivedSeasons(requireRoot(), leagueFolder, seasons)
     capture('archive_zipped', { count: seasons.length })
     return zips
   })
 
-  handle('files:pick', async () => {
+  register('trashFolder', async (_e, path) => {
+    assertAbsolutePath(path, 'Invalid file path')
+    const plan = await planTrash(requireRoot(), path)
+    for (const target of plan.paths) {
+      await shell.trashItem(target)
+    }
+    capture(plan.kind === 'league' ? 'league_deleted' : 'season_deleted')
+  })
+
+  register('pickFiles', async () => {
     if (!mainWindow) return []
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openFile', 'multiSelections']
@@ -182,20 +300,46 @@ function registerIpc(): void {
     return result.canceled ? [] : result.filePaths
   })
 
-  handle('file:open', async (_e, path: string) => {
+  register('openFile', async (_e, requested) => {
+    assertAbsolutePath(requested, 'Invalid file path')
+    let path: string
+    try {
+      path = await assertInsideRoot(requireRoot(), requested)
+    } catch (err) {
+      // A stale browser row is an expected filesystem failure, not an application fault.
+      throw toUserFacing(err)
+    }
     capture('document_opened', { onedrive: (await oneDriveStatus(path)).availability })
     return shell.openPath(path)
   })
 
-  handle('file:reveal', (_e, path: string) => {
+  register('revealFile', async (_e, requested) => {
+    assertAbsolutePath(requested, 'Invalid file path')
+    let path: string
+    try {
+      // Location menus reveal the selected root itself; other file actions still require a descendant.
+      path = await assertInsideRoot(requireRoot(), requested, { allowRoot: true })
+    } catch (err) {
+      // Revealing a stale row should use the same user-facing error as opening it.
+      throw toUserFacing(err)
+    }
     shell.showItemInFolder(path)
   })
 
-  handle('file:import', async (_e, dest: string, sources: string[]) => {
-    const copied = await importFiles(dest, sources)
+  register('importFiles', async (_e, dest, sources) => {
+    assertAbsolutePath(dest, 'Invalid file import request')
+    const copied = await importFiles(await resolveImportDestination(requireRoot(), dest), sources)
     capture('files_imported', { count: copied.length })
     return copied
   })
+}
+
+function titleBarOverlay(dark: boolean): Electron.TitleBarOverlayOptions {
+  return {
+    color: dark ? '#0f0f0f' : '#ffffff',
+    symbolColor: dark ? '#ffffff' : '#0f0f0f',
+    height: 48
+  }
 }
 
 function createWindow(): void {
@@ -205,7 +349,12 @@ function createWindow(): void {
     minWidth: 800,
     minHeight: 500,
     show: false,
-    autoHideMenuBar: true,
+    autoHideMenuBar: process.platform !== 'darwin',
+    titleBarStyle: 'hidden',
+    // macOS needs the flag to expose titlebar-area CSS environment variables,
+    // but only Windows and Linux accept configurable overlay options.
+    titleBarOverlay:
+      process.platform === 'darwin' ? true : titleBarOverlay(nativeTheme.shouldUseDarkColors),
     // Match Kumo's --color-kumo-base (light #fff, dark oklch(17% 0 0)) so the
     // window doesn't flash the wrong colour before the renderer paints.
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#0f0f0f' : '#ffffff',
@@ -214,21 +363,37 @@ function createWindow(): void {
       sandbox: false
     }
   }
+  // Centre macOS's 12px traffic lights in the 48px toolbar.
+  if (process.platform === 'darwin') options.trafficLightPosition = { x: 14, y: 18 }
   if (process.platform === 'linux') options.icon = icon
   mainWindow = new BrowserWindow(options)
 
-  // Keep the backing surface in step when the OS theme changes at runtime,
-  // otherwise resize/reload regions paint the stale colour.
-  const onThemeUpdated = (): void =>
-    mainWindow?.setBackgroundColor(nativeTheme.shouldUseDarkColors ? '#0f0f0f' : '#ffffff')
+  // Keep native surfaces in step when the OS theme changes at runtime.
+  const onThemeUpdated = (): void => {
+    const dark = nativeTheme.shouldUseDarkColors
+    mainWindow?.setBackgroundColor(dark ? '#0f0f0f' : '#ffffff')
+    if (process.platform !== 'darwin') mainWindow?.setTitleBarOverlay(titleBarOverlay(dark))
+  }
+
   nativeTheme.on('updated', onThemeUpdated)
-  mainWindow.on('closed', () => nativeTheme.removeListener('updated', onThemeUpdated))
+  const createdWindow = mainWindow
+  mainWindow.on('closed', () => {
+    nativeTheme.removeListener('updated', onThemeUpdated)
+    if (mainWindow === createdWindow) mainWindow = null
+  })
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
     void shell.openExternal(details.url)
     return { action: 'deny' }
+  })
+
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    if (!params.isEditable) return
+    Menu.buildFromTemplate(buildEditableContextMenuTemplate(params.editFlags)).popup({
+      window: createdWindow
+    })
   })
 
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
@@ -241,14 +406,22 @@ function createWindow(): void {
 app.whenReady().then(() => {
   electronApp.setAppUserModelId('com.gobowling.leagues')
 
-  app.on('browser-window-created', (_, window) => {
-    optimizer.watchWindowShortcuts(window)
-  })
-
   capture('app_opened', { platform: process.platform })
 
   registerIpc()
   createWindow()
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      buildAppMenuTemplate(process.platform, is.dev, (command) => {
+        if (!mainWindow || mainWindow.isDestroyed()) return
+        mainWindow.webContents.send('app:command', {
+          command,
+          repeat: false,
+          composing: false
+        })
+      })
+    )
+  )
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

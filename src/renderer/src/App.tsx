@@ -1,18 +1,56 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type { LeaguesTree } from '@shared/tree'
-import { Button, Loader, Sidebar as KumoSidebar, Text, ToastProvider } from '@cloudflare/kumo'
-import FirstRun from './components/FirstRun'
-import LeagueView from './components/LeagueView'
-import SharedView from './components/SharedView'
-import Sidebar, { type Selection } from './components/Sidebar'
+import { useCallback, useEffect, useState } from 'react'
+import { skipToken, useQuery, type QueryClient, type UseQueryResult } from '@tanstack/react-query'
+import { AppProviders } from './components/AppProviders'
+import { AppErrorBoundary } from './components/AppErrorBoundary'
+import { PaneErrorBoundary } from './components/PaneErrorBoundary'
+import { WorkspaceStoreProvider } from './components/WorkspaceStoreProvider'
+import { Button, Loader, Sidebar as KumoSidebar, Text } from '@cloudflare/kumo'
+import { FirstRun } from './components/FirstRun'
+import { HomeView } from './components/HomeView'
+import { LeagueView } from './components/LeagueView'
+import { Sidebar } from './components/Sidebar'
+import { StatusBar } from './components/StatusBar'
+import { Toolbar } from './components/Toolbar'
+import { OperationFeedbackProvider } from './components/OperationFeedbackProvider'
+import { LocationOperationProvider } from './components/LocationOperationProvider'
 import { ipcErrorMessage } from './lib/ipc-error'
-
-type Phase = 'loading' | 'no-root' | 'ready' | 'error'
+import { findLeague, HOME, restoreSelection } from './lib/selection'
+import type { WorkspaceStore } from './lib/workspace-store'
+import { useWorkspace } from './hooks/use-workspace'
+import { useAppCommandHandler, useAppCommands } from './hooks/use-app-commands'
+import { useLocationOperation } from './hooks/use-location-operation'
+import { useOperationFeedback } from './hooks/use-operation-feedback'
+import { useDiagnosticsCommands } from './hooks/use-diagnostics-preference'
+import { rootQuery } from './queries/root'
+import { treeQuery, treeQueryKey } from './queries/tree'
+import { useQueryRefresh } from './hooks/use-query-refresh'
 
 interface ScanErrorProps {
   message: string | null
   onRetry: () => Promise<void>
   onChooseAnother: () => Promise<void>
+}
+
+function AppCommandHandlers(): null {
+  const locationOperation = useLocationOperation()
+  useAppCommandHandler('open-location', () => void locationOperation.choose('select'))
+  useAppCommandHandler('new-location', () => void locationOperation.choose('init'))
+  return null
+}
+
+function ApplicationActivity({ visible }: { visible: boolean }): React.JSX.Element {
+  const { activity } = useOperationFeedback()
+  return (
+    // A live region that mounts with its message already present is not reliably announced.
+    <span
+      role="status"
+      aria-label="Application activity"
+      aria-live="polite"
+      className={visible ? 'fixed inset-x-0 bottom-3 text-center text-base' : 'sr-only'}
+    >
+      {activity ? `${activity.label}…` : null}
+    </span>
+  )
 }
 
 function ScanError({ message, onRetry, onChooseAnother }: ScanErrorProps): React.JSX.Element {
@@ -54,96 +92,190 @@ function ScanError({ message, onRetry, onChooseAnother }: ScanErrorProps): React
 }
 
 function AppContent(): React.JSX.Element {
-  const [phase, setPhase] = useState<Phase>('loading')
-  const [tree, setTree] = useState<LeaguesTree | null>(null)
-  const [scanError, setScanError] = useState<string | null>(null)
-  const [selection, setSelection] = useState<Selection>({ kind: 'shared' })
+  const root = useQuery(rootQuery)
+  return (
+    <OperationFeedbackProvider locationKey={root.data ?? ''}>
+      <LocationOperationProvider>
+        <LocationContent root={root} />
+      </LocationOperationProvider>
+    </OperationFeedbackProvider>
+  )
+}
 
-  // Concurrent refreshes (watcher + retry click) settle in any order; only the
-  // most recently started one may write state.
-  const scanGeneration = useRef(0)
+function LocationContent({ root }: { root: UseQueryResult<string | null> }): React.JSX.Element {
+  useAppCommands()
+  useDiagnosticsCommands()
+  const locationOperation = useLocationOperation()
+  const coordinator = useQueryRefresh()
+  const rootPath = root.data ?? null
+  const tree = useQuery({
+    ...treeQuery(rootPath ?? ''),
+    queryFn: rootPath !== null ? treeQuery(rootPath).queryFn : skipToken
+  })
 
-  const refresh = useCallback(async () => {
-    const ticket = (scanGeneration.current += 1)
-    try {
-      const scanned = await window.api.scan()
-      if (scanGeneration.current !== ticket) return
-      if (scanned) {
-        setTree(scanned)
-        setPhase('ready')
-      } else {
-        setTree(null)
-        setPhase('no-root')
+  const setWorkspaceRoot = useWorkspace((workspace) => workspace.setRoot)
+  const select = useWorkspace((workspace) => workspace.select)
+  const reportLeagueDir = useWorkspace((workspace) => workspace.reportLeagueDir)
+  const reportHomeDir = useWorkspace((workspace) => workspace.reportHomeDir)
+  const leagueNavigation = useWorkspace((workspace) => workspace.leagueNavigation)
+  const homeNavigation = useWorkspace((workspace) => workspace.homeNavigation)
+  // The remembered selection is only ever written by an explicit select(); a league missing
+  // from one scan is never overwritten, so it reselects itself once the scan finds it again.
+  // Keyed on the displayed root rather than the store's, which follows it from an effect.
+  const remembered = useWorkspace((workspace) =>
+    rootPath !== null ? workspace.locations[rootPath]?.selection : undefined
+  )
+
+  useEffect(() => {
+    setWorkspaceRoot(root.data ?? null)
+  }, [root.data, setWorkspaceRoot])
+
+  const homeRoot = root.data
+  const updateHomeCurrentDir = useCallback(
+    (currentDir: string) => {
+      if (
+        homeRoot &&
+        (currentDir === homeRoot ||
+          currentDir.startsWith(`${homeRoot}/`) ||
+          currentDir.startsWith(`${homeRoot}\\`))
+      ) {
+        reportHomeDir({ ownerRoot: homeRoot, currentDir })
       }
-      setScanError(null)
-    } catch (caught) {
-      if (scanGeneration.current !== ticket) return
-      // Without this, a failing scan strands the app on the spinner forever.
-      setScanError(ipcErrorMessage(caught) || 'Unknown error')
-      setPhase('error')
+    },
+    [homeRoot, reportHomeDir]
+  )
+
+  useEffect(() => {
+    // A file dropped anywhere but a drop target would otherwise navigate the
+    // whole window to it. Drop targets handle their own events first; here we
+    // only refuse what nothing else accepted.
+    const refuse = (event: DragEvent): void => {
+      if (event.defaultPrevented) return
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'none'
+      event.preventDefault()
+    }
+    document.addEventListener('dragover', refuse)
+    document.addEventListener('drop', refuse)
+    return () => {
+      document.removeEventListener('dragover', refuse)
+      document.removeEventListener('drop', refuse)
     }
   }, [])
 
-  const forgetAndRestart = useCallback(async () => {
-    await window.api.forgetRoot()
-    setScanError(null)
-    setTree(null)
-    setPhase('no-root')
-  }, [])
-
-  useEffect(() => {
-    // refresh() only touches state after awaiting the IPC scan, never synchronously
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void refresh()
-    return window.api.onTreeChanged(() => void refresh())
-  }, [refresh])
-
-  if (phase === 'loading') {
-    return (
-      <div role="status" className="flex h-full items-center justify-center gap-2 bg-kumo-base">
+  let content: React.JSX.Element | null = null
+  if (root.isPending || (!root.isError && rootPath !== null && tree.isPending && !tree.data)) {
+    content = (
+      <div className="flex h-full items-center justify-center gap-2 bg-kumo-base">
         <Loader />
         <Text>Loading…</Text>
       </div>
     )
-  }
+  } else if (root.isError) {
+    content = (
+      <ScanError
+        message={ipcErrorMessage(root.error)}
+        onRetry={async () => {
+          await root.refetch()
+        }}
+        onChooseAnother={locationOperation.forget}
+      />
+    )
+  } else if (root.data === null) {
+    content = <FirstRun />
+  } else if (tree.isError) {
+    content = (
+      <ScanError
+        message={ipcErrorMessage(tree.error)}
+        onRetry={() => coordinator.refresh({ queryKey: treeQueryKey(rootPath ?? '') })}
+        onChooseAnother={locationOperation.forget}
+      />
+    )
+  } else if (tree.data) {
+    const scanned = tree.data
+    const effectiveSelection = restoreSelection(scanned, remembered ?? null)
+    const selectedLeague = findLeague(scanned, effectiveSelection)
+    const statusPath = selectedLeague
+      ? leagueNavigation?.ownerPath === selectedLeague.path
+        ? leagueNavigation.currentDir
+        : selectedLeague.path
+      : homeNavigation?.ownerRoot === scanned.root
+        ? homeNavigation.currentDir
+        : scanned.sharedPath
 
-  if (phase === 'error') {
-    return <ScanError message={scanError} onRetry={refresh} onChooseAnother={forgetAndRestart} />
+    // Keyed on the location / league so each view's local state starts fresh
+    // when they change.
+    content = (
+      <KumoSidebar.Provider
+        defaultOpen
+        collapsible="icon"
+        resizable={false}
+        contained
+        className="flex h-full flex-col"
+      >
+        <Toolbar
+          root={scanned.root}
+          isHome={effectiveSelection.kind === 'home'}
+          onHome={() => select(HOME)}
+        />
+        <div className="flex min-h-0 w-full flex-1">
+          <Sidebar
+            key={scanned.root}
+            tree={scanned}
+            selection={effectiveSelection}
+            onSelect={select}
+          />
+          <main className="h-full min-w-0 flex-1 overflow-auto">
+            <PaneErrorBoundary resetKeys={[selectedLeague?.path ?? scanned.root]}>
+              {selectedLeague ? (
+                <LeagueView
+                  key={selectedLeague.path}
+                  league={selectedLeague}
+                  onCurrentDirChange={(currentDir) =>
+                    reportLeagueDir({ ownerPath: selectedLeague.path, currentDir })
+                  }
+                />
+              ) : (
+                <HomeView
+                  key={scanned.root}
+                  tree={scanned}
+                  onSelect={select}
+                  onCurrentDirChange={updateHomeCurrentDir}
+                />
+              )}
+            </PaneErrorBoundary>
+          </main>
+        </div>
+        <StatusBar path={statusPath} />
+      </KumoSidebar.Provider>
+    )
   }
-
-  if (phase === 'no-root' || !tree) {
-    return <FirstRun onChosen={() => void refresh()} />
-  }
-
-  const selectedLeague =
-    selection.kind === 'league'
-      ? (tree.days[selection.day].find((l) => l.folderName === selection.folderName) ?? null)
-      : null
 
   return (
-    <KumoSidebar.Provider
-      defaultOpen
-      collapsible="icon"
-      resizable={false}
-      className="flex h-full min-h-0"
-    >
-      <Sidebar tree={tree} selection={selection} onSelect={setSelection} onChanged={refresh} />
-      <main className="h-full min-w-0 flex-1 overflow-auto">
-        {selection.kind === 'shared' || !selectedLeague ? (
-          <SharedView tree={tree} />
-        ) : (
-          <LeagueView league={selectedLeague} onChanged={() => void refresh()} />
-        )}
-      </main>
-    </KumoSidebar.Provider>
+    <>
+      <AppCommandHandlers />
+      {content}
+      <ApplicationActivity
+        visible={root.isPending || root.isError || root.data === null || !tree.data || tree.isError}
+      />
+    </>
   )
 }
 
-function App(): React.JSX.Element {
+function App({
+  queryClient,
+  workspaceStore
+}: {
+  queryClient: QueryClient
+  workspaceStore: WorkspaceStore
+}): React.JSX.Element {
   return (
-    <ToastProvider>
-      <AppContent />
-    </ToastProvider>
+    <AppProviders queryClient={queryClient}>
+      <WorkspaceStoreProvider store={workspaceStore}>
+        <AppErrorBoundary>
+          <AppContent />
+        </AppErrorBoundary>
+      </WorkspaceStoreProvider>
+    </AppProviders>
   )
 }
 

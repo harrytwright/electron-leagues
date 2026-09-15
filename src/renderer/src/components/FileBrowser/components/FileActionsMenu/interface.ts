@@ -1,0 +1,12 @@
+import type { RowMenuItem } from '../../row'
+
+export interface Props {
+  id: string
+  label: string
+  open: boolean
+  anchor: { left: number; top: number }
+  actions: RowMenuItem[]
+  focusScope: string
+  onOpenChange: (open: boolean) => void
+  onRestoreFocus: () => void
+}

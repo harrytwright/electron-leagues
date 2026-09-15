@@ -3,6 +3,8 @@ import './assets/main.css'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App'
+import { createQueryClient } from './lib/query-client'
+import { createWorkspaceStore, type WorkspaceStorage } from './lib/workspace-store'
 import { watchSystemTheme } from './theme'
 import { initAnalytics } from './lib/analytics'
 
@@ -11,8 +13,20 @@ import { initAnalytics } from './lib/analytics'
 watchSystemTheme()
 void initAnalytics()
 
+function localStorageWorkspaceStorage(): WorkspaceStorage {
+  return {
+    getItem: (key) => localStorage.getItem(key),
+    setItem: (key, value) => localStorage.setItem(key, value),
+    removeItem: (key) => localStorage.removeItem(key),
+    keys: () => Object.keys(localStorage)
+  }
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <App />
+    <App
+      queryClient={createQueryClient()}
+      workspaceStore={createWorkspaceStore({ storage: localStorageWorkspaceStorage() })}
+    />
   </StrictMode>
 )
