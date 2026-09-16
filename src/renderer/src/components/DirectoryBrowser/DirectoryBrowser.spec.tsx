@@ -228,7 +228,7 @@ it('shares row actions across pointer and keyboard menus, selecting and restorin
 
 it('reports native open and reveal failures as toasts', async () => {
   installMockApi({
-    openFile: vi.fn().mockResolvedValue('No associated application'),
+    openFile: vi.fn().mockRejectedValue(new Error('No associated application')),
     revealFile: vi.fn().mockRejectedValue(new Error('Reveal failed'))
   })
   const user = userEvent.setup()

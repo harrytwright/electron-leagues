@@ -205,20 +205,29 @@ export function classifyTrashTarget(root: string, target: string): TrashTarget |
 
 export interface TrashPlan {
   kind: TrashTarget
-  /** Ordered so that if any step fails, nothing the user can see has changed yet. */
+  /**
+   * Trash the visible league first so a partial failure leaves what the user sees coherent.
+   * An archive left behind without its league is recoverable.
+   */
   paths: string[]
 }
 
-/** Validate a delete request and list what must go to the trash, dependents first. */
-export async function planTrash(root: string, target: string): Promise<TrashPlan> {
+/** Validate a delete request and list what must go to the trash. */
+export async function planTrash(
+  root: string,
+  target: string,
+  getTargetStats: (path: string) => Promise<{ isDirectory(): boolean }> = stat
+): Promise<TrashPlan> {
   let resolved: string
+  let isDirectory: boolean
   try {
     resolved = await assertInsideRoot(root, target)
+    isDirectory = (await getTargetStats(resolved)).isDirectory()
   } catch (err) {
     throw toUserFacing(err)
   }
   const kind = classifyTrashTarget(root, resolved)
-  if (!kind || !(await stat(resolved)).isDirectory()) {
+  if (!kind || !isDirectory) {
     throw new UserFacingError('Only league and season folders can be deleted')
   }
   const paths = [resolved]
@@ -233,7 +242,7 @@ export async function planTrash(root: string, target: string): Promise<TrashPlan
         throw err
       }
     )
-    if (present) paths.unshift(archive)
+    if (present) paths.push(archive)
   }
   return { kind, paths }
 }

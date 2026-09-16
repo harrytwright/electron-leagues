@@ -27,7 +27,7 @@ export interface InvokeOutputs {
   createSeason: { seasonPath: string; archived: string | null }
   syncSeasonTemplates: { added: string[]; skipped: string[] }
   zipArchive: string[]
-  openFile: string
+  openFile: void
   revealFile: void
   pickFiles: string[]
   importFiles: string[]

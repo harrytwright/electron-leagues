@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { toUserFacing, UserFacingError } from '../fs-errors'
 import {
   assertAbsolutePath,
@@ -182,12 +182,12 @@ describe('classifyTrashTarget', () => {
 describe('planTrash', () => {
   const league = (): string => join(root, 'monday', 'Mens Triples')
 
-  test('a league with archives trashes the archive first, then the league', async () => {
+  test('a league with archives trashes the league first, then its archive', async () => {
     await mkdir(join(league(), '2025-26'), { recursive: true })
     await mkdir(join(root, '_archives', 'Mens Triples', '2023-24'), { recursive: true })
     await expect(planTrash(root, league())).resolves.toEqual({
       kind: 'league',
-      paths: [join(root, '_archives', 'Mens Triples'), league()]
+      paths: [league(), join(root, '_archives', 'Mens Triples')]
     })
   })
 
@@ -229,5 +229,17 @@ describe('planTrash', () => {
     await expect(planTrash(root, join(root, 'monday', 'Ghost'))).rejects.toThrow(
       'That folder no longer exists'
     )
+  })
+
+  test('a target that vanishes after containment gets a friendly message', async () => {
+    await mkdir(league(), { recursive: true })
+    const missingStat = vi
+      .fn<(path: string) => Promise<{ isDirectory(): boolean }>>()
+      .mockRejectedValue(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }))
+
+    const failure = await planTrash(root, league(), missingStat).catch((e: Error) => e)
+
+    expect(failure).toBeInstanceOf(UserFacingError)
+    expect(failure).toHaveProperty('message', 'That folder no longer exists')
   })
 })

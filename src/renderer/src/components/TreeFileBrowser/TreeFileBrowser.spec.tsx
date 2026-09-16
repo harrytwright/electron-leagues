@@ -93,7 +93,7 @@ it('refreshes collapsed caches on reopening, not on watcher events', async () =>
 
 it('selects on click, opens files on double-click, and reports OS open errors', async () => {
   const api = installMockApi({
-    openFile: vi.fn().mockResolvedValue('No application is associated with this file')
+    openFile: vi.fn().mockRejectedValue(new Error('No application is associated with this file'))
   })
   const user = userEvent.setup()
   renderFiles()

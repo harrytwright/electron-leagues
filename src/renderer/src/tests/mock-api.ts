@@ -47,7 +47,7 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
       repaired: [],
       warnings: []
     }),
-    openFile: vi.fn<RendererApi['openFile']>().mockResolvedValue(''),
+    openFile: vi.fn<RendererApi['openFile']>().mockResolvedValue(undefined),
     revealFile: vi.fn<RendererApi['revealFile']>().mockResolvedValue(undefined),
     forgetRoot: vi.fn<RendererApi['forgetRoot']>().mockResolvedValue(undefined),
     pathForFile: vi.fn<RendererApi['pathForFile']>((file) => file.name),

@@ -3,7 +3,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from 'e
 import Store from 'electron-store'
 import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import icon from '../../resources/icon.png?asset'
 import { updateDiagnosticsMenu } from './lib/diagnostics-menu'
 import {
@@ -22,7 +22,7 @@ import {
   syncSeasonWithTemplates,
   zipArchivedSeasons
 } from './lib/operations'
-import { isMissing, toUserFacing } from './lib/fs-errors'
+import { isMissing, toUserFacing, UserFacingError } from './lib/fs-errors'
 import { registerInvokeHandler, type InvokeListener, type IpcErrorReporter } from './lib/ipc-handle'
 import type { InvokeName } from '../shared/ipc'
 import {
@@ -33,6 +33,7 @@ import {
 } from './lib/paths'
 import { pruneRecents, seedRecents, updateRecents, type RootProbe } from './lib/recents'
 import { listDirEntries, scanLeaguesRoot } from './lib/scanner'
+import { executeTrashPlan } from './lib/trash'
 import { createRootWatcher, type RootWatcher } from './lib/watcher'
 import * as Sentry from '@sentry/electron/main'
 
@@ -283,9 +284,7 @@ function registerIpc(): void {
   register('trashFolder', async (_e, path) => {
     assertAbsolutePath(path, 'Invalid file path')
     const plan = await planTrash(requireRoot(), path)
-    for (const target of plan.paths) {
-      await shell.trashItem(target)
-    }
+    await executeTrashPlan(plan, (target) => shell.trashItem(target))
     capture(plan.kind === 'league' ? 'league_deleted' : 'season_deleted')
   })
 
@@ -306,8 +305,9 @@ function registerIpc(): void {
       // A stale browser row is an expected filesystem failure, not an application fault.
       throw toUserFacing(err)
     }
+    const failure = await shell.openPath(path)
+    if (failure) throw new UserFacingError(`Couldn’t open “${basename(path)}”: ${failure}`)
     capture('document_opened', { onedrive: (await oneDriveStatus(path)).availability })
-    return shell.openPath(path)
   })
 
   register('revealFile', async (_e, requested) => {

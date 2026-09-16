@@ -8,10 +8,9 @@ interface FileActions {
 
 export function useFileActions(): FileActions {
   const { add } = useKumoToastManager()
-  const run = async (action: () => Promise<string | void>): Promise<void> => {
+  const run = async (action: () => Promise<void>): Promise<void> => {
     try {
-      const error = await action()
-      if (error) add({ title: error, variant: 'error' })
+      await action()
     } catch (caught) {
       add({ title: ipcErrorMessage(caught), variant: 'error' })
     }
