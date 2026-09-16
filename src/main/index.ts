@@ -1,5 +1,4 @@
 import { electronApp, is } from '@electron-toolkit/utils'
-import { watch, type FSWatcher } from 'chokidar'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron'
 import Store from 'electron-store'
 import { randomUUID } from 'node:crypto'
@@ -34,6 +33,7 @@ import {
 } from './lib/paths'
 import { pruneRecents, seedRecents, updateRecents, type RootProbe } from './lib/recents'
 import { listDirEntries, scanLeaguesRoot } from './lib/scanner'
+import { createRootWatcher, type RootWatcher } from './lib/watcher'
 import * as Sentry from '@sentry/electron/main'
 
 interface Settings {
@@ -86,28 +86,25 @@ function bundledTemplatesDir(): string {
 }
 
 let mainWindow: BrowserWindow | null = null
-let watcher: FSWatcher | null = null
-let watchTimer: NodeJS.Timeout | null = null
+let rootWatcher: RootWatcher | null = null
 
 function stopWatching(): void {
-  void watcher?.close()
-  watcher = null
-  if (watchTimer) clearTimeout(watchTimer)
-  watchTimer = null
+  void rootWatcher?.close()
+  rootWatcher = null
 }
 
 function watchRoot(root: string): void {
   stopWatching()
-  // Depth 6 reaches two levels below a season folder; edits deeper than that
-  // won't auto-refresh until the user navigates.
-  watcher = watch(root, { ignoreInitial: true, depth: 6 })
-  watcher.on('all', () => {
-    if (watchTimer) clearTimeout(watchTimer)
-    watchTimer = setTimeout(() => mainWindow?.webContents.send('tree:changed'), 500)
-  })
-  watcher.on('error', (err) => {
-    console.error(err)
-    Sentry.captureException(err)
+  rootWatcher = createRootWatcher(root, {
+    onChange: () => mainWindow?.webContents.send('tree:changed'),
+    onError: (error, mode) => {
+      console.error(error)
+      Sentry.captureException(error, { tags: { watch_mode: mode } })
+    },
+    onFallback: (message, data) => {
+      console.warn(message, { code: data.code })
+      Sentry.addBreadcrumb({ category: 'watcher', level: 'warning', message, data })
+    }
   })
 }
 
@@ -239,7 +236,7 @@ function registerIpc(): void {
   register('scan', async () => {
     const root = currentRoot()
     if (!root) return null
-    if (!watcher) watchRoot(root)
+    if (!rootWatcher) watchRoot(root)
     return scanLeaguesRoot(root, { heal: true })
   })
 
@@ -441,5 +438,5 @@ app.on('before-quit', (event) => {
   if (flushedOnQuit) return
   flushedOnQuit = true
   event.preventDefault()
-  void Promise.allSettled([watcher?.close(), shutdownAnalytics()]).then(() => app.quit())
+  void Promise.allSettled([rootWatcher?.close(), shutdownAnalytics()]).then(() => app.quit())
 })
