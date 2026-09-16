@@ -9,6 +9,7 @@ import {
   classifyTrashTarget,
   isInsideRoot,
   planTrash,
+  resolveArchivePath,
   resolveImportDestination
 } from '../paths'
 
@@ -116,6 +117,21 @@ describe('assertInsideRoot', () => {
   test('allows the root only when the caller opts in', async () => {
     await expect(assertInsideRoot(root, root)).rejects.toThrow(/outside the leagues folder/)
     await expect(assertInsideRoot(root, root, { allowRoot: true })).resolves.toBe(root)
+  })
+})
+
+describe('resolveArchivePath', () => {
+  test('returns the validated archive path before it exists', async () => {
+    await expect(resolveArchivePath(root, 'Pairs')).resolves.toBe(join(root, '_archives', 'Pairs'))
+  })
+
+  test('rejects an archive league symlink outside the root', async () => {
+    await mkdir(join(root, '_archives'))
+    await symlink(outside, join(root, '_archives', 'Pairs'))
+
+    await expect(resolveArchivePath(root, 'Pairs')).rejects.toEqual(
+      new UserFacingError('Path is outside the leagues folder')
+    )
   })
 })
 

@@ -28,6 +28,7 @@ import {
 import { UserFacingError } from '../fs-errors'
 import { FILE_RULES } from '../template-workflows'
 import { resolveNewLiveSeasonRoot } from '../paths'
+import { scanLeaguesRoot } from '../scanner'
 
 let root: string
 let outside: string
@@ -160,6 +161,15 @@ describe('createLeague', () => {
     )
   })
 
+  test('never writes into a league folder that already exists', async () => {
+    await makeTree(root, { 'monday/Pairs/.keep': '' })
+
+    const attempt = createLeague(root, 'monday', 'Pairs')
+    await expect(attempt).rejects.toBeInstanceOf(UserFacingError)
+    await expect(attempt).rejects.toThrow(/already exists/)
+    expect(await readdir(join(root, 'monday/Pairs'))).toEqual(['.keep'])
+  })
+
   test('rejects an in-root weekday alias before creating a league', async () => {
     await makeTree(root, { monday: null, tuesday: null })
     await rm(join(root, 'monday'), { recursive: true })
@@ -192,6 +202,25 @@ describe('createSeason', () => {
         archiveOldest: false
       })
     ).rejects.toEqual(new UserFacingError('Invalid league folder'))
+  })
+
+  test('rejects a league whose meta.json is a symlink without creating the season', async () => {
+    await makeTree(root, { 'monday/Mens Triples/2024-25/Rules.docx': 'prev' })
+    await makeTree(outside, { 'Notes.txt': 'private notes' })
+    await symlink(join(outside, 'Notes.txt'), join(root, 'monday/Mens Triples/meta.json'))
+
+    await expect(
+      createSeason({
+        root,
+        day: 'monday',
+        leagueFolder: 'Mens Triples',
+        seasonName: '2025-26',
+        source: 'empty',
+        archiveOldest: false
+      })
+    ).rejects.toEqual(new UserFacingError('meta.json can’t be a symbolic link'))
+    expect(await readFile(join(outside, 'Notes.txt'), 'utf8')).toBe('private notes')
+    expect(await exists(join(root, 'monday/Mens Triples/2025-26'))).toBe(false)
   })
 
   test('library season creation does not seed a deleted bundled template', async () => {
@@ -303,6 +332,64 @@ describe('createSeason', () => {
     )
   })
 
+  test('refuses to archive over an existing archive folder', async () => {
+    await makeTree(root, {
+      '_archives/Mens Triples/2023-24/Rules.docx': 'archived copy',
+      'monday/Mens Triples/2023-24/Rules.docx': 'old',
+      'monday/Mens Triples/2024-25/Rules.docx': 'prev'
+    })
+
+    await expect(
+      createSeason({
+        root,
+        day: 'monday',
+        leagueFolder: 'Mens Triples',
+        seasonName: '2025-26',
+        source: 'empty',
+        archiveOldest: true
+      })
+    ).rejects.toEqual(
+      new UserFacingError('An archive folder for “2023-24” already exists in “Mens Triples”')
+    )
+    expect(await readFile(join(root, '_archives/Mens Triples/2023-24/Rules.docx'), 'utf8')).toBe(
+      'archived copy'
+    )
+    expect(await readFile(join(root, 'monday/Mens Triples/2023-24/Rules.docx'), 'utf8')).toBe('old')
+    expect((await readdir(join(root, 'monday/Mens Triples'))).sort()).toEqual([
+      '2023-24',
+      '2024-25'
+    ])
+    expect(await readdir(join(root, '_archives/Mens Triples/2023-24'))).toEqual(['Rules.docx'])
+  })
+
+  test('refuses to archive onto a dangling symlink', async () => {
+    await makeTree(root, {
+      '_archives/Mens Triples': null,
+      'monday/Mens Triples/2023-24/Rules.docx': 'old',
+      'monday/Mens Triples/2024-25/Rules.docx': 'prev'
+    })
+    await symlink(join(outside, 'gone'), join(root, '_archives/Mens Triples/2023-24'))
+
+    await expect(
+      createSeason({
+        root,
+        day: 'monday',
+        leagueFolder: 'Mens Triples',
+        seasonName: '2025-26',
+        source: 'empty',
+        archiveOldest: true
+      })
+    ).rejects.toEqual(
+      new UserFacingError('An archive folder for “2023-24” already exists in “Mens Triples”')
+    )
+    expect((await readdir(join(root, 'monday/Mens Triples'))).sort()).toEqual([
+      '2023-24',
+      '2024-25'
+    ])
+    expect(await readFile(join(root, 'monday/Mens Triples/2023-24/Rules.docx'), 'utf8')).toBe('old')
+    expect(await exists(join(root, 'monday/Mens Triples/2025-26'))).toBe(false)
+  })
+
   test('does not move a live season through an archive league symlink', async () => {
     await makeTree(root, {
       _archives: null,
@@ -325,8 +412,7 @@ describe('createSeason', () => {
     expect((await readdir(join(root, 'monday/Mens Triples'))).sort()).toEqual([
       '2022-23',
       '2023-24',
-      '2024-25',
-      '2025-26'
+      '2024-25'
     ])
     expect(await readdir(outside)).toEqual([])
   })
@@ -372,6 +458,29 @@ describe('createSeason', () => {
     })
     expect(result.archived).toBeNull()
     expect(await exists(join(root, 'monday/Mens Triples/2023-24'))).toBe(true)
+  })
+
+  test('writes archived seasons in season order so a heal scan leaves meta.json unchanged', async () => {
+    await makeTree(root, {
+      '_archives/Mens Triples/2023-24/.keep': '',
+      '_archives/Mens Triples/2021-22/.keep': '',
+      '_archives/Mens Triples/Photos/.keep': '',
+      'monday/Mens Triples/2024-25/Rules.docx': 'prev'
+    })
+    await createSeason({
+      root,
+      day: 'monday',
+      leagueFolder: 'Mens Triples',
+      seasonName: '2025-26',
+      source: 'empty',
+      archiveOldest: false
+    })
+
+    const metaPath = join(root, 'monday/Mens Triples/meta.json')
+    const beforeScan = await readFile(metaPath, 'utf8')
+    expect(JSON.parse(beforeScan).archivedSeasons).toEqual(['2021-22', '2023-24', 'Photos'])
+    await scanLeaguesRoot(root, { heal: true })
+    expect(await readFile(metaPath, 'utf8')).toBe(beforeScan)
   })
 
   test('records createdAt for the new season in meta.json', async () => {
@@ -468,16 +577,16 @@ describe('createSeason', () => {
 
   test('rejects a season that already exists', async () => {
     await makeTree(root, { 'monday/Mens Triples/2025-26': null })
-    await expect(
-      createSeason({
-        root,
-        day: 'monday',
-        leagueFolder: 'Mens Triples',
-        seasonName: '2025-26',
-        source: 'templates',
-        archiveOldest: true
-      })
-    ).rejects.toThrow(/exists/i)
+    const attempt = createSeason({
+      root,
+      day: 'monday',
+      leagueFolder: 'Mens Triples',
+      seasonName: '2025-26',
+      source: 'templates',
+      archiveOldest: true
+    })
+    await expect(attempt).rejects.toBeInstanceOf(UserFacingError)
+    await expect(attempt).rejects.toThrow(/exists/i)
   })
 })
 

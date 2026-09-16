@@ -18,6 +18,12 @@ export function archivePathFor(root: string, leagueFolder: string): string {
   return join(root, ARCHIVES_FOLDER, leagueFolder)
 }
 
+/** The archive folder for a league, validated so writes land where the UI named them. */
+export async function resolveArchivePath(root: string, leagueFolder: string): Promise<string> {
+  const path = archivePathFor(root, leagueFolder)
+  return assertRealLayout(root, path, join(ARCHIVES_FOLDER, leagueFolder))
+}
+
 export function assertAbsolutePath(path: string, message: string): void {
   if (!isAbsolute(path)) throw new UserFacingError(message)
 }

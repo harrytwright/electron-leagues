@@ -15,18 +15,23 @@ import {
 import { basename, dirname, extname, join } from 'node:path'
 import { healMeta, parseLeagueMetaInput } from '../../shared/meta'
 import type { ImportFilesResult, ZipArchiveResult } from '../../shared/ipc'
-import { compareSeasonNames, parseSeasonName, type SeasonName } from '../../shared/season'
+import {
+  compareSeasonNames,
+  parseSeasonName,
+  sortSeasonNames,
+  type SeasonName
+} from '../../shared/season'
 import { sanitiseFolderName } from '../../shared/sanitise'
 import type { Weekday } from '../../shared/weekday'
 import type { SeasonCreateRequest, SeasonSyncRequest } from '../../shared/season-create'
-import { isAlreadyExists, isMissing, toUserFacing, UserFacingError } from './fs-errors'
-import { META_FILE, writeLeagueMeta } from './league-meta'
+import { errorCode, isAlreadyExists, isMissing, toUserFacing, UserFacingError } from './fs-errors'
+import { assertMetaWritable, META_FILE, writeLeagueMeta } from './league-meta'
 import {
   ARCHIVES_FOLDER,
-  archivePathFor,
   assertInsideRoot,
   assertLeagueFolderName,
   assertRealLayout,
+  resolveArchivePath,
   resolveNewLiveSeasonRoot,
   resolveLiveSeasonRoot
 } from './paths'
@@ -193,22 +198,34 @@ export async function createLeague(
 ): Promise<string> {
   const folderName = sanitiseFolderName(displayName)
   if (!folderName) throw new UserFacingError(`"${displayName}" is not a usable league name`)
+  const duplicateFolder = `A league folder named "${folderName}" already exists`
 
   const path = join(root, day, folderName)
   // Check collisions first: realpath can canonicalise casing and obscure an ordinary duplicate-name error.
   if (await exists(path)) {
-    throw new UserFacingError(`A league folder named "${folderName}" already exists`)
+    throw new UserFacingError(duplicateFolder)
   }
   await assertRealLayout(root, path, join(day, folderName))
 
-  await mkdir(path, { recursive: true })
+  await mkdir(dirname(path), { recursive: true })
+  await mkdir(path).catch((err) => {
+    if (isAlreadyExists(err)) {
+      throw new UserFacingError(duplicateFolder)
+    }
+    throw toUserFacing(err)
+  })
   const meta = healMeta(parseLeagueMetaInput({ name: displayName.trim() }), {
     folderName,
     day,
     liveSeasons: [],
     archivedSeasons: []
   })
-  await writeLeagueMeta(path, meta)
+  await writeLeagueMeta(path, meta, { exclusive: true }).catch((err) => {
+    if (isAlreadyExists(err)) {
+      throw new UserFacingError(duplicateFolder)
+    }
+    throw toUserFacing(err)
+  })
   return path
 }
 
@@ -221,12 +238,29 @@ async function liveSeasonsOf(leaguePath: string): Promise<SeasonName[]> {
     .sort(compareSeasonNames)
 }
 
+async function assertArchiveSlotFree(path: string): Promise<void> {
+  const occupied = await lstat(path).then(
+    () => true,
+    (err) => {
+      if (errorCode(err) === 'ENOENT') return false
+      throw toUserFacing(err)
+    }
+  )
+  if (occupied) {
+    throw new UserFacingError(
+      `An archive folder for “${basename(path)}” already exists in “${basename(dirname(path))}”`
+    )
+  }
+}
+
 async function moveDir(from: string, to: string): Promise<void> {
-  await mkdir(join(to, '..'), { recursive: true })
+  await assertArchiveSlotFree(to)
+  await mkdir(dirname(to), { recursive: true })
   try {
     await rename(from, to)
-  } catch {
-    await cp(from, to, { recursive: true })
+  } catch (err) {
+    if (errorCode(err) !== 'EXDEV') throw toUserFacing(err)
+    await cp(from, to, { recursive: true, force: false, errorOnExist: true })
     await rm(from, { recursive: true })
   }
 }
@@ -266,9 +300,16 @@ async function createSeasonUnlocked(
   await repairReservedLocationsUnlocked(opts.root)
 
   const leaguePath = dirname(seasonPath)
-  if (await exists(seasonPath)) throw new Error(`Season "${season.name}" already exists`)
+  if (await exists(seasonPath)) {
+    throw new UserFacingError(`Season "${season.name}" already exists`)
+  }
+  await assertMetaWritable(leaguePath)
 
   const before = await liveSeasonsOf(leaguePath)
+  const archivePath = await resolveArchivePath(opts.root, opts.leagueFolder)
+  const after = [...before, season].sort(compareSeasonNames)
+  const oldest = opts.archiveOldest && after.length > 2 ? after[0] : null
+  if (oldest) await assertArchiveSlotFree(join(archivePath, oldest.name))
 
   await mkdir(seasonPath, { recursive: true })
   const previousDir =
@@ -282,18 +323,16 @@ async function createSeasonUnlocked(
   })
 
   let archived: string | null = null
-  const after = await liveSeasonsOf(leaguePath)
-  const archivePath = archivePathFor(opts.root, opts.leagueFolder)
-  if (opts.archiveOldest && after.length > 2) {
-    const oldest = after[0]
-    await assertRealLayout(opts.root, archivePath, join(ARCHIVES_FOLDER, opts.leagueFolder))
+  if (oldest) {
     await moveDir(join(leaguePath, oldest.name), join(archivePath, oldest.name))
     archived = oldest.name
   }
 
-  const archivedSeasons = (await readdir(archivePath, { withFileTypes: true }).catch(() => []))
-    .filter((e) => e.isDirectory())
-    .map((e) => e.name)
+  const archivedSeasons = sortSeasonNames(
+    (await readdir(archivePath, { withFileTypes: true }).catch(() => []))
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+  )
 
   const metaPath = join(leaguePath, META_FILE)
   const existing = await readFile(metaPath, 'utf8')
@@ -345,8 +384,7 @@ export async function zipArchivedSeasons(
     return season
   })
   if (seasons.length === 0) return { zips: [], failed: [] }
-  const archiveDir = archivePathFor(root, leagueFolder)
-  await assertRealLayout(root, archiveDir, join(ARCHIVES_FOLDER, leagueFolder))
+  const archiveDir = await resolveArchivePath(root, leagueFolder)
   // Validate the entire batch first so a later invalid selection cannot leave earlier zip writes behind.
   const plans = await Promise.all(
     seasons.map(async (season) => {

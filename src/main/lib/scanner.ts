@@ -1,11 +1,16 @@
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { healMeta, parseLeagueMetaInput, type LeagueMetaInput } from '../../shared/meta'
-import { compareSeasonNames, parseSeasonName, type SeasonName } from '../../shared/season'
+import {
+  compareSeasonNames,
+  parseSeasonName,
+  sortSeasonNames,
+  type SeasonName
+} from '../../shared/season'
 import type { DirEntry, FileEntry, LeagueNode, LeaguesTree, SeasonNode } from '../../shared/tree'
 import { isWeekday, WEEKDAYS, type Weekday } from '../../shared/weekday'
 import { isMissing } from './fs-errors'
-import { META_FILE, serialiseLeagueMeta } from './league-meta'
+import { META_FILE, MetaSymlinkError, serialiseLeagueMeta, writeLeagueMeta } from './league-meta'
 import { archivePathFor } from './paths'
 
 export type { DirEntry, FileEntry, LeagueNode, LeaguesTree, SeasonNode }
@@ -71,15 +76,6 @@ async function listEntries(dir: string): Promise<FileEntry[]> {
   }
 }
 
-function sortSeasonNames(names: string[]): string[] {
-  return [...names].sort((a, b) => {
-    const pa = parseSeasonName(a)
-    const pb = parseSeasonName(b)
-    if (pa && pb) return compareSeasonNames(pa, pb)
-    return a.localeCompare(b)
-  })
-}
-
 interface ExistingMeta {
   raw: string | null
   input: LeagueMetaInput | null
@@ -134,11 +130,14 @@ async function scanLeague(
     const serialised = serialiseLeagueMeta(meta)
     if (serialised !== existing.raw) {
       try {
-        await writeFile(metaPath, serialised, 'utf8')
+        await writeLeagueMeta(leagueDir.path, meta)
       } catch (err) {
+        if (err instanceof MetaSymlinkError) {
+          console.warn(`Skipped healing meta.json for ${leagueDir.path}: ${err.message}`)
+        }
         // The league was removed mid-scan (e.g. just trashed); the watcher
         // will trigger a fresh scan without it.
-        if (!isMissing(err)) throw err
+        else if (!isMissing(err)) throw err
       }
     }
   }

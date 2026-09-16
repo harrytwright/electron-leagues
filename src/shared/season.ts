@@ -89,3 +89,12 @@ function startKey(season: SeasonName): number {
 export function compareSeasonNames(a: SeasonName, b: SeasonName): number {
   return startKey(a) - startKey(b)
 }
+
+export function sortSeasonNames(names: string[]): string[] {
+  return [...names].sort((a, b) => {
+    const pa = parseSeasonName(a)
+    const pb = parseSeasonName(b)
+    if (pa && pb) return compareSeasonNames(pa, pb)
+    return a.localeCompare(b)
+  })
+}

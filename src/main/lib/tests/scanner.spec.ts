@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, test } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { compareDirectoryEntries, listDirEntries, scanLeaguesRoot } from '../scanner'
 
 let root: string
@@ -23,6 +23,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await rm(root, { recursive: true, force: true })
 })
 
@@ -142,6 +143,21 @@ describe('scanLeaguesRoot', () => {
     expect(written.name).toBe("Men's Triples League")
     expect(written.extra).toEqual({ contact: 'Dave' })
     expect(written.seasons.map((s: { name: string }) => s.name)).toEqual(['2025-26'])
+  })
+
+  test('heal never writes through a symlinked meta.json', async () => {
+    await makeTree({
+      'monday/Mens Triples/2025-26/Rules.docx': 'x',
+      'elsewhere/Notes.txt': 'private notes'
+    })
+    await symlink(join(root, 'elsewhere/Notes.txt'), join(root, 'monday/Mens Triples/meta.json'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const tree = await scanLeaguesRoot(root, { heal: true })
+
+    expect(tree.days.monday[0].folderName).toBe('Mens Triples')
+    expect(await readFile(join(root, 'elsewhere/Notes.txt'), 'utf8')).toBe('private notes')
+    expect(warn).toHaveBeenCalledTimes(1)
   })
 
   test('scan without heal never writes meta.json', async () => {

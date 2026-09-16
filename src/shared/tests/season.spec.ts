@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'vitest'
-import { compareSeasonNames, nextSeasonName, parseSeasonName, suggestSeasonName } from '../season'
+import {
+  compareSeasonNames,
+  nextSeasonName,
+  parseSeasonName,
+  sortSeasonNames,
+  suggestSeasonName
+} from '../season'
 
 describe('parseSeasonName', () => {
   test('parses a cross-year season', () => {
@@ -109,5 +115,17 @@ describe('compareSeasonNames', () => {
       .sort(compareSeasonNames)
       .map((s) => s.name)
     expect(sorted).toEqual(['2024-25', '2025', '2026-Q1', '2026-Q2', '2026-27'])
+  })
+})
+
+describe('sortSeasonNames', () => {
+  test('orders seasons chronologically with a locale fallback for other names', () => {
+    expect(sortSeasonNames(['2024-25', 'notes', '2019', '2023-Q1', 'Archive'])).toEqual([
+      '2019',
+      '2023-Q1',
+      '2024-25',
+      'Archive',
+      'notes'
+    ])
   })
 })
