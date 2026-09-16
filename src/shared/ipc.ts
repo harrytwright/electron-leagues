@@ -12,6 +12,16 @@ import {
 
 const pathSchema = z.string().min(1)
 
+export interface ZipArchiveResult {
+  zips: string[]
+  failed: { season: string; message: string }[]
+}
+
+export interface ImportFilesResult {
+  copied: string[]
+  failed: { source: string; message: string }[]
+}
+
 export interface InvokeOutputs {
   getAnalyticsConfig: { apiKey: string | null; distinctId: string }
   getRoot: string | null
@@ -26,11 +36,11 @@ export interface InvokeOutputs {
   createLeague: string
   createSeason: { seasonPath: string; archived: string | null }
   syncSeasonTemplates: { added: string[]; skipped: string[] }
-  zipArchive: string[]
+  zipArchive: ZipArchiveResult
   openFile: void
   revealFile: void
   pickFiles: string[]
-  importFiles: string[]
+  importFiles: ImportFilesResult
 }
 
 interface InvokeDefinition {

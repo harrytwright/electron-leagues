@@ -1,5 +1,6 @@
 import AdmZip from 'adm-zip'
 import { ZipArchive } from 'archiver'
+import { execFileSync } from 'node:child_process'
 import {
   chmod,
   mkdtemp,
@@ -542,9 +543,12 @@ describe('zipArchivedSeasons', () => {
       '_archives/Mens Triples/2023-24/Rules.docx': 'r23',
       '_archives/Mens Triples/2023-24/bls-backup.bak': 'bls'
     })
-    const zips = await zipArchivedSeasons(root, 'Mens Triples', ['2023-24'])
-    expect(zips).toEqual([join(root, '_archives/Mens Triples/2023-24.zip')])
-    const entries = new AdmZip(zips[0])
+    const result = await zipArchivedSeasons(root, 'Mens Triples', ['2023-24'])
+    expect(result).toEqual({
+      zips: [join(root, '_archives/Mens Triples/2023-24.zip')],
+      failed: []
+    })
+    const entries = new AdmZip(result.zips[0])
       .getEntries()
       .map((e) => e.entryName)
       .sort()
@@ -559,7 +563,10 @@ describe('zipArchivedSeasons', () => {
   })
 
   test('does nothing for an empty archive selection', async () => {
-    await expect(zipArchivedSeasons(root, 'Mens Triples', [])).resolves.toEqual([])
+    await expect(zipArchivedSeasons(root, 'Mens Triples', [])).resolves.toEqual({
+      zips: [],
+      failed: []
+    })
     expect(await readdir(root)).toEqual([])
   })
 
@@ -657,6 +664,67 @@ describe('zipArchivedSeasons', () => {
     expect(await exists(join(root, '_archives/Mens Triples/2025-26.zip'))).toBe(false)
   })
 
+  test('zips the remaining seasons when one fails', async () => {
+    await makeTree(root, {
+      '_archives/Mens Triples/2024-25/Rules.docx': 'rules',
+      '_archives/Mens Triples/2025-26/Rules.docx': 'rules'
+    })
+    const fault = Object.assign(new Error('archive denied'), { code: 'EACCES' })
+    vi.spyOn(ZipArchive.prototype, 'finalize').mockImplementationOnce(function (
+      this: ZipArchive
+    ): Promise<void> {
+      this.emit('error', fault)
+      return Promise.reject(fault)
+    })
+
+    await expect(zipArchivedSeasons(root, 'Mens Triples', ['2024-25', '2025-26'])).resolves.toEqual(
+      {
+        zips: [join(root, '_archives/Mens Triples/2025-26.zip')],
+        failed: [
+          {
+            season: '2024-25',
+            message: 'That folder can’t be read or changed (permission denied)'
+          }
+        ]
+      }
+    )
+    expect(await exists(join(root, '_archives/Mens Triples/2024-25.zip'))).toBe(false)
+    expect(await exists(join(root, '_archives/Mens Triples/2025-26.zip'))).toBe(true)
+  })
+
+  test.skipIf(process.platform === 'win32')(
+    'fails a season whose archive reports a warning',
+    async () => {
+      const fifoPath = join(root, '_archives/Mens Triples/2025-26/cloud-placeholder')
+      await makeTree(root, { '_archives/Mens Triples/2025-26/Rules.docx': 'rules' })
+      execFileSync('mkfifo', [fifoPath])
+
+      const archive = zipArchivedSeasons(root, 'Mens Triples', ['2025-26'])
+
+      await expect(archive).rejects.toBeInstanceOf(UserFacingError)
+      await expect(archive).rejects.toThrow(/^“2025-26” couldn’t be zipped completely:/)
+      expect(await exists(join(root, '_archives/Mens Triples/2025-26.zip'))).toBe(false)
+    },
+    10_000
+  )
+
+  test.skipIf(process.platform === 'win32')(
+    'stores a dangling symlink without failing',
+    async () => {
+      const seasonDir = join(root, '_archives/Mens Triples/2025-26')
+      await makeTree(root, { '_archives/Mens Triples/2025-26/Rules.docx': 'rules' })
+      await symlink(join(outside, 'missing.pdf'), join(seasonDir, 'missing.pdf'))
+
+      const result = await zipArchivedSeasons(root, 'Mens Triples', ['2025-26'])
+
+      expect(result).toEqual({
+        zips: [join(root, '_archives/Mens Triples/2025-26.zip')],
+        failed: []
+      })
+      expect(new AdmZip(result.zips[0]).getEntry('2025-26/missing.pdf')).not.toBeNull()
+    }
+  )
+
   // Root ignores mode bits, and Windows ignores them on directories altogether.
   test.skipIf(process.getuid?.() === 0 || process.platform === 'win32')(
     'settles with a user-facing error when the zip destination is read-only',
@@ -706,5 +774,31 @@ describe('importFiles', () => {
 
     expect(await readFile(join(dest, 'bls-backup (2).bak'), 'utf8')).toBe('newer')
     expect(await exists(danglingTarget)).toBe(false)
+  })
+
+  test('copies the rest when one source is missing', async () => {
+    await makeTree(root, { 'monday/Mens Triples/2025-26': null })
+    await makeTree(outside, { 'a.pdf': 'a', 'c.pdf': 'c' })
+    const dest = join(root, 'monday/Mens Triples/2025-26')
+    const missing = join(outside, 'b.pdf')
+
+    await expect(
+      importFiles(dest, [join(outside, 'a.pdf'), missing, join(outside, 'c.pdf')])
+    ).resolves.toEqual({
+      copied: [join(dest, 'a.pdf'), join(dest, 'c.pdf')],
+      failed: [{ source: missing, message: 'That folder no longer exists' }]
+    })
+    expect(await readFile(join(dest, 'a.pdf'), 'utf8')).toBe('a')
+    expect(await readFile(join(dest, 'c.pdf'), 'utf8')).toBe('c')
+  })
+
+  test('rejects when every source fails', async () => {
+    await makeTree(root, { 'monday/Mens Triples/2025-26': null })
+    const dest = join(root, 'monday/Mens Triples/2025-26')
+
+    await expect(
+      importFiles(dest, [join(outside, 'a.pdf'), join(outside, 'b.pdf')])
+    ).rejects.toBeInstanceOf(UserFacingError)
+    expect(await readdir(dest)).toEqual([])
   })
 })

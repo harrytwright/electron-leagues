@@ -31,8 +31,10 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
     })),
     scan: vi.fn<RendererApi['scan']>().mockResolvedValue(null),
     // Echo the sources back, like the real handler returns the copied paths.
-    importFiles: vi.fn<RendererApi['importFiles']>((_dest, sources) => Promise.resolve(sources)),
-    zipArchive: vi.fn<RendererApi['zipArchive']>().mockResolvedValue([]),
+    importFiles: vi.fn<RendererApi['importFiles']>((_dest, sources) =>
+      Promise.resolve({ copied: sources, failed: [] })
+    ),
+    zipArchive: vi.fn<RendererApi['zipArchive']>().mockResolvedValue({ zips: [], failed: [] }),
     createLeague: vi.fn<RendererApi['createLeague']>().mockResolvedValue(''),
     createSeason: vi.fn<RendererApi['createSeason']>().mockResolvedValue({
       seasonPath: '',

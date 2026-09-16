@@ -24,7 +24,7 @@ import {
 } from './lib/operations'
 import { isMissing, toUserFacing, UserFacingError } from './lib/fs-errors'
 import { registerInvokeHandler, type InvokeListener, type IpcErrorReporter } from './lib/ipc-handle'
-import type { InvokeName } from '../shared/ipc'
+import type { ImportFilesResult, InvokeName } from '../shared/ipc'
 import {
   assertAbsolutePath,
   assertInsideRoot,
@@ -276,9 +276,9 @@ function registerIpc(): void {
   })
 
   register('zipArchive', async (_e, leagueFolder, seasons) => {
-    const zips = await zipArchivedSeasons(requireRoot(), leagueFolder, seasons)
-    capture('archive_zipped', { count: seasons.length })
-    return zips
+    const result = await zipArchivedSeasons(requireRoot(), leagueFolder, seasons)
+    capture('archive_zipped', { count: result.zips.length })
+    return result
   })
 
   register('trashFolder', async (_e, path) => {
@@ -325,9 +325,14 @@ function registerIpc(): void {
 
   register('importFiles', async (_e, dest, sources) => {
     assertAbsolutePath(dest, 'Invalid file import request')
-    const copied = await importFiles(await resolveImportDestination(requireRoot(), dest), sources)
-    capture('files_imported', { count: copied.length })
-    return copied
+    let result: ImportFilesResult
+    try {
+      result = await importFiles(await resolveImportDestination(requireRoot(), dest), sources)
+    } catch (err) {
+      throw toUserFacing(err)
+    }
+    capture('files_imported', { count: result.copied.length })
+    return result
   })
 }
 

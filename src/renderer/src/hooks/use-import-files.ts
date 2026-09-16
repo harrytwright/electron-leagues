@@ -55,16 +55,27 @@ export function useImportFiles(dest: string | undefined): FileImporter {
     try {
       // Main reports what it actually copied — count that, not the request.
       const outcome = await operation.run({ destination, paths: usable })
-      const copied = outcome.result
+      const result = outcome.result
       const message =
-        copied.length === usable.length
-          ? `Imported ${plural(copied.length, 'file')}`
-          : `Imported ${copied.length} of ${usable.length} files`
+        result.failed.length === 0
+          ? `Imported ${plural(result.copied.length, 'file')}`
+          : `Imported ${result.copied.length} of ${usable.length} files`
+      const description = result.failed
+        .map(
+          ({ source, message: failureMessage }) =>
+            `Couldn’t import “${source.split(/[\\/]/).pop() ?? source}”: ${failureMessage}`
+        )
+        .join('. ')
       if (outcome.status === 'refresh-failed' && lifecycle.current.generation === generation) {
         add({
           title: `${message}, but the folder could not be refreshed: ${outcome.refreshError}`,
+          description: description || undefined,
           variant: 'error'
         })
+        return
+      }
+      if (result.failed.length > 0) {
+        add({ title: message, description })
         return
       }
       add({ title: message, variant: 'success' })

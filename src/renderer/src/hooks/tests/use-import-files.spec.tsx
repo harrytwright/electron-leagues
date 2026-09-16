@@ -7,6 +7,7 @@ import { makeTree } from '../../tests/fixtures'
 import { createQueryClient } from '../../lib/query-client'
 import { ROOT_QUERY_KEY } from '../../queries/root'
 import { treeQuery, treeQueryKey } from '../../queries/tree'
+import type { ImportFilesResult } from '../../../../shared/ipc'
 import { useImportFiles } from '../use-import-files'
 import { useOperationFeedback } from '../use-operation-feedback'
 
@@ -71,7 +72,13 @@ it('uses singular copy for one file and reports partial imports honestly', async
       .fn()
       .mockResolvedValueOnce(['/tmp/a.pdf'])
       .mockResolvedValue(['/tmp/a.pdf', '/tmp/b.pdf']),
-    importFiles: vi.fn().mockResolvedValue(['/dest/a.pdf'])
+    importFiles: vi
+      .fn()
+      .mockResolvedValueOnce({ copied: ['/dest/a.pdf'], failed: [] })
+      .mockResolvedValue({
+        copied: ['/dest/a.pdf'],
+        failed: [{ source: '/tmp/b.pdf', message: 'That folder no longer exists' }]
+      })
   })
   const { result } = renderImporter('/dest')
 
@@ -80,12 +87,15 @@ it('uses singular copy for one file and reports partial imports honestly', async
 
   await act(() => result.current.pickFiles())
   expect(await screen.findByRole('dialog', { name: 'Imported 1 of 2 files' })).toBeInTheDocument()
+  expect(
+    await screen.findByText('Couldn’t import “b.pdf”: That folder no longer exists')
+  ).toBeInTheDocument()
 })
 
 it('stays pending through refresh and reports a successful copy with its refresh failure', async () => {
   let finishRefresh!: () => void
   const api = installMockApi({
-    importFiles: vi.fn().mockResolvedValue(['/dest/a.pdf']),
+    importFiles: vi.fn().mockResolvedValue({ copied: ['/dest/a.pdf'], failed: [] }),
     scan: vi.fn(
       () =>
         new Promise<Awaited<ReturnType<typeof window.api.scan>>>((_resolve, reject) => {
@@ -151,8 +161,8 @@ it('shows an error toast when the import or the picker fails', async () => {
 })
 
 it('imports once while an import is already pending', async () => {
-  let finish!: (copied: string[]) => void
-  const importFiles = vi.fn(() => new Promise<string[]>((resolve) => (finish = resolve)))
+  let finish!: (result: ImportFilesResult) => void
+  const importFiles = vi.fn(() => new Promise<ImportFilesResult>((resolve) => (finish = resolve)))
   installMockApi({ importFiles })
   const { result } = renderImporter('/dest')
 
@@ -165,7 +175,7 @@ it('imports once while an import is already pending', async () => {
 
   expect(importFiles).toHaveBeenCalledTimes(1)
   await act(async () => {
-    finish(['/dest/a.pdf'])
+    finish({ copied: ['/dest/a.pdf'], failed: [] })
     await first
   })
   expect(result.current.importing).toBe(false)
@@ -194,9 +204,9 @@ it('ignores a picker result after the destination changes in StrictMode', async 
 })
 
 it('reports a completed import after the destination changes without refreshing the stale view', async () => {
-  let finishImport!: (copied: string[]) => void
+  let finishImport!: (result: ImportFilesResult) => void
   const api = installMockApi({
-    importFiles: vi.fn(() => new Promise<string[]>((resolve) => (finishImport = resolve)))
+    importFiles: vi.fn(() => new Promise<ImportFilesResult>((resolve) => (finishImport = resolve)))
   })
   const { result, rerender } = renderHookWithProviders(({ dest }) => useImportFiles(dest), {
     initialProps: { dest: '/first' },
@@ -215,7 +225,7 @@ it('reports a completed import after the destination changes without refreshing 
   rerender({ dest: '/second' })
 
   await act(async () => {
-    finishImport(['/first/a.pdf'])
+    finishImport({ copied: ['/first/a.pdf'], failed: [] })
     await importing
   })
   expect(await screen.findByRole('dialog', { name: 'Imported 1 file' })).toBeInTheDocument()
@@ -226,7 +236,7 @@ it('reports a failed import after its hook unmounts without refreshing stale con
   const api = installMockApi({
     importFiles: vi.fn(
       () =>
-        new Promise<string[]>(
+        new Promise<ImportFilesResult>(
           (_resolve, reject) => (failImport = () => reject(new Error('Import failed')))
         )
     )

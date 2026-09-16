@@ -516,11 +516,16 @@ it('keeps the archive read-only at every depth', async () => {
 })
 
 it('offers to zip archived seasons, once at a time, and reports the outcome', async () => {
-  let finish!: (zips: string[]) => void
+  let finish!: (result: Awaited<ReturnType<typeof window.api.zipArchive>>) => void
   const api = installMockApi({
     scan: vi.fn().mockResolvedValue(makeTree()),
     listDir: vi.fn(listingFor(ARCHIVE_LISTING)),
-    zipArchive: vi.fn(() => new Promise<string[]>((resolve) => (finish = resolve)))
+    zipArchive: vi.fn(
+      () =>
+        new Promise<Awaited<ReturnType<typeof window.api.zipArchive>>>(
+          (resolve) => (finish = resolve)
+        )
+    )
   })
   const user = userEvent.setup()
   renderLeagueWithActiveTree()
@@ -541,7 +546,7 @@ it('offers to zip archived seasons, once at a time, and reports the outcome', as
     'true'
   )
   await user.keyboard('{Escape}')
-  finish([`${ARCHIVE_PATH}/2023-24.zip`])
+  finish({ zips: [`${ARCHIVE_PATH}/2023-24.zip`], failed: [] })
 
   await waitFor(() => expect(api.listDir).toHaveBeenCalledTimes(2))
   expect(api.scan).toHaveBeenCalledOnce()
@@ -562,7 +567,10 @@ it('keeps zipping pending through refresh and names both outcomes when refresh f
           rejectRefresh = reject
         })
     ),
-    zipArchive: vi.fn().mockResolvedValue([`${ARCHIVE_PATH}/2023-24.zip`])
+    zipArchive: vi.fn().mockResolvedValue({
+      zips: [`${ARCHIVE_PATH}/2023-24.zip`],
+      failed: []
+    })
   })
   const user = userEvent.setup()
   renderLeagueWithActiveTree()
