@@ -48,6 +48,33 @@ jobs:
             exit 1
           fi
 
+      # Presence is not usefulness. A Keychain Access export that selected the
+      # private key rather than the certificate above it decodes and unlocks
+      # fine, then fails ten minutes later inside electron-builder on both the
+      # macOS and Windows legs. Reject it here instead.
+      - name: Signing certificate is usable
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          p12="$RUNNER_TEMP/csc.p12"
+          printf '%s' "$CSC_LINK" | base64 --decode > "$p12"
+          subject=''
+          # Keychain Access still exports some bags under RC2, which OpenSSL 3
+          # only reads through the legacy provider.
+          for provider in '' '-legacy'; do
+            subject="$(openssl pkcs12 $provider -in "$p12" -passin env:CSC_KEY_PASSWORD \
+              -nokeys -clcerts 2>/dev/null | openssl x509 -noout -subject 2>/dev/null || true)"
+            [ -n "$subject" ] && break
+          done
+          if [ -z "$subject" ]; then
+            echo "::error::CSC_LINK decodes but holds no code signing certificate."
+            echo "::error::Re-export from Keychain Access with the Developer ID Application"
+            echo "::error::certificate selected, not the private key nested under it."
+            exit 1
+          fi
+          echo "Signing as $subject"
+
   checks:
     needs: verify
     uses: ./.github/workflows/checks.yml
@@ -101,11 +128,15 @@ jobs:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: npm run build
 
+      # electron-builder falls back to CSC_LINK when WIN_CSC_LINK is unset, so a
+      # Windows runner that can see the Developer ID tries to Authenticode sign
+      # with it and dies on the Apple certificate. The Windows installer is
+      # deliberately unsigned, so the signing pair only reaches the macOS leg.
       - name: Package and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ matrix.os == 'macos-latest' && secrets.CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.CSC_KEY_PASSWORD || '' }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: npx electron-builder ${{ matrix.platform }} --publish always
