@@ -48,6 +48,71 @@ jobs:
             exit 1
           fi
 
+      # Presence is not usefulness. A Keychain Access export that selected the
+      # private key rather than the certificate above it decodes and unlocks
+      # fine, then fails ten minutes later inside electron-builder on both the
+      # macOS and Windows legs. Reject it here instead.
+      - name: Signing certificate is usable
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          p12="$RUNNER_TEMP/csc.p12"
+          printf '%s' "$CSC_LINK" | base64 --decode > "$p12"
+
+          # Keychain Access still exports some bags under RC2, which OpenSSL 3
+          # only reads through the legacy provider.
+          provider=''
+          opened=''
+          for candidate in '' '-legacy'; do
+            if openssl pkcs12 $candidate -in "$p12" -passin env:CSC_KEY_PASSWORD -noout 2>/dev/null; then
+              provider="$candidate"
+              opened='yes'
+              break
+            fi
+          done
+          if [ -z "$opened" ]; then
+            echo "::error::CSC_LINK will not open with CSC_KEY_PASSWORD."
+            echo "::error::Either the password is wrong or the base64 is truncated."
+            exit 1
+          fi
+
+          keys="$(openssl pkcs12 $provider -in "$p12" -passin env:CSC_KEY_PASSWORD \
+            -nocerts -nodes 2>/dev/null | grep -c 'BEGIN PRIVATE KEY' || true)"
+          if [ "$keys" = '0' ]; then
+            echo "::error::CSC_LINK holds no private key, and codesign needs one."
+            echo "::error::Export the My Certificates row in Keychain Access rather than"
+            echo "::error::the .cer downloaded from the developer portal."
+            exit 1
+          fi
+
+          subject="$(openssl pkcs12 $provider -in "$p12" -passin env:CSC_KEY_PASSWORD \
+            -nokeys -clcerts 2>/dev/null | openssl x509 -noout -subject 2>/dev/null || true)"
+          if [ -z "$subject" ]; then
+            echo "::error::CSC_LINK holds a private key but no certificate."
+            echo "::error::In Keychain Access export the Developer ID Application row under"
+            echo "::error::My Certificates, not the key nested beneath it."
+            exit 1
+          fi
+          echo "Signing as $subject"
+
+      # The build job decodes this into a file and hands notarytool the path.
+      # A secret holding the raw PEM, the key ID, or the wrong file entirely
+      # still produces a file, so the failure lands ten minutes later inside
+      # notarytool as an unhelpful path error.
+      - name: App Store Connect key is usable
+        env:
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          key="$RUNNER_TEMP/asc-api-key.p8"
+          printf '%s' "$APPLE_API_KEY" | base64 --decode > "$key" 2>/dev/null || true
+          if ! openssl pkey -in "$key" -noout 2>/dev/null; then
+            echo "::error::APPLE_API_KEY does not decode to a private key."
+            echo "::error::It must be base64 of the AuthKey_*.p8 file downloaded from App"
+            echo "::error::Store Connect, not the raw PEM, the key ID, or a file path."
+            exit 1
+          fi
+
   checks:
     needs: verify
     uses: ./.github/workflows/checks.yml
@@ -101,14 +166,34 @@ jobs:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
         run: npm run build
 
+      # electron-builder falls back to CSC_LINK when WIN_CSC_LINK is unset, so a
+      # Windows runner that can see the Developer ID tries to Authenticode sign
+      # with it and dies on the Apple certificate. The Windows installer is
+      # deliberately unsigned, so the signing pair only reaches the macOS leg.
       - name: Package and publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_LINK: ${{ matrix.os == 'macos-latest' && secrets.CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.os == 'macos-latest' && secrets.CSC_KEY_PASSWORD || '' }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: npx electron-builder ${{ matrix.platform }} --publish always
+
+      # electron-builder logs a warning and exits 0 when notarisation is skipped,
+      # so a green leg is not proof of a notarised app. The upload has already
+      # happened by now, but a failure here keeps promote from running and the
+      # release stays a draft.
+      - name: App is signed and notarised
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: |
+          app="$(find dist -maxdepth 2 -name '*.app' -print -quit)"
+          if [ -z "$app" ]; then
+            echo "::error::No .app found under dist to verify."
+            exit 1
+          fi
+          codesign --verify --strict --verbose=2 "$app"
+          xcrun stapler validate "$app"
 
   promote:
     name: promote release
