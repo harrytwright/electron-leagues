@@ -36,6 +36,10 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
     ),
     zipArchive: vi.fn<RendererApi['zipArchive']>().mockResolvedValue({ zips: [], failed: [] }),
     createLeague: vi.fn<RendererApi['createLeague']>().mockResolvedValue(''),
+    // Echo the renamed path back, like the real handler does once the folder has moved.
+    renameLeague: vi.fn<RendererApi['renameLeague']>((day, _folder, name) =>
+      Promise.resolve(`/root/${day}/${name}`)
+    ),
     createSeason: vi.fn<RendererApi['createSeason']>().mockResolvedValue({
       seasonPath: '',
       archived: null

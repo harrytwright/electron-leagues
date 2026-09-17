@@ -6,7 +6,7 @@ import type { DirEntry, LeagueNode, SeasonNode } from '@shared/tree'
 import { LeagueView } from './index'
 import { revealLabel } from '../../lib/os-labels'
 import { makeDirEntry, makeLeague, makeTree } from '../../tests/fixtures'
-import { emitTreeChanged, installMockApi } from '../../tests/mock-api'
+import { emitTreeChanged, installMockApi, type RendererApi } from '../../tests/mock-api'
 import { renderWithProviders } from '../../tests/render-helpers'
 import { createQueryClient } from '../../lib/query-client'
 import { ROOT_QUERY_KEY } from '../../queries/root'
@@ -50,8 +50,14 @@ const ARCHIVE_LISTING = {
   ]
 }
 
-function renderLeague(league: LeagueNode = fullLeague(), onCurrentDirChange = vi.fn()): void {
-  renderWithProviders(<LeagueView league={league} onCurrentDirChange={onCurrentDirChange} />)
+function renderLeague(
+  league: LeagueNode = fullLeague(),
+  onCurrentDirChange = vi.fn(),
+  onRenamed = vi.fn()
+): void {
+  renderWithProviders(
+    <LeagueView league={league} onCurrentDirChange={onCurrentDirChange} onRenamed={onRenamed} />
+  )
 }
 
 async function openRowMenu(
@@ -81,7 +87,7 @@ function renderLeagueWithActiveTree(league: LeagueNode = fullLeague()): void {
   renderWithProviders(
     <>
       <ActiveTree />
-      <LeagueView league={league} onCurrentDirChange={vi.fn()} />
+      <LeagueView league={league} onCurrentDirChange={vi.fn()} onRenamed={vi.fn()} />
     </>,
     { queryClient }
   )
@@ -118,11 +124,14 @@ it('shows the archive row for zipped-only archives and hides it when empty', () 
     <LeagueView
       league={makeLeague({ archivedSeasons: [], archiveItemCount: 1 })}
       onCurrentDirChange={vi.fn()}
+      onRenamed={vi.fn()}
     />
   )
   expect(screen.getByRole('row', { name: /Archive/ })).toHaveTextContent('1 item')
 
-  view.rerender(<LeagueView league={makeLeague()} onCurrentDirChange={vi.fn()} />)
+  view.rerender(
+    <LeagueView league={makeLeague()} onCurrentDirChange={vi.fn()} onRenamed={vi.fn()} />
+  )
   expect(screen.queryByRole('row', { name: /^Archive/ })).not.toBeInTheDocument()
 })
 
@@ -648,6 +657,60 @@ it('deletes the league from the header menu, warning about archives', async () =
 
   expect(api.trashFolder).toHaveBeenCalledWith(LEAGUE_PATH)
   expect(await screen.findByText(/Moved “Mixed triples” to the/)).toBeInTheDocument()
+})
+
+it('renames the league from the header menu and reselects its new folder', async () => {
+  const api = installMockApi()
+  const user = userEvent.setup()
+  const onRenamed = vi.fn()
+  renderLeague(fullLeague(), vi.fn(), onRenamed)
+
+  await user.click(screen.getByRole('button', { name: 'League actions' }))
+  await user.click(await screen.findByRole('menuitem', { name: 'Rename league…' }))
+  const dialog = await screen.findByRole('dialog', { name: 'Rename league “Mixed triples”' })
+  const input = within(dialog).getByLabelText('League name')
+  expect(input).toHaveValue('Mixed triples')
+  expect(within(dialog).getByRole('button', { name: 'Rename league' })).toBeDisabled()
+
+  await user.clear(input)
+  await user.type(input, 'Monday Trios: Mixed')
+  expect(dialog).toHaveTextContent('Folder will be renamed to “Monday Trios Mixed”')
+  await user.click(within(dialog).getByRole('button', { name: 'Rename league' }))
+
+  expect(api.renameLeague).toHaveBeenCalledExactlyOnceWith(
+    'monday',
+    'Mixed triples',
+    'Monday Trios: Mixed'
+  )
+  await waitFor(() =>
+    expect(onRenamed).toHaveBeenCalledExactlyOnceWith('monday', 'Monday Trios: Mixed')
+  )
+})
+
+it('keeps the rename dialog open with the error when the rename is refused', async () => {
+  const api = installMockApi({
+    renameLeague: vi
+      .fn<RendererApi['renameLeague']>()
+      .mockRejectedValue(new Error('A league folder named "Trios" already exists'))
+  })
+  const user = userEvent.setup()
+  const onRenamed = vi.fn()
+  renderLeague(fullLeague(), vi.fn(), onRenamed)
+
+  await user.click(screen.getByRole('button', { name: 'League actions' }))
+  await user.click(await screen.findByRole('menuitem', { name: 'Rename league…' }))
+  const dialog = await screen.findByRole('dialog', { name: 'Rename league “Mixed triples”' })
+  const input = within(dialog).getByLabelText('League name')
+  await user.clear(input)
+  await user.type(input, 'Trios')
+  await user.click(within(dialog).getByRole('button', { name: 'Rename league' }))
+
+  expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+    'A league folder named "Trios" already exists'
+  )
+  expect(api.renameLeague).toHaveBeenCalledOnce()
+  expect(onRenamed).not.toHaveBeenCalled()
+  expect(input).toHaveFocus()
 })
 
 it('reveals the folder being viewed from the header menu', async () => {

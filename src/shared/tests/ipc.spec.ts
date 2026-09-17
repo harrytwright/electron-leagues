@@ -16,6 +16,7 @@ describe('invoke definitions', () => {
     ['listDir', ['/leagues/monday/Pairs']],
     ['trashFolder', ['/leagues/monday/Pairs']],
     ['createLeague', ['monday', 'Pairs League']],
+    ['renameLeague', ['monday', 'Pairs League', 'Pairs & Trios']],
     [
       'createSeason',
       [
@@ -52,6 +53,7 @@ describe('invoke definitions', () => {
     ['listDir', [], 'Invalid file path'],
     ['trashFolder', [42], 'Invalid file path'],
     ['createLeague', ['monday'], 'Invalid league request'],
+    ['renameLeague', ['monday', 'Pairs'], 'Invalid league rename request'],
     ['createSeason', [{}], 'Invalid season request'],
     ['syncSeasonTemplates', [{}], 'Invalid season sync request'],
     ['zipArchive', ['Pairs', [42]], 'Invalid archive request'],
@@ -68,6 +70,7 @@ describe('invoke definitions', () => {
 
   test.each([
     ['createLeague', ['funday', 'Pairs'], 'Invalid league day'],
+    ['renameLeague', ['monday', '../Pairs', 'Trios'], 'Invalid league folder'],
     [
       'createSeason',
       [

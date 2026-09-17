@@ -18,6 +18,7 @@ import {
   createSeason,
   importFiles,
   prepareRootSelection,
+  renameLeague,
   repairReservedLocations,
   syncSeasonWithTemplates,
   zipArchivedSeasons
@@ -254,6 +255,12 @@ function registerIpc(): void {
   register('createLeague', async (_e, day, name) => {
     const path = await createLeague(requireRoot(), day, name)
     capture('league_created', { day })
+    return path
+  })
+
+  register('renameLeague', async (_e, day, leagueFolder, displayName) => {
+    const path = await renameLeague({ root: requireRoot(), day, leagueFolder, displayName })
+    capture('league_renamed', { day, folderChanged: basename(path) !== leagueFolder })
     return path
   })
 

@@ -18,6 +18,7 @@ import { DeleteResourceDialog, type DeleteTarget } from '../DeleteResourceDialog
 import { DirectoryBrowser, type BrowserRow } from '../DirectoryBrowser'
 import { IconButton } from '../IconButton'
 import { NewSeasonDialog } from '../NewSeasonDialog'
+import { RenameLeagueDialog } from '../RenameLeagueDialog'
 import { TreeFileBrowser } from '../TreeFileBrowser'
 import type { Sort } from '../TreeFileBrowser/interface'
 import type { Props } from './interface'
@@ -32,9 +33,10 @@ function seasonBadgeVariant(status: SeasonNode['status']): 'success' | 'info' {
   }
 }
 
-export function LeagueView({ league, onCurrentDirChange }: Props): React.JSX.Element {
+export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): React.JSX.Element {
   const trail = useCrumbs(league.path, onCurrentDirChange)
   const [newSeason, setNewSeason] = useState(false)
+  const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null)
   const [zipping, setZipping] = useState<string | null>(null)
   const [syncingTemplates, setSyncingTemplates] = useState(false)
@@ -244,6 +246,9 @@ export function LeagueView({ league, onCurrentDirChange }: Props): React.JSX.Ele
                     {revealLabel()}
                   </DropdownMenu.Item>
                   <DropdownMenu.Separator />
+                  <DropdownMenu.Item onClick={() => setRenaming(true)}>
+                    Rename league…
+                  </DropdownMenu.Item>
                   <DropdownMenu.Item
                     variant="danger"
                     onClick={() =>
@@ -306,6 +311,16 @@ export function LeagueView({ league, onCurrentDirChange }: Props): React.JSX.Ele
         open={newSeason}
         onOpenChange={setNewSeason}
         onCreated={() => setNewSeason(false)}
+      />
+
+      <RenameLeagueDialog
+        league={league}
+        open={renaming}
+        onOpenChange={setRenaming}
+        onRenamed={(day, folderName) => {
+          setRenaming(false)
+          onRenamed(day, folderName)
+        }}
       />
 
       <DeleteResourceDialog
