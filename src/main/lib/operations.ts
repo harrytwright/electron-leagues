@@ -13,7 +13,7 @@ import {
   stat
 } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
-import { healMeta, parseLeagueMetaInput } from '../../shared/meta'
+import { healMeta, parseLeagueMetaInput, type LeagueMetaInput } from '../../shared/meta'
 import type { ImportFilesResult, ZipArchiveResult } from '../../shared/ipc'
 import {
   compareSeasonNames,
@@ -229,6 +229,159 @@ export async function createLeague(
   return path
 }
 
+async function isOccupied(path: string): Promise<boolean> {
+  return lstat(path).then(
+    () => true,
+    (err) => {
+      if (isMissing(err)) return false
+      throw toUserFacing(err)
+    }
+  )
+}
+
+/**
+ * On a case-insensitive volume a case-only rename targets the folder it renames.
+ * Anything unresolvable, such as a dangling link, counts as a different occupant.
+ */
+async function isSameEntry(a: string, b: string): Promise<boolean> {
+  try {
+    const [realA, realB] = await Promise.all([realpath(a), realpath(b)])
+    return realA === realB
+  } catch {
+    return false
+  }
+}
+
+async function readLeagueMetaInput(leaguePath: string): Promise<LeagueMetaInput | null> {
+  return readFile(join(leaguePath, META_FILE), 'utf8')
+    .then((raw) => parseLeagueMetaInput(JSON.parse(raw)))
+    .catch(() => null)
+}
+
+async function archivedSeasonsOf(archivePath: string): Promise<string[]> {
+  const entries = await readdir(archivePath, { withFileTypes: true }).catch(() => [])
+  return sortSeasonNames(entries.filter((e) => e.isDirectory()).map((e) => e.name))
+}
+
+// oxlint-disable-next-line anti-slop/no-unknown-parameters -- catch clauses hand us `unknown`; see fs-errors
+function renameFailure(leagueFolder: string, err: unknown): Error {
+  // Windows refuses to move a folder holding an open document with either code.
+  const code = errorCode(err)
+  if (code === 'EBUSY' || code === 'EPERM') {
+    return new UserFacingError(
+      `Couldn’t rename “${leagueFolder}” because a file inside it is open in another program`
+    )
+  }
+  return toUserFacing(err)
+}
+
+export interface RenameLeagueOptions {
+  root: string
+  day: Weekday
+  leagueFolder: string
+  displayName: string
+}
+
+/**
+ * Give a league a new display name and, when the sanitised name differs, a new
+ * folder. The archive folder follows the league so its seasons stay attached.
+ * Every collision is checked before anything moves, and a failed archive move
+ * puts the live folder back so the tree never shows a league without its archive.
+ */
+export async function renameLeague(
+  opts: RenameLeagueOptions,
+  moveFolder: (from: string, to: string) => Promise<void> = rename
+): Promise<string> {
+  assertLeagueFolderName(opts.leagueFolder)
+  const displayName = opts.displayName.trim()
+  const folderName = sanitiseFolderName(displayName)
+  if (!folderName) throw new UserFacingError(`"${opts.displayName}" is not a usable league name`)
+  return withTemplateLock(opts.root, () =>
+    renameLeagueUnlocked(opts, displayName, folderName, moveFolder)
+  )
+}
+
+async function renameLeagueUnlocked(
+  opts: RenameLeagueOptions,
+  displayName: string,
+  folderName: string,
+  moveFolder: (from: string, to: string) => Promise<void>
+): Promise<string> {
+  const { root, day, leagueFolder } = opts
+  const fromPath = await assertRealLayout(
+    root,
+    join(root, day, leagueFolder),
+    join(day, leagueFolder)
+  ).catch((err) => {
+    throw toUserFacing(err)
+  })
+  const fromInfo = await stat(fromPath).catch((err) => {
+    throw toUserFacing(err)
+  })
+  if (!fromInfo.isDirectory()) throw new UserFacingError('That folder no longer exists')
+  await assertMetaWritable(fromPath)
+
+  const folderChanges = folderName !== leagueFolder
+  const toPath = folderChanges ? join(root, day, folderName) : fromPath
+  const fromArchive = await resolveArchivePath(root, leagueFolder)
+  const toArchive = folderChanges ? await resolveArchivePath(root, folderName) : fromArchive
+  const hasArchive = await isOccupied(fromArchive)
+
+  if (folderChanges) {
+    if ((await isOccupied(toPath)) && !(await isSameEntry(fromPath, toPath))) {
+      throw new UserFacingError(`A league folder named "${folderName}" already exists`)
+    }
+    await assertRealLayout(root, toPath, join(day, folderName))
+    if (
+      hasArchive &&
+      (await isOccupied(toArchive)) &&
+      !(await isSameEntry(fromArchive, toArchive))
+    ) {
+      throw new UserFacingError(`An archive folder named "${folderName}" already exists`)
+    }
+  }
+
+  const existing = await readLeagueMetaInput(fromPath)
+
+  if (folderChanges) {
+    await moveFolder(fromPath, toPath).catch((err) => {
+      throw renameFailure(leagueFolder, err)
+    })
+    if (hasArchive) {
+      try {
+        await moveFolder(fromArchive, toArchive)
+      } catch (err) {
+        const failure = renameFailure(`_archives/${leagueFolder}`, err)
+        const restored = await moveFolder(toPath, fromPath).then(
+          () => true,
+          () => false
+        )
+        throw new UserFacingError(
+          restored
+            ? failure.message
+            : `Renamed the league folder to “${folderName}” but its archived seasons stayed under “${leagueFolder}”: ${failure.message}`
+        )
+      }
+    }
+  }
+
+  const meta = healMeta(
+    { name: displayName, seasons: existing?.seasons ?? [], extra: existing?.extra ?? {} },
+    {
+      folderName,
+      day,
+      liveSeasons: await liveSeasonsOf(toPath),
+      archivedSeasons: await archivedSeasonsOf(toArchive)
+    }
+  )
+  await writeLeagueMeta(toPath, meta).catch((err) => {
+    throw new UserFacingError(
+      `Renamed the folder but couldn’t update its meta.json: ${toUserFacing(err).message}`
+    )
+  })
+  return toPath
+}
+
 async function liveSeasonsOf(leaguePath: string): Promise<SeasonName[]> {
   const entries = await readdir(leaguePath, { withFileTypes: true })
   return entries
@@ -328,21 +481,11 @@ async function createSeasonUnlocked(
     archived = oldest.name
   }
 
-  const archivedSeasons = sortSeasonNames(
-    (await readdir(archivePath, { withFileTypes: true }).catch(() => []))
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name)
-  )
-
-  const metaPath = join(leaguePath, META_FILE)
-  const existing = await readFile(metaPath, 'utf8')
-    .then((raw) => parseLeagueMetaInput(JSON.parse(raw)))
-    .catch(() => null)
-  const meta = healMeta(existing, {
+  const meta = healMeta(await readLeagueMetaInput(leaguePath), {
     folderName: opts.leagueFolder,
     day: opts.day,
     liveSeasons: await liveSeasonsOf(leaguePath),
-    archivedSeasons
+    archivedSeasons: await archivedSeasonsOf(archivePath)
   })
   const created = meta.seasons.find((s) => s.name === season.name)
   if (created && !created.createdAt) created.createdAt = new Date().toISOString()

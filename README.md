@@ -36,7 +36,7 @@ A league opens as a file browser: seasons at the top, newest first with their st
 
 Within a season, disclosure arrows expand folders in place and column headings sort each folder's contents. The season filter searches loaded folders and keeps matching files' parents visible. Drop files into league roots, Shared documents, Templates or live season views to copy them in. The app remembers your last-opened league and collapsed days per location.
 
-Right-click a row to open the same actions shown in its `…` menu: browse folders, open documents in their default app, or reveal items in Finder or Explorer. Deleting a league or season asks you to type its name, then moves the whole folder, including unmanaged files, to the OS trash. The same menus zip archived seasons.
+Right-click a row to open the same actions shown in its `…` menu: browse folders, open documents in their default app, or reveal items in Finder or Explorer. Renaming a league from its `…` menu changes the name shown in the app and, when the sanitised name differs, renames its folder and its `_archives` folder to match. Deleting a league or season asks you to type its name, then moves the whole folder, including unmanaged files, to the OS trash. The same menus zip archived seasons.
 
 On macOS, use ⇧⌘O to open a location, ⌘R to refresh and ⌘F to focus the filter. On Windows, use Ctrl+Shift+O, Ctrl+R and Ctrl+F. In file lists, press Enter to open the selected item and use the arrow keys to move between rows.
 

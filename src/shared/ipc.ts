@@ -34,6 +34,7 @@ export interface InvokeOutputs {
   listDir: DirEntry[]
   trashFolder: void
   createLeague: string
+  renameLeague: string
   createSeason: { seasonPath: string; archived: string | null }
   syncSeasonTemplates: { added: string[]; skipped: string[] }
   zipArchive: ZipArchiveResult
@@ -106,6 +107,12 @@ export const invokeDefinitions = {
     channel: 'league:create',
     args: z.tuple([weekdaySchema, z.string()]),
     failureMessage: 'Invalid league request'
+  },
+  /** Rename a league's display name and, when its sanitised folder name changes, its folders. */
+  renameLeague: {
+    channel: 'league:rename',
+    args: z.tuple([weekdaySchema, leagueFolderSchema, z.string()]),
+    failureMessage: 'Invalid league rename request'
   },
   createSeason: {
     channel: 'season:create',

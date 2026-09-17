@@ -233,6 +233,7 @@ function LocationContent({ root }: { root: UseQueryResult<string | null> }): Rea
                   onCurrentDirChange={(currentDir) =>
                     reportLeagueDir({ ownerPath: selectedLeague.path, currentDir })
                   }
+                  onRenamed={(day, folderName) => select({ kind: 'league', day, folderName })}
                 />
               ) : (
                 <HomeView

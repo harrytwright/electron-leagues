@@ -7,6 +7,7 @@ import {
   mkdir,
   readdir,
   readFile,
+  rename,
   rm,
   stat,
   symlink,
@@ -21,11 +22,13 @@ import {
   importFiles,
   initialiseRoot,
   prepareRootSelection,
+  renameLeague,
   repairReservedLocations,
   syncSeasonWithTemplates,
   zipArchivedSeasons
 } from '../operations'
 import { UserFacingError } from '../fs-errors'
+import type { LeagueMeta } from '../../../shared/meta'
 import { FILE_RULES } from '../template-workflows'
 import { resolveNewLiveSeasonRoot } from '../paths'
 import { scanLeaguesRoot } from '../scanner'
@@ -187,6 +190,159 @@ describe('createLeague', () => {
     await expect(attempt).rejects.toBeInstanceOf(UserFacingError)
     await expect(attempt).rejects.toThrow('A league folder named "Pairs" already exists')
     expect(await readdir(join(root, 'tuesday/Trios'))).toEqual([])
+  })
+})
+
+describe('renameLeague', () => {
+  async function readMeta(leaguePath: string): Promise<LeagueMeta> {
+    return JSON.parse(await readFile(join(leaguePath, 'meta.json'), 'utf8'))
+  }
+
+  test('renames the folder, its archive and the display name together', async () => {
+    const original = await createLeague(root, 'monday', 'Mixed Triples')
+    await makeTree(root, {
+      'monday/Mixed Triples/2025-26/Rules.docx': 'rules',
+      '_archives/Mixed Triples/2023-24/Rules.docx': 'old rules'
+    })
+
+    const renamed = await renameLeague({
+      root,
+      day: 'monday',
+      leagueFolder: 'Mixed Triples',
+      displayName: ' Monday Trios: Mixed '
+    })
+
+    expect(renamed).toBe(join(root, 'monday', 'Monday Trios Mixed'))
+    expect(await exists(original)).toBe(false)
+    expect(await exists(join(root, '_archives/Mixed Triples'))).toBe(false)
+    expect(await exists(join(renamed, '2025-26/Rules.docx'))).toBe(true)
+    expect(await exists(join(root, '_archives/Monday Trios Mixed/2023-24/Rules.docx'))).toBe(true)
+    expect(await readMeta(renamed)).toMatchObject({
+      name: 'Monday Trios: Mixed',
+      day: 'monday',
+      seasons: [{ name: '2025-26', status: 'active' }],
+      archivedSeasons: ['2023-24']
+    })
+  })
+
+  test('changes only the display name when the folder name stays the same', async () => {
+    const path = await createLeague(root, 'monday', 'Mixed Triples')
+    await writeFile(
+      join(path, 'meta.json'),
+      JSON.stringify({ name: 'Mixed Triples', extra: { venue: 'Lanes' } })
+    )
+
+    expect(
+      await renameLeague({
+        root,
+        day: 'monday',
+        leagueFolder: 'Mixed Triples',
+        displayName: 'Mixed Triples?'
+      })
+    ).toBe(path)
+    expect(await readMeta(path)).toMatchObject({
+      name: 'Mixed Triples?',
+      extra: { venue: 'Lanes' }
+    })
+  })
+
+  test('renames a league that has no archive folder yet', async () => {
+    await createLeague(root, 'monday', 'Pairs')
+    const renamed = await renameLeague({
+      root,
+      day: 'monday',
+      leagueFolder: 'Pairs',
+      displayName: 'Doubles'
+    })
+    expect(renamed).toBe(join(root, 'monday', 'Doubles'))
+    expect(await exists(join(root, '_archives/Doubles'))).toBe(false)
+  })
+
+  test('rejects a name that sanitises to nothing', async () => {
+    await createLeague(root, 'monday', 'Pairs')
+    await expect(
+      renameLeague({ root, day: 'monday', leagueFolder: 'Pairs', displayName: '***' })
+    ).rejects.toBeInstanceOf(UserFacingError)
+  })
+
+  test('refuses to move onto an existing league folder', async () => {
+    await createLeague(root, 'monday', 'Pairs')
+    await createLeague(root, 'monday', 'Trios')
+
+    const attempt = renameLeague({
+      root,
+      day: 'monday',
+      leagueFolder: 'Pairs',
+      displayName: 'Trios'
+    })
+    await expect(attempt).rejects.toThrow('A league folder named "Trios" already exists')
+    expect(await exists(join(root, 'monday/Pairs'))).toBe(true)
+    expect((await readMeta(join(root, 'monday/Trios'))).name).toBe('Trios')
+  })
+
+  test('moves nothing when the archive slot is already taken', async () => {
+    await createLeague(root, 'monday', 'Pairs')
+    await makeTree(root, {
+      '_archives/Pairs/2023-24/.keep': '',
+      '_archives/Doubles/2022-23/.keep': ''
+    })
+
+    const attempt = renameLeague({
+      root,
+      day: 'monday',
+      leagueFolder: 'Pairs',
+      displayName: 'Doubles'
+    })
+    await expect(attempt).rejects.toThrow('An archive folder named "Doubles" already exists')
+    expect(await exists(join(root, 'monday/Pairs'))).toBe(true)
+    expect(await exists(join(root, 'monday/Doubles'))).toBe(false)
+    expect(await exists(join(root, '_archives/Pairs/2023-24'))).toBe(true)
+  })
+
+  test('puts the league folder back when its archive cannot follow', async () => {
+    await createLeague(root, 'monday', 'Pairs')
+    await makeTree(root, { '_archives/Pairs/2023-24/.keep': '' })
+    const moves: string[] = []
+    const moveFolder = async (from: string, to: string): Promise<void> => {
+      moves.push(from)
+      if (from === join(root, '_archives', 'Pairs')) {
+        throw Object.assign(new Error('busy'), { code: 'EBUSY' })
+      }
+      await rename(from, to)
+    }
+
+    const attempt = renameLeague(
+      { root, day: 'monday', leagueFolder: 'Pairs', displayName: 'Doubles' },
+      moveFolder
+    )
+    await expect(attempt).rejects.toThrow(/open in another program/)
+    expect(moves).toEqual([
+      join(root, 'monday', 'Pairs'),
+      join(root, '_archives', 'Pairs'),
+      join(root, 'monday', 'Doubles')
+    ])
+    expect(await exists(join(root, 'monday/Pairs'))).toBe(true)
+    expect(await exists(join(root, 'monday/Doubles'))).toBe(false)
+    expect(await exists(join(root, '_archives/Pairs/2023-24'))).toBe(true)
+  })
+
+  test('rejects a missing league and a symlinked meta.json before moving anything', async () => {
+    await expect(
+      renameLeague({ root, day: 'monday', leagueFolder: 'Ghost', displayName: 'Spirit' })
+    ).rejects.toThrow('That folder no longer exists')
+
+    await makeTree(root, { 'monday/Linked/2025-26': null, 'outside.json': '{}' })
+    await symlink(join(root, 'outside.json'), join(root, 'monday/Linked/meta.json'))
+    await expect(
+      renameLeague({ root, day: 'monday', leagueFolder: 'Linked', displayName: 'Unlinked' })
+    ).rejects.toThrow('meta.json can’t be a symbolic link')
+    expect(await exists(join(root, 'monday/Linked'))).toBe(true)
+  })
+
+  test('rejects path syntax in the league folder', async () => {
+    await expect(
+      renameLeague({ root, day: 'monday', leagueFolder: '../monday', displayName: 'Pairs' })
+    ).rejects.toThrow('Invalid league folder')
   })
 })
 
