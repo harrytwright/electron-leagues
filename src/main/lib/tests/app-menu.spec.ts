@@ -1,6 +1,10 @@
 import type { MenuItemConstructorOptions } from 'electron'
 import { describe, expect, it, vi } from 'vitest'
-import { buildAppMenuTemplate, buildEditableContextMenuTemplate } from '../app-menu'
+import {
+  buildAppMenuTemplate,
+  buildEditableContextMenuTemplate,
+  HELP_MENU_LABEL
+} from '../app-menu'
 
 function items(template: MenuItemConstructorOptions[]): MenuItemConstructorOptions[] {
   return template.flatMap((item) => [
@@ -20,8 +24,8 @@ function byLabel(
 
 describe('buildAppMenuTemplate', () => {
   it('builds conventional macOS and Windows menus and accelerators', () => {
-    const mac = buildAppMenuTemplate('darwin', false, vi.fn())
-    const windows = buildAppMenuTemplate('win32', false, vi.fn())
+    const mac = buildAppMenuTemplate('darwin', false, vi.fn(), vi.fn())
+    const windows = buildAppMenuTemplate('win32', false, vi.fn(), vi.fn())
 
     expect(mac[0]?.role).toBe('appMenu')
     expect(items(mac).some((item) => item.role === 'about')).toBe(true)
@@ -44,7 +48,9 @@ describe('buildAppMenuTemplate', () => {
   it.each(['darwin', 'win32'] as const)(
     'keeps reload and developer tools out of %s production',
     (platform) => {
-      const roles = items(buildAppMenuTemplate(platform, false, vi.fn())).map((item) => item.role)
+      const roles = items(buildAppMenuTemplate(platform, false, vi.fn(), vi.fn())).map(
+        (item) => item.role
+      )
       expect(roles).not.toContain('reload')
       expect(roles).not.toContain('forceReload')
       expect(roles).not.toContain('toggleDevTools')
@@ -52,10 +58,10 @@ describe('buildAppMenuTemplate', () => {
   )
 
   it('offers platform-native developer tools only in development', () => {
-    const mac = items(buildAppMenuTemplate('darwin', true, vi.fn())).filter(
+    const mac = items(buildAppMenuTemplate('darwin', true, vi.fn(), vi.fn())).filter(
       (item) => item.role === 'toggleDevTools'
     )
-    const windows = items(buildAppMenuTemplate('win32', true, vi.fn())).filter(
+    const windows = items(buildAppMenuTemplate('win32', true, vi.fn(), vi.fn())).filter(
       (item) => item.role === 'toggleDevTools'
     )
     expect(mac.map((item) => item.accelerator)).toEqual(['Alt+Command+I'])
@@ -64,7 +70,7 @@ describe('buildAppMenuTemplate', () => {
 
   it.each([false, true])('offers diagnostics independently of development=%s', (development) => {
     const onCommand = vi.fn()
-    const template = buildAppMenuTemplate('win32', development, onCommand)
+    const template = buildAppMenuTemplate('win32', development, onCommand, vi.fn())
     const view = byLabel(template, 'View')
     if (!Array.isArray(view.submenu)) throw new Error('View must contain menu items')
     const diagnostics = byLabel(view.submenu, 'Show diagnostics')
@@ -83,7 +89,7 @@ describe('buildAppMenuTemplate', () => {
 
   it('forwards native menu clicks as application commands', () => {
     const onCommand = vi.fn()
-    const template = buildAppMenuTemplate('linux', false, onCommand)
+    const template = buildAppMenuTemplate('linux', false, onCommand, vi.fn())
     for (const label of ['Open location…', 'New location…', 'Refresh', 'Focus filter']) {
       const click = byLabel(template, label).click
       // SAFETY: commandItem always installs a closure that ignores Electron's click arguments.
@@ -96,6 +102,25 @@ describe('buildAppMenuTemplate', () => {
       ['refresh'],
       ['focus-filter']
     ])
+  })
+
+  it('adds a Help menu whose item uses the platform help accelerator and opens help', () => {
+    const onHelp = vi.fn()
+    const mac = buildAppMenuTemplate('darwin', false, vi.fn(), onHelp)
+    const windows = buildAppMenuTemplate('win32', false, vi.fn(), onHelp)
+
+    expect(mac.at(-1)?.role).toBe('help')
+    expect(windows.at(-1)?.role).toBe('help')
+    expect(byLabel(mac, HELP_MENU_LABEL).accelerator).toBe('Command+?')
+    expect(byLabel(windows, HELP_MENU_LABEL).accelerator).toBe('F1')
+    expect(
+      byLabel(buildAppMenuTemplate('linux', false, vi.fn(), onHelp), HELP_MENU_LABEL).accelerator
+    ).toBe('F1')
+
+    // SAFETY: the help item installs a closure that ignores Electron's click arguments.
+    const invoke = byLabel(windows, HELP_MENU_LABEL).click as () => void
+    invoke()
+    expect(onHelp).toHaveBeenCalledOnce()
   })
 })
 

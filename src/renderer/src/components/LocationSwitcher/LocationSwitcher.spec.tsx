@@ -1,6 +1,7 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
+import { HELP_LINKS } from '@renderer/lib/help/links'
 import { LocationSwitcher } from './index'
 import { revealLabel } from '../../lib/os-labels'
 import { makeTree } from '../../tests/fixtures'
@@ -228,8 +229,9 @@ it('repairs the current location from the item after reveal', async () => {
 
   const menu = await openMenu(user)
   const items = within(menu).getAllByRole('menuitem')
-  expect(items.at(-2)).toHaveTextContent(revealLabel())
-  expect(items.at(-1)).toHaveTextContent('Repair location…')
+  expect(items.at(-3)).toHaveTextContent(revealLabel())
+  expect(items.at(-2)).toHaveTextContent('Repair location…')
+  expect(items.at(-1)).toHaveTextContent('About locations')
   await user.click(within(menu).getByRole('menuitem', { name: 'Repair location…' }))
 
   expect(api.repairLocation).toHaveBeenCalledOnce()
@@ -281,4 +283,15 @@ it('recovers the recents list when the menu is reopened after a failure', async 
   ).toBeInTheDocument()
   expect(within(reopened).queryByText('Recents unavailable')).not.toBeInTheDocument()
   expect(api.recentRoots).toHaveBeenCalledTimes(2)
+})
+
+it('opens help about locations from the last menu item', async () => {
+  const api = installMockApi()
+  const user = userEvent.setup()
+  renderWithProviders(<LocationSwitcher root={CURRENT} />)
+
+  const menu = await openMenu(user)
+  await user.click(within(menu).getByRole('menuitem', { name: 'About locations' }))
+
+  expect(api.openHelp).toHaveBeenCalledExactlyOnceWith(HELP_LINKS.locations)
 })

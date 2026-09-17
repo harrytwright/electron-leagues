@@ -10,6 +10,7 @@ import {
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { useDialogTask } from '@renderer/hooks/use-dialog-task'
 import { useWriteOperation } from '@renderer/hooks/use-write-operation'
+import { HelpLink } from '../HelpLink'
 import { TaskDialog } from '../TaskDialog'
 import type { Props, SeasonTypeOption, Source } from './interface'
 
@@ -142,20 +143,25 @@ export function NewSeasonDialog({
           }}
         />
 
-        <Input
-          ref={nameRef}
-          label="Season name"
-          name="season-name"
-          autoComplete="off"
-          autoFocus
-          value={name}
-          aria-invalid={task.error ? true : undefined}
-          aria-describedby={task.error ? 'new-season-error' : undefined}
-          onChange={(event) => {
-            setName(event.target.value)
-            if (task.error) task.edited()
-          }}
-        />
+        <div className="grid gap-1.5">
+          <Input
+            ref={nameRef}
+            label="Season name"
+            name="season-name"
+            autoComplete="off"
+            autoFocus
+            value={name}
+            aria-invalid={task.error ? true : undefined}
+            aria-describedby={task.error ? 'new-season-error' : undefined}
+            onChange={(event) => {
+              setName(event.target.value)
+              if (task.error) task.edited()
+            }}
+          />
+          <div>
+            <HelpLink link="seasonNames">How season names work</HelpLink>
+          </div>
+        </div>
 
         <Select
           label="Starting documents"
@@ -167,11 +173,16 @@ export function NewSeasonDialog({
         />
 
         {willArchive ? (
-          <Checkbox
-            label={`Archive “${willArchive.name}” (moves it to _archives)`}
-            checked={archiveOldest}
-            onCheckedChange={setArchiveOldest}
-          />
+          <div className="grid gap-1.5">
+            <Checkbox
+              label={`Archive “${willArchive.name}” (moves it to _archives)`}
+              checked={archiveOldest}
+              onCheckedChange={setArchiveOldest}
+            />
+            <div>
+              <HelpLink link="archiving">What archiving does</HelpLink>
+            </div>
+          </div>
         ) : null}
 
         {task.error ? (

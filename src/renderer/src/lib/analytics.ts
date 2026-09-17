@@ -2,6 +2,8 @@ import * as Sentry from '@sentry/electron/renderer'
 import posthog from 'posthog-js'
 import 'posthog-js/dist/recorder'
 
+let productAnalyticsReady = false
+
 export function reportRenderError(error: Error, componentStack: string | null | undefined): void {
   Sentry.captureException(error, { contexts: { react: { componentStack } } })
 }
@@ -29,5 +31,14 @@ export async function initAnalytics(): Promise<void> {
       capture_pageleave: false,
       autocapture: true
     })
+    productAnalyticsReady = true
   }
+}
+
+/** Product events only; without a PostHog key this is a silent no-op like main's `capture`. */
+export function captureEvent(
+  event: string,
+  properties: Record<string, string | number | boolean> = {}
+): void {
+  if (productAnalyticsReady) posthog.capture(event, properties)
 }

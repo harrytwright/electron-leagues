@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { helpTargetSchema } from './help'
 import type { DirEntry, LeaguesTree } from './tree'
 import type { AppUpdateStatus } from './app-update'
 import {
@@ -45,6 +46,7 @@ export interface InvokeOutputs {
   revealFile: void
   pickFiles: string[]
   importFiles: ImportFilesResult
+  openHelp: void
 }
 
 interface InvokeDefinition {
@@ -161,6 +163,12 @@ export const invokeDefinitions = {
     channel: 'file:import',
     args: z.tuple([pathSchema, z.array(pathSchema)]),
     failureMessage: 'Invalid file import request'
+  },
+  /** Open or focus the help window, optionally at a topic and heading. */
+  openHelp: {
+    channel: 'help:open',
+    args: z.tuple([helpTargetSchema.nullable()]),
+    failureMessage: 'Invalid help request'
   }
 } as const satisfies Record<keyof InvokeOutputs, InvokeDefinition>
 

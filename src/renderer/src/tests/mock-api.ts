@@ -1,6 +1,7 @@
 import { vi } from 'vitest'
 import type { LeaguesApi } from '../../../preload/index'
 import type { AppCommandEvent } from '../../../shared/app-command'
+import type { HelpTarget } from '../../../shared/help'
 
 export type RendererApi = LeaguesApi
 
@@ -13,6 +14,7 @@ export function emitAppUpdateChanged(
 ): void {
   for (const listener of appUpdateListeners) listener(status)
 }
+let helpNavigateListeners: Parameters<RendererApi['onHelpNavigate']>[0][] = []
 
 /** Fire the tree:changed event into whatever the component under test registered. */
 export function emitTreeChanged(): void {
@@ -27,10 +29,15 @@ export function emitAppCommand(event: AppCommandEvent): void {
   for (const listener of appCommandListeners) listener(event)
 }
 
+export function emitHelpNavigate(target: HelpTarget): void {
+  for (const listener of helpNavigateListeners) listener(target)
+}
+
 export function installMockApi(overrides: Partial<RendererApi> = {}): RendererApi {
   treeChangedListeners = []
   appCommandListeners = []
   appUpdateListeners = []
+  helpNavigateListeners = []
   const api: RendererApi = {
     getAppUpdateStatus: vi.fn<RendererApi['getAppUpdateStatus']>().mockResolvedValue({
       version: '0.2.3',
@@ -87,6 +94,13 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
         appCommandListeners = appCommandListeners.filter((item) => item !== listener)
       }
     }),
+    onHelpNavigate: vi.fn<RendererApi['onHelpNavigate']>((listener) => {
+      helpNavigateListeners.push(listener)
+      return () => {
+        helpNavigateListeners = helpNavigateListeners.filter((item) => item !== listener)
+      }
+    }),
+    openHelp: vi.fn<RendererApi['openHelp']>().mockResolvedValue(undefined),
     getAnalyticsConfig: vi.fn<RendererApi['getAnalyticsConfig']>().mockResolvedValue({
       apiKey: null,
       distinctId: 'test'

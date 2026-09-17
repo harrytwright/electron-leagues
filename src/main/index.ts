@@ -8,6 +8,7 @@ import { basename, join, resolve } from 'node:path'
 import icon from '../../resources/icon.png?asset'
 import { updateDiagnosticsMenu } from './lib/diagnostics-menu'
 import { createAppUpdates } from './lib/app-updates'
+import { createHelpWindowController, helpJumpListTasks, type HelpSurface } from './lib/help-window'
 import {
   buildAppMenuTemplate,
   buildEditableContextMenuTemplate,
@@ -27,6 +28,8 @@ import {
 } from './lib/operations'
 import { isMissing, toUserFacing, UserFacingError } from './lib/fs-errors'
 import { registerInvokeHandler, type InvokeListener, type IpcErrorReporter } from './lib/ipc-handle'
+import type { AppCommand } from '../shared/app-command'
+import { helpRequested, helpTargetToSearch, type HelpTarget } from '../shared/help'
 import type { ImportFilesResult, InvokeName } from '../shared/ipc'
 import {
   assertAbsolutePath,
@@ -79,6 +82,11 @@ function sentryDSN(): string | undefined {
   )
 }
 
+// A second launch, including the Windows jump list's Help task, hands its
+// arguments to the running app and exits instead of opening another window.
+const primaryInstance = app.requestSingleInstanceLock()
+if (!primaryInstance) app.quit()
+
 // As early as possible so Sentry's error hooks and the IPC bridge for the
 // renderer SDK are in place before any window loads.
 initAnalytics(posthogKey(), sentryDSN(), machineId())
@@ -96,6 +104,7 @@ const appUpdates = createAppUpdates(
   (status) => mainWindow?.webContents.send('app:update-changed', status),
   (error) => console.warn('Could not update the app:', error)
 )
+const helpWindows = createHelpWindowController((initial) => createHelpWindow(initial))
 
 function stopWatching(): void {
   void rootWatcher?.close()
@@ -363,6 +372,76 @@ function registerIpc(): void {
     capture('files_imported', { count: result.copied.length })
     return result
   })
+
+  register('openHelp', (_e, target) => {
+    helpWindows.open(target)
+  })
+}
+
+function windowBackground(): string {
+  return nativeTheme.shouldUseDarkColors ? '#0f0f0f' : '#ffffff'
+}
+
+function openExternally(contents: Electron.WebContents): void {
+  contents.setWindowOpenHandler((details) => {
+    void shell.openExternal(details.url)
+    return { action: 'deny' }
+  })
+}
+
+/** A plain framed window: the help viewer is secondary and reads best as one. */
+function createHelpWindow(initial: HelpTarget | null): HelpSurface {
+  const options: Electron.BrowserWindowConstructorOptions = {
+    width: 1000,
+    height: 720,
+    minWidth: 700,
+    minHeight: 480,
+    show: false,
+    title: 'GoBowling Leagues Help',
+    autoHideMenuBar: process.platform !== 'darwin',
+    backgroundColor: windowBackground(),
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false
+    }
+  }
+  if (process.platform === 'linux') options.icon = icon
+  const window = new BrowserWindow(options)
+
+  const onThemeUpdated = (): void => window.setBackgroundColor(windowBackground())
+  nativeTheme.on('updated', onThemeUpdated)
+  window.on('closed', () => nativeTheme.removeListener('updated', onThemeUpdated))
+  window.on('ready-to-show', () => window.show())
+
+  openExternally(window.webContents)
+  // The page is static; a link that is not a topic, anchor or external URL goes nowhere.
+  window.webContents.on('will-navigate', (event) => event.preventDefault())
+
+  const query = helpTargetToSearch(initial)
+  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    const url = new URL('/help.html', process.env['ELECTRON_RENDERER_URL'])
+    url.search = new URLSearchParams(query).toString()
+    void window.loadURL(url.toString())
+  } else {
+    void window.loadFile(join(__dirname, '../renderer/help.html'), { query })
+  }
+
+  return {
+    focus: () => {
+      if (window.isMinimized()) window.restore()
+      window.focus()
+    },
+    close: () => window.close(),
+    isDestroyed: () => window.isDestroyed(),
+    navigate: (target) => {
+      const send = (): void => window.webContents.send('help:navigate', target)
+      if (window.webContents.isLoading()) window.webContents.once('did-finish-load', send)
+      else send()
+    },
+    onClosed: (listener) => {
+      window.on('closed', listener)
+    }
+  }
 }
 
 function titleBarOverlay(dark: boolean): Electron.TitleBarOverlayOptions {
@@ -411,14 +490,12 @@ function createWindow(): void {
   mainWindow.on('closed', () => {
     nativeTheme.removeListener('updated', onThemeUpdated)
     if (mainWindow === createdWindow) mainWindow = null
+    helpWindows.close()
   })
 
   mainWindow.on('ready-to-show', () => mainWindow?.show())
 
-  mainWindow.webContents.setWindowOpenHandler((details) => {
-    void shell.openExternal(details.url)
-    return { action: 'deny' }
-  })
+  openExternally(mainWindow.webContents)
 
   mainWindow.webContents.on('context-menu', (_event, params) => {
     if (!params.isEditable) return
@@ -434,34 +511,63 @@ function createWindow(): void {
   }
 }
 
-app.whenReady().then(() => {
-  electronApp.setAppUserModelId('com.gobowling.leagues')
-
-  capture('app_opened', { platform: process.platform })
-
-  registerIpc()
-  createWindow()
-  if (app.isPackaged && (process.platform !== 'linux' || process.env.APPIMAGE)) {
-    const stopUpdates = appUpdates.start(autoUpdater)
-    app.once('will-quit', stopUpdates)
+function focusMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow()
+    return
   }
-  Menu.setApplicationMenu(
-    Menu.buildFromTemplate(
-      buildAppMenuTemplate(process.platform, is.dev, (command) => {
-        if (!mainWindow || mainWindow.isDestroyed()) return
-        mainWindow.webContents.send('app:command', {
-          command,
-          repeat: false,
-          composing: false
-        })
-      })
-    )
-  )
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.focus()
+}
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+/** The filter shortcut belongs to whichever window has focus; everything else is the main window's. */
+function commandWindow(command: AppCommand): BrowserWindow | null {
+  const focused = BrowserWindow.getFocusedWindow()
+  if (command === 'focus-filter' && focused && !focused.isDestroyed()) return focused
+  return mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
+}
+
+if (primaryInstance) {
+  app.on('second-instance', (_event, argv) => {
+    focusMainWindow()
+    if (helpRequested(argv)) helpWindows.open(null)
   })
-})
+
+  app.whenReady().then(() => {
+    electronApp.setAppUserModelId('com.gobowling.leagues')
+    if (process.platform === 'win32') app.setUserTasks(helpJumpListTasks(process.execPath))
+
+    capture('app_opened', { platform: process.platform })
+
+    registerIpc()
+    createWindow()
+    if (app.isPackaged && (process.platform !== 'linux' || process.env.APPIMAGE)) {
+      const stopUpdates = appUpdates.start(autoUpdater)
+      app.once('will-quit', stopUpdates)
+    }
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate(
+        buildAppMenuTemplate(
+          process.platform,
+          is.dev,
+          (command) => {
+            commandWindow(command)?.webContents.send('app:command', {
+              command,
+              repeat: false,
+              composing: false
+            })
+          },
+          () => helpWindows.open(null)
+        )
+      )
+    )
+    if (helpRequested(process.argv)) helpWindows.open(null)
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    })
+  })
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

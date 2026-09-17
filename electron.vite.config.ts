@@ -41,7 +41,15 @@ export default defineConfig(({ command }) => {
       plugins: upload ? [sentryUpload('preload')] : []
     },
     renderer: {
-      build: { sourcemap: upload ? 'hidden' : false },
+      build: {
+        sourcemap: upload ? 'hidden' : false,
+        rollupOptions: {
+          input: {
+            index: resolve('src/renderer/index.html'),
+            help: resolve('src/renderer/help.html')
+          }
+        }
+      },
       resolve: {
         alias: {
           '@renderer': resolve('src/renderer/src'),

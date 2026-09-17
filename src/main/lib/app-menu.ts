@@ -5,6 +5,13 @@ type CommandHandler = (command: AppCommand) => void
 
 export const DIAGNOSTICS_MENU_ID = 'show-diagnostics'
 
+export const HELP_MENU_LABEL = 'GoBowling Leagues Help'
+
+/** ⌘? is the macOS convention for an app's help item; everywhere else it is F1. */
+export function helpAccelerator(platform: NodeJS.Platform): string {
+  return platform === 'darwin' ? 'Command+?' : 'F1'
+}
+
 const editMenu: MenuItemConstructorOptions = {
   label: 'Edit',
   submenu: [
@@ -31,7 +38,8 @@ function commandItem(
 export function buildAppMenuTemplate(
   platform: NodeJS.Platform,
   development: boolean,
-  onCommand: CommandHandler
+  onCommand: CommandHandler,
+  onHelp: () => void
 ): MenuItemConstructorOptions[] {
   const template: MenuItemConstructorOptions[] = []
   if (platform === 'darwin') {
@@ -100,6 +108,14 @@ export function buildAppMenuTemplate(
         platform === 'darwin'
           ? [{ role: 'minimize' }, { role: 'zoom' }, { role: 'close' }]
           : [{ role: 'minimize' }, { role: 'close' }]
+    },
+    {
+      // The help role places the menu where each platform expects it and adds
+      // macOS's menu search field.
+      role: 'help',
+      submenu: [
+        { label: HELP_MENU_LABEL, accelerator: helpAccelerator(platform), click: () => onHelp() }
+      ]
     }
   )
   return template

@@ -2,6 +2,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AppCommandEvent } from '../shared/app-command'
 import type { AppUpdateStatus } from '../shared/app-update'
+import type { HelpTarget } from '../shared/help'
 import {
   invokeDefinitions,
   type InvokeApi,
@@ -51,6 +52,12 @@ const api = {
       listener(command)
     ipcRenderer.on('app:command', wrapped)
     return () => ipcRenderer.removeListener('app:command', wrapped)
+  },
+  onHelpNavigate: (listener: (target: HelpTarget) => void): (() => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, target: HelpTarget): void =>
+      listener(target)
+    ipcRenderer.on('help:navigate', wrapped)
+    return () => ipcRenderer.removeListener('help:navigate', wrapped)
   }
 }
 
