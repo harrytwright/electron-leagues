@@ -99,7 +99,12 @@ export function LocationSwitcher({ root }: Props): React.JSX.Element {
             }}
           >
             {locations.map((path) => (
-              <DropdownMenu.RadioItem key={path} value={path} disabled={locationOperation.busy}>
+              <DropdownMenu.RadioItem
+                key={path}
+                value={path}
+                closeOnClick
+                disabled={locationOperation.busy}
+              >
                 <LocationRow path={path} />
                 <DropdownMenu.RadioItemIndicator />
               </DropdownMenu.RadioItem>
