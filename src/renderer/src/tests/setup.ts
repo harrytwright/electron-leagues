@@ -24,7 +24,37 @@ Object.defineProperty(globalThis, 'ResizeObserver', {
   value: MockResizeObserver
 })
 
+/** jsdom has no layout, so scroll tracking never fires; components must still mount. */
+class MockIntersectionObserver implements IntersectionObserver {
+  readonly root = null
+  readonly rootMargin = ''
+  readonly scrollMargin = ''
+  readonly thresholds: readonly number[] = []
+  observe(): void {
+    return undefined
+  }
+  unobserve(): void {
+    return undefined
+  }
+  disconnect(): void {
+    return undefined
+  }
+  takeRecords(): IntersectionObserverEntry[] {
+    return []
+  }
+}
+
+Object.defineProperty(globalThis, 'IntersectionObserver', {
+  configurable: true,
+  value: MockIntersectionObserver
+})
+
 Object.defineProperty(Element.prototype, 'scrollIntoView', {
+  configurable: true,
+  value: () => {}
+})
+
+Object.defineProperty(Element.prototype, 'scrollTo', {
   configurable: true,
   value: () => {}
 })

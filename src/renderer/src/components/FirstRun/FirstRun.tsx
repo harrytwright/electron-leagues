@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { Button, Text } from '@cloudflare/kumo'
 import { FolderIcon } from '@phosphor-icons/react/dist/csr/Folder'
+import { HelpLink } from '../HelpLink'
 import { LocationRow } from '../LocationRow/LocationRow'
 import { useRecentRoots } from '@renderer/hooks/use-recent-roots'
 import { useLocationOperation } from '@renderer/hooks/use-location-operation'
@@ -51,6 +52,9 @@ export function FirstRun(): React.JSX.Element {
             Pick the leagues folder inside your OneDrive, or create a new one — the app creates the
             shared, templates and archive folders for you.
           </Text>
+          <div>
+            <HelpLink link="locations">Learn more about locations</HelpLink>
+          </div>
         </div>
         <div className="flex gap-3">
           <Button

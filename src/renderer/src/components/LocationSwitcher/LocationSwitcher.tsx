@@ -5,8 +5,11 @@ import {
   FolderIcon,
   FolderOpenIcon,
   FolderPlusIcon,
+  QuestionIcon,
   WrenchIcon
 } from '@phosphor-icons/react'
+import { HELP_LINKS } from '@renderer/lib/help/links'
+import { hasHelpTarget, helpTopics } from '@renderer/lib/help/topics'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { pathBasename } from '@renderer/lib/path-basename'
 import { appShortcutLabel, revealLabel } from '@renderer/lib/os-labels'
@@ -126,6 +129,14 @@ export function LocationSwitcher({ root }: Props): React.JSX.Element {
         <DropdownMenu.Item icon={WrenchIcon} disabled={repairing} onClick={() => void repair()}>
           Repair location…
         </DropdownMenu.Item>
+        {hasHelpTarget(helpTopics(), HELP_LINKS.locations) ? (
+          <DropdownMenu.Item
+            icon={QuestionIcon}
+            onClick={() => void window.api.openHelp(HELP_LINKS.locations)}
+          >
+            About locations
+          </DropdownMenu.Item>
+        ) : null}
       </DropdownMenu.Content>
     </DropdownMenu>
   )

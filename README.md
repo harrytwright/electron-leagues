@@ -2,47 +2,13 @@
 
 GoBowling Leagues is a desktop organiser for bowling league documents stored in a OneDrive folder. The folder tree is the source of truth: the app scans it, adopts folders you create by hand, opens documents in their default program, generates new season folders and archives old seasons. It never overwrites an existing document. Template and import workflows only add new copies, and the only files the app owns are `meta.json` and the archive zips you request.
 
-## Folder layout
+## Help
 
-The leagues folder follows a fixed layout, and the app treats anything outside it as a plain browsable folder:
-
-```text
-/leagues/
-  _templates/                        # season templates, copied into new seasons
-  _shared/                           # general documents for every league
-  _archives/{League Name}/{season}/  # archived seasons (plain folders); BLS backups live here
-  monday/ … sunday/                  # league nights (lowercase on disk)
-    {League Name}/
-      meta.json                      # app-owned and auto-healed: the scan always wins
-      2025-26/                       # seasons: 2025-26, 2025, or 2026-Q1
-        Rules.docx, Sign-In Sheet.docx, …
-```
-
-Season folders use one of three names: cross-year `2025-26`, full-year `2025` or quarter `2026-Q1`. The app shows any folder that doesn't match as a plain browsable folder and never guesses at it.
-
-Each league keeps two live seasons, the active one and the previous one. A template-based season copies every visible, direct file in `_templates`. A previous-season copy takes the previous season's direct files first, then fills missing names from templates, so previous filenames always win. Start empty copies nothing. Every copy is a snapshot, not a live link.
-
-The wizard's pre-ticked archive option moves the oldest live season into `_archives`, where you can zip seasons on demand.
-
-Scans may update app-owned `meta.json` files, but they never create reserved folders, copy bundled templates or touch your documents. **New location…** creates `_templates`, `_shared` and `_archives` and seeds the bundled `Rules.docx` and `Sign-In Sheet.docx` where they are missing. **Repair location…** does the same on demand. Both leave edited defaults and custom templates alone, and neither recreates the selected root itself if it has moved or become unavailable.
-
-## Using the app
-
-The startup panel opens existing leagues folders (“locations”), creates new ones or returns you to a recent location. After startup, **Home** in the title bar returns you to shared documents and templates. Use the location switcher beside it to change, create or reveal locations.
-
-Home is a single-pane browser with **Shared documents**, **Templates** and, when needed, **Other items** tabs. Changing tabs starts again at that tab's root. The sidebar holds the Leagues list grouped under collapsible days.
-
-A league opens as a file browser: seasons at the top, newest first with their status, then any other files and the Archive folder. The league, archive and season panes share a desktop-style file browser: click to select and double-click to open, with breadcrumbs leading back. The league overview adds season status badges, item counts and a filter for the current folder.
-
-Within a season, disclosure arrows expand folders in place and column headings sort each folder's contents. The season filter searches loaded folders and keeps matching files' parents visible. Drop files into league roots, Shared documents, Templates or live season views to copy them in. The app remembers your last-opened league and collapsed days per location.
-
-Right-click a row to open the same actions shown in its `…` menu: browse folders, open documents in their default app, or reveal items in Finder or Explorer. Renaming a league from its `…` menu changes the name shown in the app and, when the sanitised name differs, renames its folder and its `_archives` folder to match. Deleting a league or season asks you to type its name, then moves the whole folder, including unmanaged files, to the OS trash. The same menus zip archived seasons.
-
-On macOS, use ⇧⌘O to open a location, ⌘R to refresh and ⌘F to focus the filter. On Windows, use Ctrl+Shift+O, Ctrl+R and Ctrl+F. In file lists, press Enter to open the selected item and use the arrow keys to move between rows.
-
-The status bar shows the current path and any pending activity. Completion toasts report whether an action succeeded or failed.
-
-At the root of any live season, **Sync with templates** adds only the template filenames that are missing. It never creates numbered duplicates, and archives and subfolders don't offer it.
+The user guide lives in `resources/docs` as markdown topics and ships inside the app as the help
+window. Open it from the Help menu, with ⌘? on macOS or F1 on Windows and Linux, or from the
+**Learn more** links beside the season naming rules and the location picker. Each topic carries
+frontmatter with a `status` of `draft` or `verified`; drafts are hidden in packaged builds and shown
+with a badge during development. See [docs/help.md](docs/help.md) for the loader contract.
 
 ## Development
 
