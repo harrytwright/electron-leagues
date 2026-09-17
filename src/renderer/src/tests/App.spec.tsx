@@ -755,11 +755,11 @@ it('refetches a previously visited folder after switching away and back', async 
   let menu = await screen.findByRole('menu')
   await user.click(await within(menu).findByRole('menuitemradio', { name: /^b/ }))
   await screen.findByRole('heading', { name: 'Home' })
-  // Radio items leave the menu open, so it is reused rather than reopened. Its items are
-  // disabled until the switch has finished, which the cleared activity region confirms.
+  // Items stay disabled until the switch has finished, which the cleared activity region confirms.
   await waitFor(() =>
     expect(screen.getByRole('status', { name: 'Application activity' })).toBeEmptyDOMElement()
   )
+  await user.click(screen.getByRole('button', { name: 'Location: b' }))
   menu = await screen.findByRole('menu')
   await user.click(await within(menu).findByRole('menuitemradio', { name: /^a/ }))
   await screen.findByRole('heading', { name: 'Pairs' })
@@ -856,7 +856,9 @@ it('prunes a missing recent root and keeps the current location', async () => {
   expect(screen.getByRole('button', { name: 'Location: a' })).toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Pairs' })).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Location: a' }))
-  expect(screen.queryByRole('menuitemradio', { name: /^gone/ })).not.toBeInTheDocument()
+  const menu = await screen.findByRole('menu')
+  expect(await within(menu).findByRole('menuitemradio', { name: /^a/ })).toBeInTheDocument()
+  expect(within(menu).queryByRole('menuitemradio', { name: /^gone/ })).not.toBeInTheDocument()
   expect(api.scan).toHaveBeenCalledOnce()
 })
 

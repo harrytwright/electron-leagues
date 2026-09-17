@@ -12,7 +12,10 @@ const CURRENT = '/Users/me/LeagueDocs'
 const USB = '/Volumes/USB/leagues'
 
 async function openMenu(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
-  await user.click(screen.getByRole('button', { name: 'Location: LeagueDocs' }))
+  const trigger = screen.getByRole('button', { name: 'Location: LeagueDocs' })
+  // Clicking the trigger toggles, so an open menu would close instead.
+  expect(trigger).toHaveAttribute('aria-expanded', 'false')
+  await user.click(trigger)
   return screen.findByRole('menu')
 }
 
@@ -72,6 +75,7 @@ it('switches to a recent location and asks for a rescan', async () => {
   const menu = await openMenu(user)
   await user.click(await within(menu).findByRole('menuitemradio', { name: /^leagues/ }))
 
+  await waitFor(() => expect(screen.queryByRole('menu')).not.toBeInTheDocument())
   expect(api.setRoot).toHaveBeenCalledWith(USB)
   await waitFor(() => expect(window.api.scan).toHaveBeenCalledOnce())
   expect(await screen.findByText('Opened location')).toBeInTheDocument()
