@@ -1,18 +1,6 @@
-import { afterEach, expect, test } from 'vitest'
+import { expect, test } from 'vitest'
 import { appShortcutAria, appShortcutLabel, revealLabel, trashLabel } from '../os-labels'
-
-function pretendPlatform(platform: string): void {
-  Object.defineProperty(window, 'electron', {
-    value: { process: { platform } },
-    configurable: true,
-    writable: true
-  })
-}
-
-afterEach(() => {
-  // SAFETY: tests never define the bridge otherwise; removing it restores the default.
-  delete (window as { electron?: unknown }).electron
-})
+import { pretendPlatform } from '../../tests/mock-platform'
 
 test.each([
   ['darwin', 'Show in Finder', 'Trash'],

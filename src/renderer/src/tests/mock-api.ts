@@ -91,6 +91,9 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
       apiKey: null,
       distinctId: 'test'
     }),
+    openPermissionSettings: vi
+      .fn<RendererApi['openPermissionSettings']>()
+      .mockResolvedValue(undefined),
     getRoot: vi.fn<RendererApi['getRoot']>().mockResolvedValue(null),
     // Echo the path back, like the real handler does for a folder that exists.
     setRoot: vi.fn<RendererApi['setRoot']>((path) => Promise.resolve(path)),

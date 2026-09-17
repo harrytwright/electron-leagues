@@ -192,6 +192,20 @@ function registerIpc(): void {
     distinctId: machineId()
   }))
 
+  register('openPermissionSettings', async () => {
+    if (process.platform !== 'darwin') return
+    Sentry.addBreadcrumb({
+      category: 'permissions',
+      level: 'info',
+      message: 'Opening System Settings for folder access'
+    })
+    // Deep-links System Settings → Privacy & Security → Files and Folders; verified on macOS 26.
+    await shell.openExternal(
+      'x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_FilesAndFolders'
+    )
+    capture('permission_settings_opened')
+  })
+
   register('getRoot', () => currentRoot() ?? null)
 
   register('chooseRoot', async (_e, mode) => {

@@ -1,3 +1,5 @@
+import { PERMISSION_DENIED_MESSAGE } from '../../shared/fs-messages'
+
 /** An expected failure the user can act on: shown as a message, never reported as a bug. */
 export class UserFacingError extends Error {}
 
@@ -31,7 +33,7 @@ export function toUserFacing(err: unknown): Error {
   if (err instanceof UserFacingError) return err
   if (isMissing(err)) return new UserFacingError('That folder no longer exists')
   if (isPermissionDenied(err)) {
-    return new UserFacingError('That folder can’t be read or changed (permission denied)')
+    return new UserFacingError(PERMISSION_DENIED_MESSAGE)
   }
   if (errorCode(err) === 'ENOSPC') {
     return new UserFacingError('There isn’t enough free space to complete that operation')

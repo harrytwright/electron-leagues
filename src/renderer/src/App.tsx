@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { skipToken, useQuery, type QueryClient, type UseQueryResult } from '@tanstack/react-query'
+import { isPermissionDeniedMessage } from '@shared/fs-messages'
 import { AppProviders } from './components/AppProviders'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
+import { ErrorState } from './components/ErrorState'
 import { PaneErrorBoundary } from './components/PaneErrorBoundary'
 import { WorkspaceStoreProvider } from './components/WorkspaceStoreProvider'
 import { Button, Loader, Sidebar as KumoSidebar, Text } from '@cloudflare/kumo'
@@ -14,6 +16,7 @@ import { Toolbar } from './components/Toolbar'
 import { OperationFeedbackProvider } from './components/OperationFeedbackProvider'
 import { LocationOperationProvider } from './components/LocationOperationProvider'
 import { ipcErrorMessage } from './lib/ipc-error'
+import { currentPlatform } from './lib/platform'
 import { findLeague, HOME, restoreSelection } from './lib/selection'
 import type { WorkspaceStore } from './lib/workspace-store'
 import { useWorkspace } from './hooks/use-workspace'
@@ -55,6 +58,15 @@ function ApplicationActivity({ visible }: { visible: boolean }): React.JSX.Eleme
 
 function ScanError({ message, onRetry, onChooseAnother }: ScanErrorProps): React.JSX.Element {
   const [busy, setBusy] = useState(false)
+  const onMac = currentPlatform() === 'darwin'
+  const permissionDenied = message !== null && isPermissionDeniedMessage(message)
+  const showPermissionSettings = permissionDenied && onMac
+  const title = permissionDenied ? 'Folder access is blocked' : 'Couldn’t read the leagues folder'
+  const description = permissionDenied
+    ? onMac
+      ? 'macOS is blocking this app from reading the folder. Grant access under Privacy & Security, Files and Folders, then try again.'
+      : 'The folder’s permissions are blocking this app from reading it. Check the folder’s permissions, then try again.'
+    : message
 
   const run = async (action: () => Promise<void>): Promise<void> => {
     setBusy(true)
@@ -66,17 +78,25 @@ function ScanError({ message, onRetry, onChooseAnother }: ScanErrorProps): React
   }
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-4 bg-kumo-base">
-      <div role="alert" className="grid max-w-md gap-1.5 text-center">
-        <Text as="h1" variant="heading">
-          Couldn’t read the leagues folder
-        </Text>
-        <Text variant="secondary">{message}</Text>
-      </div>
-      <div className="flex gap-3">
+    <ErrorState>
+      <ErrorState.Title>{title}</ErrorState.Title>
+      <ErrorState.Message>{description}</ErrorState.Message>
+      <ErrorState.Actions>
+        {showPermissionSettings ? (
+          <Button
+            variant="primary"
+            autoFocus
+            onClick={() => {
+              // The main process already reports failures to open System Settings.
+              void window.api.openPermissionSettings().catch(() => {})
+            }}
+          >
+            Open System Settings
+          </Button>
+        ) : null}
         <Button
-          variant="primary"
-          autoFocus
+          variant={showPermissionSettings ? 'secondary' : 'primary'}
+          autoFocus={!showPermissionSettings}
           loading={busy}
           disabled={busy}
           onClick={() => void run(onRetry)}
@@ -86,8 +106,8 @@ function ScanError({ message, onRetry, onChooseAnother }: ScanErrorProps): React
         <Button disabled={busy} onClick={() => void run(onChooseAnother)}>
           Choose another folder
         </Button>
-      </div>
-    </div>
+      </ErrorState.Actions>
+    </ErrorState>
   )
 }
 

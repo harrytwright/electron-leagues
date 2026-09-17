@@ -26,6 +26,7 @@ export interface ImportFilesResult {
 export interface InvokeOutputs {
   getAppUpdateStatus: AppUpdateStatus
   getAnalyticsConfig: { apiKey: string | null; distinctId: string }
+  openPermissionSettings: void
   getRoot: string | null
   chooseRoot: string | null
   forgetRoot: void
@@ -62,6 +63,11 @@ export const invokeDefinitions = {
     channel: 'analytics:config',
     args: z.tuple([]),
     failureMessage: 'Invalid analytics request'
+  },
+  openPermissionSettings: {
+    channel: 'permissions:open-settings',
+    args: z.tuple([]),
+    failureMessage: 'Invalid permission settings request'
   },
   getRoot: {
     channel: 'root:get',

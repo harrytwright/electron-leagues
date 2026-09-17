@@ -1,6 +1,7 @@
-import { Button, Text } from '@cloudflare/kumo'
+import { Button } from '@cloudflare/kumo'
 import { ErrorBoundary } from 'react-error-boundary'
 import { reportRenderError } from '../lib/analytics'
+import { ErrorState } from './ErrorState'
 
 export function AppErrorBoundary({
   children,
@@ -18,24 +19,17 @@ export function AppErrorBoundary({
         )
       }
       fallbackRender={({ error }) => (
-        <div
-          role="alert"
-          className="flex h-full items-center justify-center bg-kumo-base px-6 py-5"
-        >
-          <div className="grid max-w-md justify-items-center gap-4 text-center">
-            <div className="grid gap-1.5">
-              <Text as="h1" variant="heading">
-                Something went wrong
-              </Text>
-              <Text variant="secondary">
-                {error instanceof Error ? error.message : String(error)}
-              </Text>
-            </div>
+        <ErrorState>
+          <ErrorState.Title>Something went wrong</ErrorState.Title>
+          <ErrorState.Message>
+            {error instanceof Error ? error.message : String(error)}
+          </ErrorState.Message>
+          <ErrorState.Actions>
             <Button variant="primary" onClick={() => onReload()}>
               Reload
             </Button>
-          </div>
-        </div>
+          </ErrorState.Actions>
+        </ErrorState>
       )}
     >
       {children}

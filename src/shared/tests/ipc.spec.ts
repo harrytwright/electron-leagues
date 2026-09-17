@@ -43,6 +43,7 @@ describe('invoke definitions', () => {
 
   test.each([
     ['getAnalyticsConfig', [null], 'Invalid analytics request'],
+    ['openPermissionSettings', [null], 'Invalid permission settings request'],
     ['getRoot', [null], 'Invalid location request'],
     ['chooseRoot', [], 'Invalid location request'],
     ['forgetRoot', [null], 'Invalid location request'],

@@ -9,6 +9,7 @@ import {
 } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
+import { PERMISSION_DENIED_MESSAGE } from '@shared/fs-messages'
 import type { LeaguesTree } from '@shared/tree'
 import App from '../App'
 import { createQueryClient } from '../lib/query-client'
@@ -29,6 +30,17 @@ import {
   treeChangedListenerCount,
   type RendererApi
 } from './mock-api'
+import { pretendPlatform } from './mock-platform'
+
+const KUMO_EMPHASIS_CLASS = 'bg-(--kumo-button-emphasis-bg)'
+
+function expectEmphasised(button: HTMLElement, emphasised: boolean): void {
+  if (emphasised) {
+    expect(button).toHaveClass(KUMO_EMPHASIS_CLASS)
+  } else {
+    expect(button).not.toHaveClass(KUMO_EMPHASIS_CLASS)
+  }
+}
 
 function renderApp(): RenderResult & { workspaceStore: WorkspaceStore } {
   const queryClient = registerTestQueryClient(createQueryClient())
@@ -382,6 +394,79 @@ it('shows a recoverable error when the scan fails, and retries', async () => {
 
   expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
   expect(scan).toHaveBeenCalledTimes(2)
+})
+
+it('explains a permission-denied scan failure without macOS settings on Linux', async () => {
+  const scan = vi
+    .fn()
+    .mockRejectedValue(
+      new Error(`Error invoking remote method 'leagues:scan': Error: ${PERMISSION_DENIED_MESSAGE}`)
+    )
+  installScannedRoot('/root', { scan })
+
+  renderApp()
+
+  expect(
+    await screen.findByRole('heading', { name: 'Folder access is blocked' })
+  ).toBeInTheDocument()
+  expect(
+    screen.getByText(
+      'The folder’s permissions are blocking this app from reading it. Check the folder’s permissions, then try again.'
+    )
+  ).toBeInTheDocument()
+  expect(screen.queryByText(PERMISSION_DENIED_MESSAGE)).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Open System Settings' })).not.toBeInTheDocument()
+  expectEmphasised(screen.getByRole('button', { name: 'Try again' }), true)
+})
+
+it('opens macOS permission settings and still retries the scan', async () => {
+  pretendPlatform('darwin')
+  const scan = vi
+    .fn()
+    .mockRejectedValueOnce(
+      new Error(`Error invoking remote method 'leagues:scan': Error: ${PERMISSION_DENIED_MESSAGE}`)
+    )
+    .mockResolvedValue(makeTree())
+  const api = installScannedRoot('/root', { scan })
+  const user = userEvent.setup()
+
+  renderApp()
+
+  expect(
+    await screen.findByText(
+      'macOS is blocking this app from reading the folder. Grant access under Privacy & Security, Files and Folders, then try again.'
+    )
+  ).toBeInTheDocument()
+  const settings = screen.getByRole('button', { name: 'Open System Settings' })
+  expectEmphasised(settings, true)
+  expect(document.activeElement).toBe(settings)
+  const retry = screen.getByRole('button', { name: 'Try again' })
+  expectEmphasised(retry, false)
+
+  await user.click(settings)
+  expect(api.openPermissionSettings).toHaveBeenCalledExactlyOnceWith()
+  expect(scan).toHaveBeenCalledOnce()
+
+  await user.click(retry)
+  expect(await screen.findByRole('heading', { name: 'Home' })).toBeInTheDocument()
+  expect(scan).toHaveBeenCalledTimes(2)
+})
+
+it('keeps retry available when opening permission settings fails', async () => {
+  pretendPlatform('darwin')
+  const api = installScannedRoot('/root', {
+    scan: vi.fn().mockRejectedValue(new Error(PERMISSION_DENIED_MESSAGE)),
+    openPermissionSettings: vi.fn().mockRejectedValue(new Error('Couldn’t open System Settings'))
+  })
+  const user = userEvent.setup()
+  renderApp()
+
+  await user.click(await screen.findByRole('button', { name: 'Open System Settings' }))
+
+  expect(api.openPermissionSettings).toHaveBeenCalledExactlyOnceWith()
+  expect(api.scan).toHaveBeenCalledOnce()
+  expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled()
+  expect(screen.getByRole('button', { name: 'Choose another folder' })).toBeEnabled()
 })
 
 it('shows one scan error when a league overview refresh fails', async () => {
