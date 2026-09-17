@@ -6,6 +6,13 @@ export type RendererApi = LeaguesApi
 
 let treeChangedListeners: Array<() => void> = []
 let appCommandListeners: Parameters<RendererApi['onAppCommand']>[0][] = []
+let appUpdateListeners: Parameters<RendererApi['onAppUpdateChanged']>[0][] = []
+
+export function emitAppUpdateChanged(
+  status: Awaited<ReturnType<RendererApi['getAppUpdateStatus']>>
+): void {
+  for (const listener of appUpdateListeners) listener(status)
+}
 
 /** Fire the tree:changed event into whatever the component under test registered. */
 export function emitTreeChanged(): void {
@@ -23,7 +30,18 @@ export function emitAppCommand(event: AppCommandEvent): void {
 export function installMockApi(overrides: Partial<RendererApi> = {}): RendererApi {
   treeChangedListeners = []
   appCommandListeners = []
+  appUpdateListeners = []
   const api: RendererApi = {
+    getAppUpdateStatus: vi.fn<RendererApi['getAppUpdateStatus']>().mockResolvedValue({
+      version: '0.2.3',
+      readyVersion: null
+    }),
+    onAppUpdateChanged: vi.fn<RendererApi['onAppUpdateChanged']>((listener) => {
+      appUpdateListeners.push(listener)
+      return () => {
+        appUpdateListeners = appUpdateListeners.filter((item) => item !== listener)
+      }
+    }),
     diagnosticsChanged: vi.fn<RendererApi['diagnosticsChanged']>(),
     getRendererMetrics: vi.fn<RendererApi['getRendererMetrics']>(() => ({
       usedHeapKilobytes: 43008,

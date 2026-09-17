@@ -6,6 +6,7 @@ import { pathTail } from '@renderer/lib/path-basename'
 import { useOperationFeedback } from '@renderer/hooks/use-operation-feedback'
 import { IconButton } from '../IconButton'
 import { DiagnosticsMetrics } from './components/DiagnosticsMetrics'
+import { VersionTag } from './components/VersionTag/VersionTag'
 
 import type { Props } from './interface'
 
@@ -38,6 +39,7 @@ export function StatusBar({ path }: Props): React.JSX.Element {
       <div className="max-w-64 min-w-0 truncate" data-operation-activity>
         {activity ? <Text variant="secondary">{activity.label}…</Text> : null}
       </div>
+      <VersionTag />
       <DiagnosticsMetrics enabled={diagnostics} />
       <DropdownMenu>
         <DropdownMenu.Trigger

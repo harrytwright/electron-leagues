@@ -1,6 +1,7 @@
 import { electronAPI } from '@electron-toolkit/preload'
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AppCommandEvent } from '../shared/app-command'
+import type { AppUpdateStatus } from '../shared/app-update'
 import {
   invokeDefinitions,
   type InvokeApi,
@@ -31,6 +32,12 @@ const invokeApi = Object.fromEntries(
 
 const api = {
   ...invokeApi,
+  onAppUpdateChanged: (listener: (status: AppUpdateStatus) => void): (() => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, status: AppUpdateStatus): void =>
+      listener(status)
+    ipcRenderer.on('app:update-changed', wrapped)
+    return () => ipcRenderer.removeListener('app:update-changed', wrapped)
+  },
   getRendererMetrics,
   diagnosticsChanged: (enabled: boolean): void => ipcRenderer.send('diagnostics:changed', enabled),
   pathForFile: (file: File): string => webUtils.getPathForFile(file),

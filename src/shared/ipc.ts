@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { DirEntry, LeaguesTree } from './tree'
+import type { AppUpdateStatus } from './app-update'
 import {
   leagueFolderSchema,
   seasonCreateRequestSchema,
@@ -23,6 +24,7 @@ export interface ImportFilesResult {
 }
 
 export interface InvokeOutputs {
+  getAppUpdateStatus: AppUpdateStatus
   getAnalyticsConfig: { apiKey: string | null; distinctId: string }
   getRoot: string | null
   chooseRoot: string | null
@@ -51,6 +53,11 @@ interface InvokeDefinition {
 }
 
 export const invokeDefinitions = {
+  getAppUpdateStatus: {
+    channel: 'app:update-status',
+    args: z.tuple([]),
+    failureMessage: 'Invalid app update request'
+  },
   getAnalyticsConfig: {
     channel: 'analytics:config',
     args: z.tuple([]),

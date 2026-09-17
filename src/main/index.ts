@@ -1,11 +1,13 @@
 import { electronApp, is } from '@electron-toolkit/utils'
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from 'electron'
 import Store from 'electron-store'
+import { autoUpdater } from 'electron-updater'
 import { randomUUID } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import icon from '../../resources/icon.png?asset'
 import { updateDiagnosticsMenu } from './lib/diagnostics-menu'
+import { createAppUpdates } from './lib/app-updates'
 import {
   buildAppMenuTemplate,
   buildEditableContextMenuTemplate,
@@ -89,6 +91,11 @@ function bundledTemplatesDir(): string {
 
 let mainWindow: BrowserWindow | null = null
 let rootWatcher: RootWatcher | null = null
+const appUpdates = createAppUpdates(
+  app.getVersion(),
+  (status) => mainWindow?.webContents.send('app:update-changed', status),
+  (error) => console.warn('Could not update the app:', error)
+)
 
 function stopWatching(): void {
   void rootWatcher?.close()
@@ -169,6 +176,7 @@ function diagnosticsMenuItem(): Electron.MenuItem | undefined {
 }
 
 function registerIpc(): void {
+  register('getAppUpdateStatus', () => appUpdates.getStatus())
   ipcMain.on('diagnostics:changed', (event, enabled) => {
     updateDiagnosticsMenu(
       event.sender,
@@ -419,6 +427,10 @@ app.whenReady().then(() => {
 
   registerIpc()
   createWindow()
+  if (app.isPackaged && (process.platform !== 'linux' || process.env.APPIMAGE)) {
+    const stopUpdates = appUpdates.start(autoUpdater)
+    app.once('will-quit', stopUpdates)
+  }
   Menu.setApplicationMenu(
     Menu.buildFromTemplate(
       buildAppMenuTemplate(process.platform, is.dev, (command) => {

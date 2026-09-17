@@ -2,7 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 import { renderWithProviders } from '../../tests/render-helpers'
-import { emitAppCommand, installMockApi } from '../../tests/mock-api'
+import { emitAppCommand, emitAppUpdateChanged, installMockApi } from '../../tests/mock-api'
 import { StatusBar } from './index'
 import { useOperationFeedback } from '@renderer/hooks/use-operation-feedback'
 import { useAppCommands } from '@renderer/hooks/use-app-commands'
@@ -43,6 +43,55 @@ async function enableDiagnostics(user: ReturnType<typeof userEvent.setup>): Prom
   const menu = await screen.findByRole('menu')
   await user.click(within(menu).getByRole('menuitemcheckbox', { name: 'Show diagnostics' }))
 }
+
+it('shows the installed version with diagnostics disabled and beside them when enabled', async () => {
+  renderStatus()
+  const version = await screen.findByLabelText('Current app version 0.2.3')
+  expect(version).toHaveTextContent('v0.2.3')
+  expect(screen.queryByText('Ready to install')).not.toBeInTheDocument()
+
+  await enableDiagnostics(userEvent.setup())
+  const metrics = await screen.findByText('Heap 42 MB')
+  expect(version.compareDocumentPosition(metrics) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+})
+
+it('shows a downloaded update without replacing the installed version', async () => {
+  renderStatus()
+  await screen.findByText('v0.2.3')
+
+  act(() => emitAppUpdateChanged({ version: '0.2.3', readyVersion: '0.2.4' }))
+
+  expect(await screen.findByText('Ready to install')).toBeVisible()
+  expect(screen.getByText('v0.2.3')).toBeVisible()
+  const tag = screen.getByLabelText(/Version 0.2.4 is ready to install/)
+  await userEvent.setup().hover(tag)
+  expect(await screen.findByText(/Quit and reopen the app to apply the update\./)).toBeVisible()
+})
+
+it('does not let an older snapshot overwrite a downloaded update', async () => {
+  const snapshot =
+    Promise.withResolvers<Awaited<ReturnType<typeof window.api.getAppUpdateStatus>>>()
+  const api = installMockApi({ getAppUpdateStatus: vi.fn(() => snapshot.promise) })
+  renderStatus()
+  expect(api.getAppUpdateStatus).toHaveBeenCalledOnce()
+
+  act(() => emitAppUpdateChanged({ version: '0.2.3', readyVersion: '0.2.4' }))
+  expect(await screen.findByText('Ready to install')).toBeVisible()
+  await act(async () => snapshot.resolve({ version: '0.2.3', readyVersion: null }))
+  expect(screen.getByText('Ready to install')).toBeVisible()
+})
+
+it('restores a ready update from the main process after remounting', async () => {
+  const api = installMockApi()
+  const view = renderStatus()
+  await screen.findByText('v0.2.3')
+  view.unmount()
+  vi.mocked(api.getAppUpdateStatus).mockResolvedValue({ version: '0.2.3', readyVersion: '0.2.4' })
+
+  renderStatus()
+
+  expect(await screen.findByText('Ready to install')).toBeVisible()
+})
 
 it('shows the last three POSIX segments while retaining the complete path title', () => {
   const api = installMockApi()

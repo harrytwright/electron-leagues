@@ -29,6 +29,8 @@ mac:
   target:
     - target: dmg
       arch: arm64
+    - target: zip
+      arch: arm64
   # Signed with the Developer ID in CSC_LINK and notarised through the App Store
   # Connect API key (APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER).
   # Signing is not optional: an unsigned build cannot auto-update on macOS.
