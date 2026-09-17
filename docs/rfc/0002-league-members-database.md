@@ -142,6 +142,8 @@ interface SeasonFile {
   /** Set on the Settings tab after creation. Not printed; kept for look-up. */
   fees?: { total: number; breakdown: { label: string; amount: number }[] }
   subFee?: number
+  /** This season's id on LeagueSecretary.com. Filled by a later lookup feature, not here. */
+  leagueSecretaryId?: string
   teams: Team[]
   players: Player[]
 }
@@ -159,10 +161,26 @@ interface Player {
   /** null = sub for this league this season. */
   teamId: string | null
   position?: number
+  /** This bowler's id in this season on LeagueSecretary.com. Filled by a later lookup, not here. */
+  leagueSecretaryId?: string
 }
 ```
 
 No `extra`: fields are added at a version bump, not ad hoc.
+
+#### External ids
+
+`leagueSecretaryId` on a season and on a roster row are the only fields that point outside
+the folder tree and BLS. They are optional and nothing in this RFC reads or writes them. They
+are reserved for a later feature that fetches season standings and basic player data from
+LeagueSecretary.com through the app, to follow how bowlers are getting on across a season.
+That feature resolves a season's id once, then matches each roster row to a LeagueSecretary
+bowler by normalised name and aliases (the same matching the MBD sync uses) and stores the
+id it finds, so name matching only ever happens before an id is known. The bowler id lives on
+the roster row, not the member, because LeagueSecretary issues it per league season: the
+same person has a different id in each league they bowl. `mbdIds` stays the key for BLS; the
+two are never derived from each other. The lookup itself, its endpoint and any fetched data
+are out of scope here and would be their own RFC.
 
 #### Reserved names and the file browser
 
