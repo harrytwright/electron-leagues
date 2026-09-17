@@ -11,7 +11,10 @@ const CURRENT = '/Users/me/LeagueDocs'
 const USB = '/Volumes/USB/leagues'
 
 async function openMenu(user: ReturnType<typeof userEvent.setup>): Promise<HTMLElement> {
-  await user.click(screen.getByRole('button', { name: 'Location: LeagueDocs' }))
+  const trigger = screen.getByRole('button', { name: 'Location: LeagueDocs' })
+  // Clicking the trigger toggles, so an open menu would close instead.
+  expect(trigger).toHaveAttribute('aria-expanded', 'false')
+  await user.click(trigger)
   return screen.findByRole('menu')
 }
 
@@ -105,8 +108,8 @@ it('reports a missing location even when refreshing recents also fails', async (
 
   expect(await screen.findByText(`“leagues” is no longer available at ${USB}`)).toBeInTheDocument()
   await waitFor(() => expect(recentRoots).toHaveBeenCalledTimes(2))
-  const reopened = await openMenu(user)
-  expect(await within(reopened).findByRole('menuitem', { name: 'Recents failed' })).toHaveAttribute(
+  // Choosing a radio item leaves the menu open, so the refreshed error shows in place.
+  expect(await within(menu).findByRole('menuitem', { name: 'Recents failed' })).toHaveAttribute(
     'aria-disabled',
     'true'
   )
