@@ -2,12 +2,12 @@
 Status: Accepted
 Author: Claude
 Created: 2026-09-06
-Updated: 2026-09-09
+Updated: 2026-09-17
 Baseline: TBC
 Reviewer: Harry Wright <haroldtomwright@gmail.com>
 ---
 
-# RFC 0001: League members database
+# RFC 0002: League members database
 
 > Supersedes: The export-driven draft at `docs/members-database-design.md` (removed)
 
@@ -66,11 +66,16 @@ membership rule, social members via a merged spreadsheet, the SBC Members system
   change. Existing documents are never overwritten; app-owned files (`meta.json`, generated
   output) are the exception and are rewritten freely.
 - Reserved folders are underscore-prefixed. League names can't start with `_`.
-- Everything touching disk runs in main behind `assertInsideRoot` / `resolveLiveSeasonRoot`;
-  the renderer only sees typed IPC results.
+- Everything touching disk runs in main behind `assertInsideRoot` / `resolveLiveSeasonRoot`.
+  The IPC contract is the `invokeDefinitions` table in `src/shared/ipc.ts`: every channel
+  declares a zod schema for its arguments and a result type in `InvokeOutputs`, and the
+  preload API is generated from that table. New channels are added there, not to preload.
+- App-owned JSON is written through the `league-meta.ts` guard: refuse a symlink at the
+  target, serialise, compare with what was read, and write only on change.
 - Two machines, two users, rarely concurrent. Writes must survive the odd OneDrive conflict
   copy without corrupting anything; they don't need to prevent it.
-- The watcher already rescans on any change under the root (depth 6, 500 ms debounce).
+- The watcher (`src/main/lib/watcher.ts`) already rescans on any change under the root
+  (depth 6, 500 ms debounce) and falls back to 2 s polling where OneDrive refuses `fs.watch`.
 
 ### Files
 
@@ -172,8 +177,9 @@ No `extra`: fields are added at a version bump, not ad hoc.
 #### Concurrency and healing
 
 - Every write re-reads the file first and takes the in-process lock (the `withTemplateLock`
-  pattern keyed on the root). If the file on disk changed since the editor loaded it, the
-  editor reloads and says so rather than overwriting.
+  pattern keyed on the root), then goes through the same symlink-refusing, compare-then-write
+  guard as the league `meta.json`. If the file on disk changed since the editor loaded it,
+  the editor reloads and says so rather than overwriting.
 - The scan reads all members files on every run and reports, never repairs: duplicate member
   numbers (from a conflict copy), roster rows whose `memberId` is unknown ("Unlinked"), teams
   referenced by no player, members missing DoB or contact ("Needs details"). Each shows in the
@@ -212,9 +218,12 @@ team), start date, weeks played, and two ticks:
 
 - _Copy documents from previous season_ — on by default when a previous season exists. Ticked
   runs today's `previous` workflow (previous files, then fill from templates); unticked runs
-  `templates`. The `empty` workflow is removed.
+  `templates`. The `empty` workflow is removed from `WORKFLOW_IDS` in `src/shared/workflows.ts`.
 - _Carry over teams and players_ — only offered when a previous season exists, on by default.
   Copies `teams` (ids, names and last year's `teamNo`) and `players` into the new season file.
+
+`seasonCreateRequestSchema` in `src/shared/season-create.ts` gains `format` and
+`carryOverRoster`; `source` narrows to `templates | previous`.
 
 Fees, team numbers and roster changes are made afterwards on the season's tabs. A team's `id`
 is created once, when the team is created, and follows it across seasons; `teamNo` is set for
@@ -320,27 +329,32 @@ These exist to bridge to the SBC Members system and are expected to move or go. 
 
 `schemaVersion` on both files is what a migrator will read.
 
-### IPC surface (preload additions)
+### IPC surface
 
-```ts
-membersEnabled: () => Promise<boolean>
-enableMembers: () => Promise<void> // creates members.json
-membersSnapshot: () => Promise<MembersSnapshot | null> // master + all season files, derived joins
-saveMember: (member: MemberInput) => Promise<Member> // create (mints) or update
-mergeMembers: (fromId: number, intoId: number) => Promise<void>
-deleteMember: (id: number) => Promise<'hard' | 'soft'>
-saveSeason: (target: SeasonRef, file: SeasonFile) => Promise<void>
-previewMapping: (sourcePath: string) => Promise<MappingPreview>
-syncMbd: (sourcePath: string, mapping: Mapping, decisions: SyncDecision[]) => Promise<SyncSummary>
-addPlayersFromExport: (target: SeasonRef, sourcePath: string, mapping: Mapping) =>
-  Promise<ImportSummary>
-openSignInSheet: (target: SeasonRef) => Promise<string> // generates if missing/stale, returns path
-printCards: (ids: number[]) => Promise<string>
-exportMembersCsv: (filter: MembersFilter) => Promise<string>
-```
+New entries in `invokeDefinitions`, each with a zod argument schema and an `InvokeOutputs`
+type; the preload methods follow from the table.
 
-`SeasonRef` is `{ day, leagueFolder, seasonName }`, validated by `resolveLiveSeasonRoot`. The
-snapshot is small (hundreds of members, tens of seasons) so one object over IPC replaces
+| Name                   | Channel                 | Arguments                                 | Result                    |
+| ---------------------- | ----------------------- | ----------------------------------------- | ------------------------- |
+| `membersEnabled`       | `members:enabled`       | none                                      | `boolean`                 |
+| `enableMembers`        | `members:enable`        | none                                      | `void` (creates the file) |
+| `membersSnapshot`      | `members:snapshot`      | none                                      | `MembersSnapshot \| null` |
+| `saveMember`           | `members:save`          | `MemberInput`                             | `Member`                  |
+| `mergeMembers`         | `members:merge`         | `fromId`, `intoId`                        | `void`                    |
+| `deleteMember`         | `members:delete`        | `id`                                      | `'hard' \| 'soft'`        |
+| `saveSeason`           | `season:save`           | `SeasonRef`, `SeasonFile`                 | `void`                    |
+| `previewMapping`       | `import:preview`        | `sourcePath`                              | `MappingPreview`          |
+| `syncMbd`              | `members:sync-mbd`      | `sourcePath`, `Mapping`, `SyncDecision[]` | `SyncSummary`             |
+| `addPlayersFromExport` | `season:import-players` | `SeasonRef`, `sourcePath`, `Mapping`      | `ImportSummary`           |
+| `openSignInSheet`      | `season:sign-in-sheet`  | `SeasonRef`                               | path (generated if stale) |
+| `printCards`           | `members:print-cards`   | `id[]`                                    | path                      |
+| `exportMembersCsv`     | `members:export-csv`    | `MembersFilter`                           | path                      |
+
+`SeasonRef` is the existing `seasonSyncRequestSchema` shape (`day`, `leagueFolder`,
+`seasonName`), validated in main by `resolveLiveSeasonRoot`. `SyncSummary` and
+`ImportSummary` follow the partial-result shape of `ZipArchiveResult` and
+`ImportFilesResult`: counts of what succeeded plus a `failed` list naming each row that did
+not, so one bad row never discards a batch. The snapshot is small (hundreds of members, tens of seasons) so one object over IPC replaces
 queries; the renderer groups and filters in memory. Analytics: `members_enabled`,
 `member_created`, `members_merged`, `mbd_synced { rows, created, merged }`,
 `players_imported { rows }`, `signin_generated`, `cards_printed { count }`.
