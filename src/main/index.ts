@@ -49,6 +49,15 @@ import {
   saveMember,
   saveSeason
 } from './lib/members'
+import {
+  addPlayersFromExport,
+  planPlayersImport,
+  planSync,
+  previewImport,
+  rememberMapping,
+  syncMbd,
+  type MappingMemory
+} from './lib/imports'
 import { renderPdfWithElectron } from './lib/pdf'
 import { listDirEntries, scanLeaguesRoot } from './lib/scanner'
 import { refreshSignInSheet, signInSheetPath, signInSheetState } from './lib/sign-in-sheet'
@@ -58,6 +67,8 @@ import * as Sentry from '@sentry/electron/main'
 
 interface Settings {
   rootPath?: string
+  /** Column mappings from earlier bowler exports, per location and header layout. */
+  importMappings?: MappingMemory[]
   /** Most-recently-used first; the last activated root is at index 0. */
   recentRoots?: string[]
   posthogKey?: string
@@ -451,6 +462,99 @@ function registerIpc(): void {
     capture('signin_opened', { generated: state !== 'fresh' })
     return path
   })
+
+  register('pickImportFile', async () => {
+    if (!mainWindow) return null
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Choose a bowler export',
+      properties: ['openFile'],
+      filters: [{ name: 'Exports', extensions: ['csv', 'tsv', 'txt'] }]
+    })
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
+  })
+
+  register('previewImport', (_e, path) =>
+    previewImport(requireRoot(), path, store.get('importMappings') ?? [])
+  )
+
+  register('planMbdSync', async (_e, path, mapping) => {
+    const root = requireRoot()
+    const { plan, revision, sourceRevision, signature } = await planSync(root, path, mapping)
+    store.set(
+      'importMappings',
+      rememberMapping(store.get('importMappings') ?? [], { root, signature, mapping })
+    )
+    return { plan, revision, sourceRevision }
+  })
+
+  register('syncMbd', async (_e, path, mapping, decisions, revision, sourceRevision) => {
+    const summary = await syncMbd(requireRoot(), {
+      path,
+      mapping,
+      decisions,
+      revision,
+      sourceRevision
+    })
+    capture('mbd_synced', { rows: summary.rows, created: summary.created, merged: summary.merged })
+    return summary
+  })
+
+  register('planPlayersImport', async (_e, ref, path, mapping) => {
+    const root = requireRoot()
+    const result = await planPlayersImport(root, ref, path, mapping)
+    store.set(
+      'importMappings',
+      rememberMapping(store.get('importMappings') ?? [], {
+        root,
+        signature: result.signature,
+        mapping
+      })
+    )
+    return {
+      plan: result.plan,
+      membersRevision: result.membersRevision,
+      seasonRevision: result.seasonRevision,
+      sourceRevision: result.sourceRevision
+    }
+  })
+
+  register(
+    'addPlayersFromExport',
+    async (
+      _e,
+      ref,
+      path,
+      mapping,
+      createLines,
+      membersRevision,
+      seasonRevision,
+      sourceRevision
+    ) => {
+      const root = requireRoot()
+      const summary = await addPlayersFromExport(root, {
+        ref,
+        path,
+        mapping,
+        createLines,
+        membersRevision,
+        seasonRevision,
+        sourceRevision
+      })
+      capture('players_imported', { rows: summary.rows, added: summary.added })
+      // The sheet follows the roster here as it does after a save; a failure is retried on open.
+      if (summary.added > 0) {
+        try {
+          await regenerateSignInSheet(root, ref)
+        } catch (err) {
+          console.warn('Could not refresh the sign-in sheet:', err)
+          Sentry.captureException(err, {
+            tags: { ipc_channel: 'season:import-players', sign_in_sheet: 'refresh-after-import' }
+          })
+        }
+      }
+      return summary
+    }
+  )
 }
 
 async function regenerateSignInSheet(root: string, ref: SeasonSyncRequest): Promise<string> {

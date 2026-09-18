@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import type { SeasonFile } from '@shared/members'
@@ -198,8 +198,35 @@ it('saves settings with numbers parsed and blanks dropped', async () => {
   )
 })
 
+it('adds players from an export picked or dropped on the players tab', async () => {
+  const api = renderTab('players')
+  vi.mocked(api.pickImportFile).mockResolvedValue('/exports/league.csv')
+  const user = userEvent.setup()
+
+  await user.click(screen.getByRole('button', { name: 'Add from export…' }))
+  expect(await screen.findByRole('dialog')).toHaveTextContent(
+    'Add players to 2025-26 from an export'
+  )
+  await waitFor(() =>
+    expect(api.previewImport).toHaveBeenCalledExactlyOnceWith('/exports/league.csv')
+  )
+  await user.click(screen.getByRole('button', { name: 'Cancel' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+  const zone = screen.getByRole('table', { name: 'Players' }).closest('[data-import-drop-target]')
+  if (!zone) throw new Error('No drop target around the players table')
+  fireEvent.drop(zone, {
+    dataTransfer: { files: [new File(['x'], 'league.csv')], types: ['Files'] }
+  })
+  expect(await screen.findByRole('dialog')).toHaveTextContent(
+    'Add players to 2025-26 from an export'
+  )
+  await waitFor(() => expect(api.previewImport).toHaveBeenLastCalledWith('league.csv'))
+})
+
 it('keeps archived seasons read-only on every tab', () => {
   renderTab('players', { archived: true, path: '/root/_archives/Mixed triples/2023-24' })
   expect(screen.queryByRole('button', { name: 'Add player…' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Add from export…' })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: /Actions for/ })).not.toBeInTheDocument()
 })

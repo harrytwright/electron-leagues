@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Badge, Button, DropdownMenu, Table, Text } from '@cloudflare/kumo'
+import { Badge, Button, DropdownMenu, Table, Text, useKumoToastManager } from '@cloudflare/kumo'
 import { DotsThreeIcon } from '@phosphor-icons/react/dist/csr/DotsThree'
+import { FileArrowUpIcon } from '@phosphor-icons/react/dist/csr/FileArrowUp'
 import { PlusIcon } from '@phosphor-icons/react/dist/csr/Plus'
 import { UserPlusIcon } from '@phosphor-icons/react/dist/csr/UserPlus'
 import {
@@ -15,12 +16,15 @@ import {
   type SeasonFile,
   type Team
 } from '@shared/members'
+import { useImportDrop } from '@renderer/hooks/use-import-drop'
 import { useSeasonSave } from '@renderer/hooks/use-season-save'
+import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { plural } from '@renderer/lib/plural'
 import { formatLabel } from '@renderer/lib/season-format'
 import { FILE_TABLE_CLASS, STATIC_ROW_CLASS } from '../FileBrowser/styles'
 import { IconButton } from '../IconButton'
 import { MemberDialog } from '../MemberDialog'
+import { RosterImportDialog } from '../RosterImportDialog'
 import { AddPlayerDialog } from './components/AddPlayerDialog'
 import { SettingsForm } from './components/SettingsForm'
 import { TeamDialog } from './components/TeamDialog'
@@ -73,8 +77,19 @@ type PlayersDialog = { kind: 'add' } | { kind: 'new-member' } | null
 
 function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element {
   const [dialog, setDialog] = useState<PlayersDialog>(null)
+  const [importPath, setImportPath] = useState<string | null>(null)
   const saver = useSeasonSave(season)
   const readOnly = season.archived
+  const { add } = useKumoToastManager()
+  const drop = useImportDrop(setImportPath)
+  const pickExport = async (): Promise<void> => {
+    try {
+      const path = await window.api.pickImportFile()
+      if (path) setImportPath(path)
+    } catch (caught) {
+      add({ title: ipcErrorMessage(caught), variant: 'error' })
+    }
+  }
   const groups = groupPlayers(season)
   const teams = sortTeams(season.file.teams)
   const total = season.file.players.length
@@ -100,7 +115,12 @@ function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      data-import-drop-target={readOnly ? undefined : true}
+      onDragOver={readOnly ? undefined : drop.onDragOver}
+      onDrop={readOnly ? undefined : drop.onDrop}
+    >
       {readOnly ? null : (
         <div className="flex shrink-0 items-center gap-2 border-b border-kumo-line px-4 py-2">
           <Button
@@ -112,6 +132,16 @@ function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element
             onClick={() => setDialog({ kind: 'add' })}
           >
             Add player…
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            icon={<FileArrowUpIcon aria-hidden size={14} />}
+            disabled={saver.pending}
+            onClick={() => void pickExport()}
+          >
+            Add from export…
           </Button>
           <Button
             type="button"
@@ -240,6 +270,14 @@ function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element
         </Table>
       </div>
 
+      <RosterImportDialog
+        season={season}
+        snapshot={snapshot}
+        path={importPath}
+        onOpenChange={(open) => {
+          if (!open) setImportPath(null)
+        }}
+      />
       <AddPlayerDialog
         season={season}
         snapshot={snapshot}

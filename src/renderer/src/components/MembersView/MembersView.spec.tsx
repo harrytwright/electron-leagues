@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import { MembersView } from './index'
@@ -211,4 +211,39 @@ it('lets one holder of a duplicated number keep it', async () => {
   await user.click(screen.getByRole('menuitem', { name: /keep this number/i }))
 
   await waitFor(() => expect(api.renumberDuplicates).toHaveBeenCalledExactlyOnceWith(3, 1, 'rev-3'))
+})
+
+it('starts an MBD sync from the toolbar picker or a dropped export', async () => {
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(makeSnapshot({ members: [makeMember({ id: 1 })] })),
+    pickImportFile: vi.fn().mockResolvedValue('/exports/all-bowlers.csv')
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await screen.findByRole('row', { name: /Jane Doe/ })
+  await user.click(screen.getByRole('button', { name: 'Sync from MBD…' }))
+  expect(await screen.findByRole('dialog')).toHaveTextContent(
+    'Sync from the Master Bowler Database'
+  )
+  await waitFor(() =>
+    expect(api.previewImport).toHaveBeenCalledExactlyOnceWith('/exports/all-bowlers.csv')
+  )
+  await user.click(screen.getByRole('button', { name: 'Cancel' }))
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+  const zone = screen.getByRole('table', { name: 'Members' }).closest('[data-import-drop-target]')
+  if (!zone) throw new Error('No drop target around the members table')
+  fireEvent.drop(zone, {
+    dataTransfer: { files: [new File(['x'], 'scores.xlsx')], types: ['Files'] }
+  })
+  expect(await screen.findByText(/Drop one bowler export/)).toBeInTheDocument()
+  fireEvent.drop(zone, {
+    dataTransfer: { files: [new File(['x'], 'bowlers.csv')], types: ['Files'] }
+  })
+  expect(
+    await screen.findByRole('dialog', { name: /Sync from the Master Bowler Database/ })
+  ).toBeInTheDocument()
+  await waitFor(() => expect(api.previewImport).toHaveBeenLastCalledWith('bowlers.csv'))
 })

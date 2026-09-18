@@ -9,6 +9,7 @@ import {
   Text,
   useKumoToastManager
 } from '@cloudflare/kumo'
+import { ArrowsClockwiseIcon } from '@phosphor-icons/react/dist/csr/ArrowsClockwise'
 import { DotsThreeIcon } from '@phosphor-icons/react/dist/csr/DotsThree'
 import { UserPlusIcon } from '@phosphor-icons/react/dist/csr/UserPlus'
 import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/csr/MagnifyingGlass'
@@ -16,6 +17,7 @@ import { XIcon } from '@phosphor-icons/react/dist/csr/X'
 import { WarningCircleIcon } from '@phosphor-icons/react/dist/csr/WarningCircle'
 import type { Member, MembersProblem, MembersSnapshot } from '@shared/members'
 import { useAppCommandHandler } from '@renderer/hooks/use-app-commands'
+import { useImportDrop } from '@renderer/hooks/use-import-drop'
 import { useMembers } from '@renderer/hooks/use-members'
 import { useQueryRefresh } from '@renderer/hooks/use-query-refresh'
 import { useWriteOperation } from '@renderer/hooks/use-write-operation'
@@ -35,6 +37,7 @@ import { pathTail } from '@renderer/lib/path-basename'
 import { plural } from '@renderer/lib/plural'
 import { DeleteMemberDialog } from '../DeleteMemberDialog'
 import { ErrorState } from '../ErrorState'
+import { MbdSyncDialog } from '../MbdSyncDialog'
 import { IconButton } from '../IconButton'
 import { MemberDialog } from '../MemberDialog'
 import { MergeMemberDialog } from '../MergeMemberDialog'
@@ -131,6 +134,8 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
   const [quick, setQuick] = useState<QuickFilter>('all')
   const [leagueFolder, setLeagueFolder] = useState<string>(ALL_LEAGUES)
   const [action, setAction] = useState<MemberAction | null>(null)
+  const [syncPath, setSyncPath] = useState<string | null>(null)
+  const drop = useImportDrop(setSyncPath)
   const filterRef = useRef<HTMLInputElement>(null)
   const coordinator = useQueryRefresh()
   const { add } = useKumoToastManager()
@@ -164,6 +169,14 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
   const closeAction = (open: boolean): void => {
     if (!open) setAction(null)
   }
+  const pickExport = async (): Promise<void> => {
+    try {
+      const path = await window.api.pickImportFile()
+      if (path) setSyncPath(path)
+    } catch (caught) {
+      add({ title: ipcErrorMessage(caught), variant: 'error' })
+    }
+  }
 
   useAppCommandHandler('refresh', () => void coordinator.refresh())
   useAppCommandHandler('focus-filter', () => {
@@ -189,7 +202,12 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div
+      className="flex min-h-0 flex-1 flex-col"
+      data-import-drop-target
+      onDragOver={drop.onDragOver}
+      onDrop={drop.onDrop}
+    >
       <div className="flex min-h-12 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-kumo-line px-4 py-2">
         <div className="relative w-64">
           <Input
@@ -240,6 +258,15 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
             Showing {visible.length} of {population.length}
           </Text>
         </span>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          icon={<ArrowsClockwiseIcon aria-hidden size={14} />}
+          onClick={() => void pickExport()}
+        >
+          Sync from MBD…
+        </Button>
         <Button
           type="button"
           size="sm"
@@ -388,6 +415,13 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
         open={action?.kind === 'merge'}
         onOpenChange={closeAction}
         onMerged={() => setAction(null)}
+      />
+      <MbdSyncDialog
+        snapshot={snapshot}
+        path={syncPath}
+        onOpenChange={(open) => {
+          if (!open) setSyncPath(null)
+        }}
       />
       <DeleteMemberDialog
         snapshot={snapshot}

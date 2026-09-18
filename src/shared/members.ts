@@ -274,6 +274,14 @@ export function mergeMemberRecords(into: Member, from: Member): Member {
   return merged
 }
 
+/** A hand-merged conflict copy can leave `nextId` behind the numbers in use; never mint one twice. */
+export function mintNumber(file: MembersFile): number {
+  const highest = file.members.reduce((max, member) => Math.max(max, member.id), 0)
+  const id = Math.max(file.nextId, highest + 1)
+  file.nextId = id + 1
+  return id
+}
+
 /** Team ids never repeat within a location; the random part keeps two machines apart. */
 export function newTeamId(random: () => string): string {
   return `team_${random()}`

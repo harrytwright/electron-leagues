@@ -132,6 +132,56 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
     renumberDuplicates: vi.fn<RendererApi['renumberDuplicates']>().mockResolvedValue([]),
     saveSeason: vi.fn<RendererApi['saveSeason']>().mockResolvedValue({ signInSheet: 'updated' }),
     openSignInSheet: vi.fn<RendererApi['openSignInSheet']>().mockResolvedValue(''),
+    pickImportFile: vi.fn<RendererApi['pickImportFile']>().mockResolvedValue(null),
+    previewImport: vi.fn<RendererApi['previewImport']>((path) =>
+      Promise.resolve({
+        path,
+        fileName: path.split(/[\\/]/).pop() ?? path,
+        columns: [],
+        sample: [],
+        rowCount: 0,
+        mapping: {
+          mbdId: null,
+          firstName: null,
+          lastName: null,
+          fullName: null,
+          gender: null,
+          team: null
+        },
+        remembered: false
+      })
+    ),
+    planMbdSync: vi.fn<RendererApi['planMbdSync']>().mockResolvedValue({
+      plan: { rows: [], invalid: [] },
+      revision: 'members-r1',
+      sourceRevision: 'export-r1'
+    }),
+    syncMbd: vi.fn<RendererApi['syncMbd']>().mockResolvedValue({
+      rows: 0,
+      created: 0,
+      matched: 0,
+      merged: 0,
+      aliased: 0,
+      restored: 0,
+      skipped: 0,
+      failed: []
+    }),
+    planPlayersImport: vi.fn<RendererApi['planPlayersImport']>().mockResolvedValue({
+      plan: { rows: [], invalid: [], newTeams: [] },
+      membersRevision: 'members-r1',
+      seasonRevision: 'season-r1',
+      sourceRevision: 'export-r1'
+    }),
+    addPlayersFromExport: vi.fn<RendererApi['addPlayersFromExport']>().mockResolvedValue({
+      rows: 0,
+      added: 0,
+      created: 0,
+      restored: 0,
+      teamsCreated: 0,
+      skipped: 0,
+      unknown: 0,
+      failed: []
+    }),
     ...overrides
   }
 

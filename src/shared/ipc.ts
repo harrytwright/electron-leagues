@@ -2,6 +2,15 @@ import { z } from 'zod'
 import { helpTargetSchema } from './help'
 import type { DirEntry, LeaguesTree } from './tree'
 import type { AppUpdateStatus } from './app-update'
+import {
+  importMappingSchema,
+  syncDecisionSchema,
+  type ImportSummary,
+  type MappingPreview,
+  type RosterPlan,
+  type SyncPlan,
+  type SyncSummary
+} from './imports'
 import { memberInputSchema, seasonFileSchema, type Member, type MembersSnapshot } from './members'
 import {
   leagueFolderSchema,
@@ -30,6 +39,21 @@ export interface ImportFilesResult {
 export interface SeasonSaveResult {
   /** The sheet is remade after every save; a failure is retried the next time it is opened. */
   signInSheet: 'updated' | 'failed'
+}
+
+export interface SyncPlanOutput {
+  plan: SyncPlan
+  /** The master list revision the plan was made from; the sync names it again. */
+  revision: string
+  /** The export's own revision; its lines are what the decisions refer to. */
+  sourceRevision: string
+}
+
+export interface RosterPlanOutput {
+  plan: RosterPlan
+  membersRevision: string
+  seasonRevision: string
+  sourceRevision: string
 }
 
 export interface InvokeOutputs {
@@ -63,6 +87,12 @@ export interface InvokeOutputs {
   renumberDuplicates: number[]
   saveSeason: SeasonSaveResult
   openSignInSheet: string
+  pickImportFile: string | null
+  previewImport: MappingPreview
+  planMbdSync: SyncPlanOutput
+  syncMbd: SyncSummary
+  planPlayersImport: RosterPlanOutput
+  addPlayersFromExport: ImportSummary
 }
 
 interface InvokeDefinition {
@@ -228,6 +258,52 @@ export const invokeDefinitions = {
     channel: 'season:sign-in-sheet',
     args: z.tuple([seasonSyncRequestSchema]),
     failureMessage: 'Invalid sign-in sheet request'
+  },
+  /** The native picker limited to delimited text, for a bowler export. */
+  pickImportFile: {
+    channel: 'import:pick',
+    args: z.tuple([]),
+    failureMessage: 'Invalid file picker request'
+  },
+  /** Columns and a sample from an export, with a remembered or guessed mapping. */
+  previewImport: {
+    channel: 'import:preview',
+    args: z.tuple([pathSchema]),
+    failureMessage: 'Invalid export path'
+  },
+  planMbdSync: {
+    channel: 'members:plan-sync',
+    args: z.tuple([pathSchema, importMappingSchema]),
+    failureMessage: 'Invalid sync request'
+  },
+  syncMbd: {
+    channel: 'members:sync-mbd',
+    args: z.tuple([
+      pathSchema,
+      importMappingSchema,
+      z.array(syncDecisionSchema),
+      revisionSchema,
+      revisionSchema
+    ]),
+    failureMessage: 'Invalid sync request'
+  },
+  planPlayersImport: {
+    channel: 'season:plan-import',
+    args: z.tuple([seasonSyncRequestSchema, pathSchema, importMappingSchema]),
+    failureMessage: 'Invalid player import request'
+  },
+  addPlayersFromExport: {
+    channel: 'season:import-players',
+    args: z.tuple([
+      seasonSyncRequestSchema,
+      pathSchema,
+      importMappingSchema,
+      z.array(z.number().int().positive()),
+      revisionSchema,
+      revisionSchema,
+      revisionSchema
+    ]),
+    failureMessage: 'Invalid player import request'
   }
 } as const satisfies Record<keyof InvokeOutputs, InvokeDefinition>
 

@@ -8,6 +8,7 @@ import {
   MEMBERS_FILE,
   membersFileSchema,
   mergeMemberRecords,
+  mintNumber,
   resolveMember,
   SEASON_FILE,
   seasonFileSchema,
@@ -150,7 +151,10 @@ export async function buildMembersSnapshot(
 }
 
 /** A write must start from a readable master list, and from the copy the editor loaded. */
-async function readMasterForWrite(root: string, expected: FileRevision): Promise<MembersFile> {
+export async function readMasterForWrite(
+  root: string,
+  expected: FileRevision
+): Promise<MembersFile> {
   const path = membersFilePath(root)
   const master = await readAppJson(path, membersFileSchema)
   if (master.status === 'missing') {
@@ -165,7 +169,7 @@ export const STALE_MESSAGE =
   'That file changed on disk since it was loaded, so nothing was saved. Check the refreshed list and try again.'
 
 /** Size and modification time together stand in for the file's contents. */
-async function fileRevision(path: string): Promise<FileRevision> {
+export async function fileRevision(path: string): Promise<FileRevision> {
   const info = await stat(path).catch((err) => {
     if (isMissing(err)) return null
     throw toUserFacing(err)
@@ -173,16 +177,8 @@ async function fileRevision(path: string): Promise<FileRevision> {
   return info ? `${info.mtimeMs}:${info.size}` : ''
 }
 
-async function writeMaster(root: string, file: MembersFile): Promise<void> {
+export async function writeMaster(root: string, file: MembersFile): Promise<void> {
   await writeAppJson(membersFilePath(root), file)
-}
-
-/** A hand-merged conflict copy can leave `nextId` behind the numbers in use; never mint one twice. */
-function mintNumber(file: MembersFile): number {
-  const highest = file.members.reduce((max, member) => Math.max(max, member.id), 0)
-  const id = Math.max(file.nextId, highest + 1)
-  file.nextId = id + 1
-  return id
 }
 
 function liveMember(file: MembersFile, id: number): Member {
