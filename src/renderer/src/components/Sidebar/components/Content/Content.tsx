@@ -47,22 +47,6 @@ export function Content({ tree, selection, onSelect }: Props): React.JSX.Element
   return (
     <Sidebar.Content>
       <Sidebar.Group>
-        <Sidebar.GroupLabel>Location</Sidebar.GroupLabel>
-        <Sidebar.Menu>
-          <Sidebar.MenuItem>
-            <Sidebar.MenuButton
-              icon={<UsersIcon aria-hidden size={16} />}
-              tooltip="Members"
-              active={membersActive}
-              aria-current={membersActive ? 'true' : undefined}
-              onClick={() => onSelect(MEMBERS)}
-            >
-              Members
-            </Sidebar.MenuButton>
-          </Sidebar.MenuItem>
-        </Sidebar.Menu>
-      </Sidebar.Group>
-      <Sidebar.Group>
         <Sidebar.GroupLabel>Leagues</Sidebar.GroupLabel>
         {daysWithLeagues.length === 0 ? (
           <div className="px-2 py-1">
@@ -143,6 +127,22 @@ export function Content({ tree, selection, onSelect }: Props): React.JSX.Element
             ))}
           </Sidebar.Menu>
         )}
+      </Sidebar.Group>
+      <Sidebar.Group>
+        <Sidebar.GroupLabel>Location</Sidebar.GroupLabel>
+        <Sidebar.Menu>
+          <Sidebar.MenuItem>
+            <Sidebar.MenuButton
+              icon={<UsersIcon aria-hidden size={16} />}
+              tooltip="Members"
+              active={membersActive}
+              aria-current={membersActive ? 'true' : undefined}
+              onClick={() => onSelect(MEMBERS)}
+            >
+              Members
+            </Sidebar.MenuButton>
+          </Sidebar.MenuItem>
+        </Sidebar.Menu>
       </Sidebar.Group>
     </Sidebar.Content>
   )

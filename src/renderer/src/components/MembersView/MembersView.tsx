@@ -3,10 +3,11 @@ import {
   Badge,
   Button,
   DropdownMenu,
-  Input,
   Select,
   Table,
   Text,
+  Toolbar,
+  Tooltip,
   useKumoToastManager
 } from '@cloudflare/kumo'
 import { ArrowsClockwiseIcon } from '@phosphor-icons/react/dist/csr/ArrowsClockwise'
@@ -14,8 +15,6 @@ import { DownloadSimpleIcon } from '@phosphor-icons/react/dist/csr/DownloadSimpl
 import { IdentificationCardIcon } from '@phosphor-icons/react/dist/csr/IdentificationCard'
 import { DotsThreeIcon } from '@phosphor-icons/react/dist/csr/DotsThree'
 import { UserPlusIcon } from '@phosphor-icons/react/dist/csr/UserPlus'
-import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/csr/MagnifyingGlass'
-import { XIcon } from '@phosphor-icons/react/dist/csr/X'
 import { WarningCircleIcon } from '@phosphor-icons/react/dist/csr/WarningCircle'
 import type { Member, MembersProblem, MembersSnapshot } from '@shared/members'
 import { useAppCommandHandler } from '@renderer/hooks/use-app-commands'
@@ -236,98 +235,98 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
       onDragOver={drop.onDragOver}
       onDrop={drop.onDrop}
     >
-      <div className="flex min-h-12 shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-kumo-line px-4 py-2">
-        <div className="relative w-64">
-          <Input
+      <div className="flex shrink-0 items-center justify-between gap-4 border-b border-kumo-line px-4 pt-3 pb-2">
+        <Text as="h1" variant="heading" size="lg">
+          Members
+        </Text>
+        <div role="group" aria-label="Member actions" className="flex shrink-0 items-center gap-1">
+          <Tooltip
+            content="Sync from MBD…"
+            render={
+              <IconButton
+                variant="ghost"
+                size="sm"
+                aria-label="Sync from MBD…"
+                icon={<ArrowsClockwiseIcon aria-hidden size={16} />}
+                onClick={() => void pickExport()}
+              />
+            }
+          />
+          <Tooltip
+            content={
+              cards.pending
+                ? 'Printing…'
+                : listed.length === 0
+                  ? 'Print cards'
+                  : `Print ${plural(listed.length, 'card')}`
+            }
+            render={
+              <IconButton
+                variant="ghost"
+                size="sm"
+                aria-label="Print cards"
+                icon={<IdentificationCardIcon aria-hidden size={16} />}
+                loading={cards.pending}
+                disabled={cards.pending || listed.length === 0}
+                onClick={() => void printCards(listed)}
+              />
+            }
+          />
+          <Tooltip
+            content="Export CSV…"
+            render={
+              <IconButton
+                variant="ghost"
+                size="sm"
+                aria-label="Export CSV…"
+                icon={<DownloadSimpleIcon aria-hidden size={16} />}
+                disabled={listed.length === 0}
+                onClick={() => setExporting(true)}
+              />
+            }
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="primary"
+            icon={<UserPlusIcon aria-hidden size={14} />}
+            className="ml-1"
+            onClick={() => setAction({ kind: 'new' })}
+          >
+            New member…
+          </Button>
+        </div>
+      </div>
+      <div className="shrink-0 border-b border-kumo-line px-4 py-2">
+        <Toolbar aria-label="Find members" className="w-full">
+          <Toolbar.Input
             ref={filterRef}
             type="search"
             aria-label="Filter members"
-            placeholder="Name, alias or number"
+            placeholder="Filter by name, alias or number"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="pr-8 pl-8"
+            className="min-w-0 flex-1"
           />
-          <MagnifyingGlassIcon
-            aria-hidden
-            size={14}
-            className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-kumo-subtle"
-          />
-          {query ? (
-            <IconButton
-              variant="ghost"
-              size="xs"
-              icon={<XIcon aria-hidden />}
-              aria-label="Clear filter"
-              className="absolute top-1/2 right-1 -translate-y-1/2"
-              onClick={() => setQuery('')}
-            />
-          ) : null}
-        </div>
-        <Select
-          aria-label="Show"
-          value={quick}
-          items={QUICK_FILTER_ITEMS}
-          onValueChange={(value) => {
-            if (value && isQuickFilter(value)) setQuick(value)
-          }}
-        />
-        {leagues.length > 0 ? (
           <Select
-            aria-label="League"
-            value={leagueFolder}
-            items={leagueItems}
+            aria-label="Show"
+            value={quick}
+            items={QUICK_FILTER_ITEMS}
             onValueChange={(value) => {
-              if (value) setLeagueFolder(value)
+              if (value && isQuickFilter(value)) setQuick(value)
             }}
           />
-        ) : null}
-        <span className="ml-auto">
-          <Text variant="secondary" size="sm">
-            Showing {visible.length} of {population.length}
-          </Text>
-        </span>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          icon={<IdentificationCardIcon aria-hidden size={14} />}
-          disabled={cards.pending || listed.length === 0}
-          onClick={() => void printCards(listed)}
-        >
-          {cards.pending
-            ? 'Printing…'
-            : listed.length === 0
-              ? 'Print cards'
-              : `Print ${plural(listed.length, 'card')}`}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          icon={<DownloadSimpleIcon aria-hidden size={14} />}
-          disabled={listed.length === 0}
-          onClick={() => setExporting(true)}
-        >
-          Export CSV…
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          icon={<ArrowsClockwiseIcon aria-hidden size={14} />}
-          onClick={() => void pickExport()}
-        >
-          Sync from MBD…
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          icon={<UserPlusIcon aria-hidden size={14} />}
-          onClick={() => setAction({ kind: 'new' })}
-        >
-          New member…
-        </Button>
+          {leagues.length > 0 ? (
+            <Select
+              aria-label="League"
+              value={leagueFolder}
+              items={leagueItems}
+              onValueChange={(value) => {
+                if (value) setLeagueFolder(value)
+              }}
+            />
+          ) : null}
+        </Toolbar>
       </div>
       {snapshot.problems.length > 0 ? (
         <section
@@ -459,6 +458,11 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
           </Table.Body>
         </Table>
       </div>
+      <div className="shrink-0 border-t border-kumo-line px-4 py-1.5">
+        <Text variant="secondary" size="sm">
+          Showing {visible.length} of {population.length}
+        </Text>
+      </div>
 
       <MemberDialog
         snapshot={snapshot}
@@ -520,24 +524,13 @@ export function MembersView({ tree }: Props): React.JSX.Element {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="sticky top-0 z-10 shrink-0 border-b border-kumo-line bg-kumo-base">
-        <div className="flex items-start justify-between gap-4 px-4 pt-3 pb-2">
-          <div className="flex min-w-0 items-center gap-2">
-            <Text as="h1" variant="heading" size="lg">
-              Members
-            </Text>
-            {members.data?.enabled ? (
-              <Badge variant="neutral">
-                {plural(
-                  members.data.members.filter((m) => m.mergedInto === undefined && !m.deleted)
-                    .length,
-                  'member'
-                )}
-              </Badge>
-            ) : null}
-          </div>
+      {members.data?.enabled ? null : (
+        <div className="shrink-0 border-b border-kumo-line px-4 pt-3 pb-2">
+          <Text as="h1" variant="heading" size="lg">
+            Members
+          </Text>
         </div>
-      </div>
+      )}
       {body}
     </div>
   )

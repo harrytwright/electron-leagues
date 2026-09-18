@@ -271,8 +271,8 @@ it('prints a card from the row menu and a sheet for everyone shown, and opens th
   await waitFor(() => expect(api.printCards).toHaveBeenCalledExactlyOnceWith([1], 'rev-5'))
   expect(await screen.findByText(/Made a sheet of 1 card/)).toBeInTheDocument()
 
-  // Hidden members are never on the sheet, so the count reads two, not three.
-  await user.click(screen.getByRole('button', { name: 'Print 2 cards' }))
+  // Hidden members are never on the sheet, so only the two listed go.
+  await user.click(screen.getByRole('button', { name: 'Print cards' }))
   await waitFor(() => expect(api.printCards).toHaveBeenLastCalledWith([2, 1], 'rev-5'))
 
   await user.click(screen.getByRole('button', { name: 'Export CSV…' }))

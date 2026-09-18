@@ -616,6 +616,56 @@ it('drops files into the folder being viewed, but never into the archive', async
   expect(api.importFiles).toHaveBeenCalledTimes(2)
 })
 
+it('offers to set up a roster for a live season made before the database was on', async () => {
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    listDir: vi.fn(listingFor({ [`${LEAGUE_PATH}/2025-26`]: [], [`${LEAGUE_PATH}/2024-25`]: [] })),
+    membersSnapshot: vi.fn().mockResolvedValue(
+      makeSnapshot({
+        seasons: [
+          makeRosterSeason({
+            season: '2024-25',
+            path: `${LEAGUE_PATH}/2024-25`,
+            file: makeSeasonFile({ format: 4 })
+          })
+        ]
+      })
+    )
+  })
+  const user = userEvent.setup()
+  renderLeague()
+
+  // The previous season already has one, so its menu does not offer it.
+  await user.dblClick(screen.getByRole('row', { name: /^2024-25/ }))
+  await screen.findByRole('tab', { name: 'Players' })
+  await user.click(screen.getByRole('button', { name: 'League actions' }))
+  expect(screen.queryByRole('menuitem', { name: 'Set up roster…' })).not.toBeInTheDocument()
+  await user.keyboard('{Escape}')
+
+  await user.click(screen.getAllByRole('link', { name: 'Mixed triples' })[0])
+  await user.dblClick(await screen.findByRole('row', { name: /^2025-26/ }))
+  await screen.findByRole('region', { name: '2025-26 files' })
+  expect(screen.queryByRole('tab', { name: 'Players' })).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'League actions' }))
+  await user.click(await screen.findByRole('menuitem', { name: 'Set up roster…' }))
+
+  const dialog = await screen.findByRole('dialog')
+  expect(dialog).toHaveTextContent('Set up the 2025-26 roster')
+  expect(within(dialog).getByLabelText(/format/i)).toHaveTextContent('Fours')
+  expect(
+    within(dialog).getByRole('checkbox', { name: /Carry over teams and players/ })
+  ).toBeChecked()
+  await user.click(within(dialog).getByRole('button', { name: 'Set up roster' }))
+
+  await waitFor(() =>
+    expect(api.createSeasonRoster).toHaveBeenCalledExactlyOnceWith(
+      { day: 'monday', leagueFolder: 'Mixed triples', seasonName: '2025-26' },
+      { format: 4, carryOver: true }
+    )
+  )
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+})
+
 it('shows an archived season its roster but never a sheet to generate', async () => {
   installMockApi({
     getRoot: vi.fn().mockResolvedValue('/root'),

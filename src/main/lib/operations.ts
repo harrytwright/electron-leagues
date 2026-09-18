@@ -24,11 +24,16 @@ import {
 import { sanitiseFolderName } from '../../shared/sanitise'
 import { DEFAULT_FORMAT, newSeasonFile, type Player, type SeasonFile } from '../../shared/members'
 import type { Weekday } from '../../shared/weekday'
-import type { SeasonCreateRequest, SeasonSyncRequest } from '../../shared/season-create'
+import type {
+  SeasonCreateRequest,
+  SeasonRosterRequest,
+  SeasonSyncRequest
+} from '../../shared/season-create'
 import { errorCode, isAlreadyExists, isMissing, toUserFacing, UserFacingError } from './fs-errors'
 import { assertMetaWritable, META_FILE, writeLeagueMeta } from './league-meta'
 import { withRootLock } from './root-lock'
-import { membersEnabled, readSeasonFile, writeSeasonFile } from './members'
+import { writeAppJson } from './app-json'
+import { membersEnabled, readSeasonFile, seasonFilePath, writeSeasonFile } from './members'
 import {
   ARCHIVES_FOLDER,
   assertInsideRoot,
@@ -501,6 +506,38 @@ async function startingSeasonFile(
     teams: previous.value.teams,
     players: previous.value.players.map(carriedOverPlayer)
   }
+}
+
+export interface CreateRosterOptions extends SeasonSyncRequest {
+  root: string
+  roster: SeasonRosterRequest
+}
+
+/** Give a live season made before the members database was on its own roster file. */
+export async function createSeasonRoster(opts: CreateRosterOptions): Promise<void> {
+  return withRootLock(opts.root, async () => {
+    if (!(await membersEnabled(opts.root))) {
+      throw new UserFacingError('The members database is not enabled for this location')
+    }
+    const seasonPath = await resolveLiveSeasonRoot(
+      opts.root,
+      opts.day,
+      opts.leagueFolder,
+      opts.seasonName
+    )
+    const leaguePath = join(opts.root, opts.day, opts.leagueFolder)
+    const seasons = await liveSeasonsOf(leaguePath)
+    const index = seasons.findIndex((season) => season.name === opts.seasonName)
+    const previousDir = index > 0 ? join(leaguePath, seasons[index - 1].name) : undefined
+    const file = await startingSeasonFile(opts.roster, previousDir)
+    try {
+      await writeAppJson(seasonFilePath(seasonPath), file, { exclusive: true })
+    } catch (err) {
+      if (isAlreadyExists(err)) throw new UserFacingError('This season already has a roster')
+      if (err instanceof UserFacingError) throw err
+      throw toUserFacing(err)
+    }
+  })
 }
 
 export interface SyncSeasonOptions extends SeasonSyncRequest {

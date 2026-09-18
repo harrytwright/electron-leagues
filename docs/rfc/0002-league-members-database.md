@@ -364,6 +364,7 @@ type; the preload methods follow from the table. Every write names the file revi
 | `mergeMembers`         | `members:merge`         | `fromId`, `intoId`, revision                                                | `void`                          |
 | `deleteMember`         | `members:delete`        | `id`, revision                                                              | `'hard' \| 'soft'`              |
 | `renumberDuplicates`   | `members:renumber`      | `id`, `keepIndex`, revision                                                 | the new numbers                 |
+| `createSeasonRoster`   | `season:create-roster`  | `SeasonRef`, `{ format, carryOver }`                                        | `void`, refuses an existing one |
 | `saveSeason`           | `season:save`           | `SeasonRef`, `SeasonFile`, revision                                         | whether the sheet was remade    |
 | `openSignInSheet`      | `season:sign-in-sheet`  | `SeasonRef`                                                                 | path (generated if stale)       |
 | `pickImportFile`       | `import:pick`           | none                                                                        | path or null                    |
@@ -376,6 +377,9 @@ type; the preload methods follow from the table. Every write names the file revi
 | `exportMembersCsv`     | `members:export-csv`    | `id[]` in table order, `{ marketingOnly }`                                  | path, or null when cancelled    |
 
 Whether the feature is on is part of the snapshot (`enabled`), so there is no separate query.
+The app still never backfills older seasons on its own, but a live season made before the
+feature was on can be given a roster from its own menu, carrying the previous season over as
+the new season dialog does.
 A sync is planned outside the lock and planned again under it from the same revision, so the
 decisions the desk made apply to exactly the list they were made on; the plan for a season
 import carries both revisions for the same reason.

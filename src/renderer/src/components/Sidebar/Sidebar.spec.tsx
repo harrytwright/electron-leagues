@@ -112,7 +112,7 @@ it('hints where to start when there are no leagues at all', () => {
   expect(screen.queryByRole('button', { name: /pairs|triples/i })).not.toBeInTheDocument()
 })
 
-it('offers Members above the leagues and marks it when selected', async () => {
+it('offers Members below the leagues and marks it when selected', async () => {
   installMockApi()
   const { onSelect } = renderSidebar({ tree: twoDayTree(), selection: { kind: 'members' } })
   const user = userEvent.setup()
@@ -120,7 +120,7 @@ it('offers Members above the leagues and marks it when selected', async () => {
   const members = screen.getByRole('button', { name: 'Members' })
   expect(members).toHaveAttribute('aria-current', 'true')
   expect(members.compareDocumentPosition(dayTrigger('Monday'))).toBe(
-    Node.DOCUMENT_POSITION_FOLLOWING
+    Node.DOCUMENT_POSITION_PRECEDING
   )
 
   await user.click(members)

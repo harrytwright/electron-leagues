@@ -14,7 +14,7 @@ The members database keeps one record per bowler across every league at a locati
 
 ## Turning it on
 
-Open **Members** in the sidebar and choose **Enable members database**. That adds a `members.json` file at the root of the location. From then on every new season gets a roster, teams and settings of its own, kept in a `meta.json` file beside the season's documents. Older seasons are left as they are.
+Open **Members** in the sidebar and choose **Enable members database**. That adds a `members.json` file at the root of the location. From then on every new season gets a roster, teams and settings of its own, kept in a `meta.json` file beside the season's documents. A live season made before that is left as it is until you choose **Set up roster…** from its menu, which can carry the previous season's teams and players over.
 
 Both files are app owned. They never appear in the file browser and should not be edited by hand.
 

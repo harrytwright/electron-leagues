@@ -14,6 +14,16 @@ export const seasonNameSchema = z
   .string()
   .refine((name) => parseSeasonName(name)?.name === name, { message: 'Invalid season name' })
 
+/** How a season's roster file starts: the format, and whether last season's line-up carries over. */
+export const seasonRosterRequestSchema = z.object({
+  /** Players per team. */
+  format: z.number().int().min(MIN_FORMAT).max(MAX_FORMAT),
+  /** Copy the previous season's teams and players into the season file. */
+  carryOver: z.boolean()
+})
+
+export type SeasonRosterRequest = z.infer<typeof seasonRosterRequestSchema>
+
 export const seasonCreateRequestSchema = z.object({
   day: weekdaySchema,
   leagueFolder: leagueFolderSchema,
@@ -21,14 +31,7 @@ export const seasonCreateRequestSchema = z.object({
   source: z.string().refine(isWorkflowId, { message: 'Unknown season workflow' }),
   archiveOldest: z.boolean(),
   /** Only honoured where the members database is enabled; see `roster`. */
-  roster: z
-    .object({
-      /** Players per team. */
-      format: z.number().int().min(MIN_FORMAT).max(MAX_FORMAT),
-      /** Copy the previous season's teams and players into the new season file. */
-      carryOver: z.boolean()
-    })
-    .optional()
+  roster: seasonRosterRequestSchema.optional()
 })
 
 export const seasonSyncRequestSchema = z.object({

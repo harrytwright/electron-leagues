@@ -16,6 +16,7 @@ import {
   leagueFolderSchema,
   seasonCreateRequestSchema,
   seasonNameSchema,
+  seasonRosterRequestSchema,
   seasonSyncRequestSchema,
   weekdaySchema,
   type SeasonCreateRequest,
@@ -86,6 +87,8 @@ export interface InvokeOutputs {
   deleteMember: 'hard' | 'soft'
   renumberDuplicates: number[]
   saveSeason: SeasonSaveResult
+  /** Gives a season made before the database was on a roster file of its own. */
+  createSeasonRoster: void
   openSignInSheet: string
   pickImportFile: string | null
   previewImport: MappingPreview
@@ -251,6 +254,11 @@ export const invokeDefinitions = {
     channel: 'members:renumber',
     args: z.tuple([memberIdSchema, z.number().int().nonnegative(), revisionSchema]),
     failureMessage: 'Invalid renumber request'
+  },
+  createSeasonRoster: {
+    channel: 'season:create-roster',
+    args: z.tuple([seasonSyncRequestSchema, seasonRosterRequestSchema]),
+    failureMessage: 'Invalid roster request'
   },
   saveSeason: {
     channel: 'season:save',

@@ -17,6 +17,7 @@ import { useQueryRefresh } from '@renderer/hooks/use-query-refresh'
 import { useTreeFolders } from '@renderer/hooks/use-tree-folders'
 import { useWriteOperation } from '@renderer/hooks/use-write-operation'
 import { ImportFilesButton } from '../FileBrowser/components/ImportFilesButton'
+import { CreateRosterDialog } from '../CreateRosterDialog'
 import { CrumbTrail } from '../CrumbTrail'
 import { DeleteResourceDialog, type DeleteTarget } from '../DeleteResourceDialog'
 import { DirectoryBrowser, type BrowserRow } from '../DirectoryBrowser'
@@ -54,6 +55,7 @@ function seasonBadgeVariant(status: SeasonNode['status']): 'success' | 'info' {
 export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): React.JSX.Element {
   const trail = useCrumbs(league.path, onCurrentDirChange)
   const [newSeason, setNewSeason] = useState(false)
+  const [settingUpRoster, setSettingUpRoster] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null)
   const [zipping, setZipping] = useState<string | null>(null)
@@ -98,6 +100,14 @@ export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): Re
       ? (snapshot.seasons.find((season) => season.path === trail.currentDir) ?? null)
       : null
   const activeSeasonTab = rosterSeason ? seasonTab : 'files'
+  // A season made before the database was on can be given a roster from its own menu.
+  const canSetUpRoster = atLiveSeasonRoot && snapshot !== null && rosterSeason === null
+  const seasonBefore = liveSeason
+    ? league.seasons[league.seasons.findIndex((season) => season.path === liveSeason.path) - 1]
+    : undefined
+  const previousRoster = seasonBefore
+    ? (snapshot?.seasons.find((season) => season.path === seasonBefore.path) ?? null)
+    : null
   const liveRoster = rosterSeason && !rosterSeason.archived ? rosterSeason : null
   const signInSheet = useWriteOperation({
     label: () => 'Preparing the sign-in sheet',
@@ -310,6 +320,11 @@ export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): Re
                 <DropdownMenu.Content>
                   {atLiveSeasonRoot ? (
                     <>
+                      {canSetUpRoster ? (
+                        <DropdownMenu.Item onClick={() => setSettingUpRoster(true)}>
+                          Set up roster…
+                        </DropdownMenu.Item>
+                      ) : null}
                       <DropdownMenu.Item
                         disabled={syncingTemplates}
                         onClick={() => void syncTemplates()}
@@ -408,6 +423,17 @@ export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): Re
         onOpenChange={setNewSeason}
         onCreated={() => setNewSeason(false)}
       />
+
+      {liveSeason ? (
+        <CreateRosterDialog
+          season={{ day: league.day, leagueFolder: league.folderName, seasonName: liveSeason.name }}
+          defaultFormat={previousRoster?.file.format}
+          previousHasRoster={previousRoster !== null}
+          open={settingUpRoster}
+          onOpenChange={setSettingUpRoster}
+          onCreated={() => setSettingUpRoster(false)}
+        />
+      ) : null}
 
       <RenameLeagueDialog
         league={league}

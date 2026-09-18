@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import {
   createLeague,
   createSeason,
+  createSeasonRoster,
   importFiles,
   initialiseRoot,
   prepareRootSelection,
@@ -889,6 +890,67 @@ describe('createSeason with the members database', () => {
       teams: [],
       players: []
     })
+  })
+})
+
+describe('createSeasonRoster', () => {
+  const ref = { root: '', day: 'monday' as const, leagueFolder: 'Pairs', seasonName: '2025-26' }
+
+  async function seasonFileOf(rel: string): Promise<SeasonFile> {
+    return seasonFileSchema.parse(JSON.parse(await readFile(join(root, rel, 'meta.json'), 'utf8')))
+  }
+
+  test('gives an existing season a roster carried over from the one before it', async () => {
+    await enableMembers(root)
+    await makeTree(root, {
+      'monday/Pairs/2024-25/Rules.docx': 'prev',
+      'monday/Pairs/2025-26/Rules.docx': 'current'
+    })
+    await writeSeasonFile(join(root, 'monday/Pairs/2024-25'), {
+      schemaVersion: 1,
+      format: 2,
+      teams: [{ id: 'team_a', teamNo: 1, name: 'Strikers' }],
+      players: [{ memberId: 1, teamId: 'team_a', leagueSecretaryId: 'ls-1' }]
+    })
+
+    await createSeasonRoster({ ...ref, root, roster: { format: 2, carryOver: true } })
+    expect(await seasonFileOf('monday/Pairs/2025-26')).toEqual({
+      schemaVersion: 1,
+      format: 2,
+      teams: [{ id: 'team_a', teamNo: 1, name: 'Strikers' }],
+      players: [{ memberId: 1, teamId: 'team_a' }]
+    })
+    expect(await readFile(join(root, 'monday/Pairs/2025-26/Rules.docx'), 'utf8')).toBe('current')
+
+    await expect(
+      createSeasonRoster({ ...ref, root, roster: { format: 3, carryOver: false } })
+    ).rejects.toThrow('already has a roster')
+  })
+
+  test('refuses a location without the database, an archived season and a missing one', async () => {
+    await makeTree(root, { 'monday/Pairs/2025-26': null, '_archives/Pairs/2023-24': null })
+    await expect(
+      createSeasonRoster({ ...ref, root, roster: { format: 3, carryOver: false } })
+    ).rejects.toThrow('not enabled')
+
+    await enableMembers(root)
+    await expect(
+      createSeasonRoster({
+        ...ref,
+        root,
+        seasonName: '2023-24',
+        roster: { format: 3, carryOver: false }
+      })
+    ).rejects.toThrow()
+    await expect(
+      createSeasonRoster({
+        ...ref,
+        root,
+        seasonName: '2026-27',
+        roster: { format: 3, carryOver: false }
+      })
+    ).rejects.toThrow()
+    expect(await exists(join(root, '_archives/Pairs/2023-24/meta.json'))).toBe(false)
   })
 })
 

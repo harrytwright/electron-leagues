@@ -19,6 +19,7 @@ import { oneDriveStatus } from './lib/onedrive'
 import {
   createLeague,
   createSeason,
+  createSeasonRoster,
   importFiles,
   prepareRootSelection,
   renameLeague,
@@ -333,6 +334,11 @@ function registerIpc(): void {
     })
     capture('season_created', { source: opts.source, archived: result.archived !== null })
     return result
+  })
+
+  register('createSeasonRoster', async (_e, ref, roster) => {
+    await createSeasonRoster({ ...ref, root: requireRoot(), roster })
+    capture('season_roster_created', { carryOver: roster.carryOver })
   })
 
   register('syncSeasonTemplates', async (_e, opts) => {
