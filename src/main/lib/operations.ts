@@ -22,10 +22,12 @@ import {
   type SeasonName
 } from '../../shared/season'
 import { sanitiseFolderName } from '../../shared/sanitise'
+import { DEFAULT_FORMAT, newSeasonFile, type Player, type SeasonFile } from '../../shared/members'
 import type { Weekday } from '../../shared/weekday'
 import type { SeasonCreateRequest, SeasonSyncRequest } from '../../shared/season-create'
 import { errorCode, isAlreadyExists, isMissing, toUserFacing, UserFacingError } from './fs-errors'
 import { assertMetaWritable, META_FILE, writeLeagueMeta } from './league-meta'
+import { membersEnabled, readSeasonFile, writeSeasonFile } from './members'
 import {
   ARCHIVES_FOLDER,
   assertInsideRoot,
@@ -466,14 +468,17 @@ async function createSeasonUnlocked(
 
   await mkdir(seasonPath, { recursive: true })
   const previousDir =
-    opts.source === 'previous' && before.length > 0
-      ? join(leaguePath, before[before.length - 1].name)
-      : undefined
+    before.length > 0 ? join(leaguePath, before[before.length - 1].name) : undefined
   await runWorkflow(opts.source, {
-    current: previousDir,
+    current: opts.source === 'previous' ? previousDir : undefined,
     templates: join(opts.root, '_templates'),
     destination: seasonPath
   })
+  // Every season of a members-enabled location gets a file, because none is ever backfilled.
+  if (await membersEnabled(opts.root)) {
+    const roster = opts.roster ?? { format: DEFAULT_FORMAT, carryOver: false }
+    await writeSeasonFile(seasonPath, await startingSeasonFile(roster, previousDir))
+  }
 
   let archived: string | null = null
   if (oldest) {
@@ -492,6 +497,33 @@ async function createSeasonUnlocked(
   await writeLeagueMeta(leaguePath, meta)
 
   return { seasonPath, archived }
+}
+
+/** Everything about a player carries over except a LeagueSecretary id, which belongs to one season. */
+function carriedOverPlayer(player: Player): Player {
+  const carried: Player = { memberId: player.memberId, teamId: player.teamId }
+  if (player.position !== undefined) carried.position = player.position
+  return carried
+}
+
+/**
+ * A carried-over roster keeps last year's teams, with their ids and lane draw, and
+ * players; dates, weeks, fees and LeagueSecretary ids start blank because they are
+ * set each season.
+ */
+async function startingSeasonFile(
+  roster: NonNullable<SeasonCreateRequest['roster']>,
+  previousDir: string | undefined
+): Promise<SeasonFile> {
+  const file = newSeasonFile(roster.format)
+  if (!roster.carryOver || !previousDir) return file
+  const previous = await readSeasonFile(previousDir)
+  if (previous.status !== 'ok') return file
+  return {
+    ...file,
+    teams: previous.value.teams,
+    players: previous.value.players.map(carriedOverPlayer)
+  }
 }
 
 export interface SyncSeasonOptions extends SeasonSyncRequest {

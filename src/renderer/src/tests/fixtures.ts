@@ -1,3 +1,4 @@
+import type { Member, MembersSnapshot, RosterSeason, SeasonFile } from '@shared/members'
 import { parseSeasonName } from '@shared/season'
 import type { DirEntry, LeagueNode, LeaguesTree } from '@shared/tree'
 
@@ -70,4 +71,40 @@ export function makeTree(overrides: Partial<LeaguesTree> = {}): LeaguesTree {
     unrecognisedRootEntries: [],
     ...overrides
   }
+}
+
+export function makeMember(overrides: Partial<Member> & Pick<Member, 'id'>): Member {
+  return {
+    firstName: 'Jane',
+    lastName: 'Doe',
+    dob: '1990-05-04',
+    email: 'jane@example.org',
+    mbdIds: [],
+    aliases: [],
+    marketing: true,
+    ...overrides
+  }
+}
+
+export function makeSeasonFile(overrides: Partial<SeasonFile> = {}): SeasonFile {
+  return { schemaVersion: 1, format: 3, teams: [], players: [], ...overrides }
+}
+
+export function makeRosterSeason(overrides: Partial<RosterSeason> = {}): RosterSeason {
+  const leagueFolder = overrides.leagueFolder ?? 'Mixed triples'
+  const day = overrides.day ?? 'monday'
+  const season = overrides.season ?? '2025-26'
+  return {
+    day,
+    leagueFolder,
+    leagueName: overrides.leagueName ?? leagueFolder,
+    season,
+    path: overrides.path ?? `/root/${day}/${leagueFolder}/${season}`,
+    archived: overrides.archived ?? false,
+    file: overrides.file ?? makeSeasonFile()
+  }
+}
+
+export function makeSnapshot(overrides: Partial<MembersSnapshot> = {}): MembersSnapshot {
+  return { enabled: true, nextId: 1, members: [], seasons: [], problems: [], ...overrides }
 }

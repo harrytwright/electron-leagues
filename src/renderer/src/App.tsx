@@ -10,6 +10,7 @@ import { Button, Loader, Sidebar as KumoSidebar, Text } from '@cloudflare/kumo'
 import { FirstRun } from './components/FirstRun'
 import { HomeView } from './components/HomeView'
 import { LeagueView } from './components/LeagueView'
+import { MembersView } from './components/MembersView'
 import { Sidebar } from './components/Sidebar'
 import { StatusBar } from './components/StatusBar'
 import { Toolbar } from './components/Toolbar'
@@ -218,9 +219,11 @@ function LocationContent({ root }: { root: UseQueryResult<string | null> }): Rea
       ? leagueNavigation?.ownerPath === selectedLeague.path
         ? leagueNavigation.currentDir
         : selectedLeague.path
-      : homeNavigation?.ownerRoot === scanned.root
-        ? homeNavigation.currentDir
-        : scanned.sharedPath
+      : effectiveSelection.kind === 'members'
+        ? scanned.root
+        : homeNavigation?.ownerRoot === scanned.root
+          ? homeNavigation.currentDir
+          : scanned.sharedPath
 
     // Keyed on the location / league so each view's local state starts fresh
     // when they change.
@@ -255,6 +258,8 @@ function LocationContent({ root }: { root: UseQueryResult<string | null> }): Rea
                   }
                   onRenamed={(day, folderName) => select({ kind: 'league', day, folderName })}
                 />
+              ) : effectiveSelection.kind === 'members' ? (
+                <MembersView key={scanned.root} tree={scanned} />
               ) : (
                 <HomeView
                   key={scanned.root}

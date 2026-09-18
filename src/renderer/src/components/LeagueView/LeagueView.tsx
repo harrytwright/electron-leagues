@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Badge, Button, DropdownMenu, Text, useKumoToastManager } from '@cloudflare/kumo'
+import { Badge, Button, DropdownMenu, Tabs, Text, useKumoToastManager } from '@cloudflare/kumo'
 import { DotsThreeIcon } from '@phosphor-icons/react'
 import type { SeasonNode } from '@shared/tree'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
@@ -9,6 +9,8 @@ import { sentenceCase } from '@renderer/lib/sentence-case'
 import { useCrumbs } from '@renderer/hooks/use-crumbs'
 import { useDirListing } from '@renderer/hooks/use-dir-listing'
 import { useImportFiles } from '@renderer/hooks/use-import-files'
+import { useKeyedState } from '@renderer/hooks/use-keyed-state'
+import { useMembers } from '@renderer/hooks/use-members'
 import { useQueryRefresh } from '@renderer/hooks/use-query-refresh'
 import { useTreeFolders } from '@renderer/hooks/use-tree-folders'
 import { useWriteOperation } from '@renderer/hooks/use-write-operation'
@@ -19,9 +21,23 @@ import { DirectoryBrowser, type BrowserRow } from '../DirectoryBrowser'
 import { IconButton } from '../IconButton'
 import { NewSeasonDialog } from '../NewSeasonDialog'
 import { RenameLeagueDialog } from '../RenameLeagueDialog'
+import { SeasonRoster, type SeasonRosterTab } from '../SeasonRoster'
 import { TreeFileBrowser } from '../TreeFileBrowser'
 import type { Sort } from '../TreeFileBrowser/interface'
 import type { Props } from './interface'
+
+type SeasonTab = 'files' | SeasonRosterTab
+
+const SEASON_TABS: { value: SeasonTab; label: string }[] = [
+  { value: 'files', label: 'Files' },
+  { value: 'players', label: 'Players' },
+  { value: 'teams', label: 'Teams' },
+  { value: 'settings', label: 'Settings' }
+]
+
+function isSeasonTab(value: string): value is SeasonTab {
+  return SEASON_TABS.some((tab) => tab.value === value)
+}
 
 function seasonBadgeVariant(status: SeasonNode['status']): 'success' | 'info' {
   switch (status) {
@@ -41,7 +57,10 @@ export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): Re
   const [zipping, setZipping] = useState<string | null>(null)
   const [syncingTemplates, setSyncingTemplates] = useState(false)
   const [treeSort, setTreeSort] = useState<Sort>({ column: 'name', direction: 'ascending' })
+  // Each season opens on its files; the tab is not carried from one season to another.
+  const [seasonTab, setSeasonTab] = useKeyedState<string, SeasonTab>(trail.currentDir, 'files')
   const tree = useTreeFolders(trail.currentDir)
+  const members = useMembers()
   const { add } = useKumoToastManager()
   const coordinator = useQueryRefresh()
   const zipOperation = useWriteOperation({
@@ -70,6 +89,16 @@ export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): Re
   const atLiveSeasonRoot = trail.crumbs.length === 1 && liveSeason !== undefined
   const listing = useDirListing(trail.atBase ? null : trail.currentDir)
   const importer = useImportFiles(inArchive ? undefined : trail.currentDir)
+  // A season with a season file gains roster tabs; older seasons keep the plain file browser.
+  const snapshot = members.data?.enabled ? members.data : null
+  const rosterSeason =
+    snapshot && inSeason
+      ? (snapshot.seasons.find((season) => season.path === trail.currentDir) ?? null)
+      : null
+  const activeSeasonTab = rosterSeason ? seasonTab : 'files'
+  const previousSeasonFormat = snapshot?.seasons.find(
+    (season) => season.path === league.seasons.at(-1)?.path
+  )?.file.format
 
   const zip = async (name: string): Promise<void> => {
     if (zipping) return
@@ -270,7 +299,23 @@ export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): Re
       </div>
 
       <div className="flex min-h-0 w-full flex-1 flex-col">
-        {inSeason ? (
+        {rosterSeason ? (
+          <Tabs
+            aria-label={`${rosterSeason.season} season`}
+            tabs={SEASON_TABS}
+            value={activeSeasonTab}
+            onValueChange={(value) => {
+              if (isSeasonTab(value)) setSeasonTab(value)
+            }}
+            activateOnFocus
+            variant="underline"
+            size="base"
+            className="shrink-0 border-b border-kumo-line px-4"
+          />
+        ) : null}
+        {rosterSeason && snapshot && activeSeasonTab !== 'files' ? (
+          <SeasonRoster season={rosterSeason} snapshot={snapshot} tab={activeSeasonTab} />
+        ) : inSeason ? (
           <TreeFileBrowser
             currentDir={trail.currentDir}
             name={trail.crumbs[trail.crumbs.length - 1].name}
@@ -308,6 +353,7 @@ export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): Re
 
       <NewSeasonDialog
         league={league}
+        roster={snapshot ? { defaultFormat: previousSeasonFormat } : null}
         open={newSeason}
         onOpenChange={setNewSeason}
         onCreated={() => setNewSeason(false)}

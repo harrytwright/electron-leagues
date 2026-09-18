@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { helpTargetSchema } from './help'
 import type { DirEntry, LeaguesTree } from './tree'
 import type { AppUpdateStatus } from './app-update'
+import type { MembersSnapshot } from './members'
 import {
   leagueFolderSchema,
   seasonCreateRequestSchema,
@@ -47,6 +48,8 @@ export interface InvokeOutputs {
   pickFiles: string[]
   importFiles: ImportFilesResult
   openHelp: void
+  enableMembers: void
+  membersSnapshot: MembersSnapshot | null
 }
 
 interface InvokeDefinition {
@@ -169,6 +172,17 @@ export const invokeDefinitions = {
     channel: 'help:open',
     args: z.tuple([helpTargetSchema.nullable()]),
     failureMessage: 'Invalid help request'
+  },
+  /** Creates the master list, which switches the feature on for the location. */
+  enableMembers: {
+    channel: 'members:enable',
+    args: z.tuple([]),
+    failureMessage: 'Invalid members request'
+  },
+  membersSnapshot: {
+    channel: 'members:snapshot',
+    args: z.tuple([]),
+    failureMessage: 'Invalid members request'
   }
 } as const satisfies Record<keyof InvokeOutputs, InvokeDefinition>
 

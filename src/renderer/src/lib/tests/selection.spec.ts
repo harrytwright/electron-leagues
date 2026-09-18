@@ -19,6 +19,10 @@ describe('restoreSelection', () => {
     ).toEqual({ kind: 'home' })
   })
 
+  test('keeps a remembered members page, which needs no league', () => {
+    expect(restoreSelection(tree, { kind: 'members' })).toEqual({ kind: 'members' })
+  })
+
   test('falls back to home with nothing remembered', () => {
     expect(restoreSelection(tree, null)).toEqual({ kind: 'home' })
     expect(restoreSelection(tree, { kind: 'home' })).toEqual({ kind: 'home' })

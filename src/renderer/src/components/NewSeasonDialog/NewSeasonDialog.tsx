@@ -1,18 +1,14 @@
 import { useRef, useState } from 'react'
 import { Button, Checkbox, Dialog, Input, Select, Text } from '@cloudflare/kumo'
+import { DEFAULT_FORMAT, MAX_FORMAT, MIN_FORMAT } from '@shared/members'
 import { parseSeasonName, suggestSeasonName, type SeasonType } from '@shared/season'
-import {
-  isWorkflowId,
-  NEW_SEASON_WORKFLOWS,
-  STOPPED_SEASON_WORKFLOWS,
-  WORKFLOWS
-} from '@shared/workflows'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { useDialogTask } from '@renderer/hooks/use-dialog-task'
 import { useWriteOperation } from '@renderer/hooks/use-write-operation'
+import { formatLabel } from '@renderer/lib/season-format'
 import { HelpLink } from '../HelpLink'
 import { TaskDialog } from '../TaskDialog'
-import type { Props, SeasonTypeOption, Source } from './interface'
+import type { Props, SeasonTypeOption } from './interface'
 
 const TYPES: ReadonlyArray<SeasonTypeOption> = [
   { value: 'cross-year', label: 'Cross-year', example: '2025-26' },
@@ -25,31 +21,22 @@ const TYPE_ITEMS = TYPES.map((item) => ({
   label: `${item.label} (e.g. ${item.example})`
 }))
 
-const RUNNING_SOURCE_ITEMS = Object.fromEntries(
-  NEW_SEASON_WORKFLOWS.map((id) => [id, WORKFLOWS[id].label])
-)
-
-const STOPPED_SOURCE_ITEMS = Object.fromEntries(
-  NEW_SEASON_WORKFLOWS.map((id) => [
-    id,
-    STOPPED_SEASON_WORKFLOWS.includes(id)
-      ? WORKFLOWS[id].label
-      : { label: WORKFLOWS[id].label, disabled: true }
-  ])
+const FORMAT_ITEMS = Object.fromEntries(
+  Array.from({ length: MAX_FORMAT - MIN_FORMAT + 1 }, (_, index) => {
+    const format = MIN_FORMAT + index
+    return [String(format), `${formatLabel(format)} (${format} per team)`]
+  })
 )
 
 function isSeasonType(value: string): value is SeasonType {
   return TYPES.some((type) => type.value === value)
 }
 
-function isSource(value: string): value is Source {
-  return isWorkflowId(value)
-}
-
 type CreateSeasonRequest = Parameters<typeof window.api.createSeason>[0]
 
 export function NewSeasonDialog({
   league,
+  roster = null,
   open,
   onOpenChange,
   onCreated
@@ -59,7 +46,9 @@ export function NewSeasonDialog({
   const initialType = current?.type ?? 'cross-year'
   const [type, setType] = useState<SeasonType>(initialType)
   const [name, setName] = useState(() => suggestSeasonName(initialType, current, new Date()))
-  const [source, setSource] = useState<Source>(league.running ? 'previous' : 'templates')
+  const [copyDocuments, setCopyDocuments] = useState(true)
+  const [carryOver, setCarryOver] = useState(true)
+  const [format, setFormat] = useState(roster?.defaultFormat ?? DEFAULT_FORMAT)
   const [archiveOldest, setArchiveOldest] = useState(true)
   const [wasOpen, setWasOpen] = useState(open)
   const nameRef = useRef<HTMLInputElement>(null)
@@ -78,7 +67,9 @@ export function NewSeasonDialog({
       const nextType = latest?.type ?? 'cross-year'
       setType(nextType)
       setName(suggestSeasonName(nextType, latest, new Date()))
-      setSource(league.running ? 'previous' : 'templates')
+      setCopyDocuments(true)
+      setCarryOver(true)
+      setFormat(roster?.defaultFormat ?? DEFAULT_FORMAT)
       setArchiveOldest(true)
     }
   }
@@ -86,6 +77,8 @@ export function NewSeasonDialog({
   const parsed = parseSeasonName(name)
   const oldest = league.seasons[0]
   const willArchive = league.seasons.length >= 2 ? oldest : null
+  // Only a running league has a previous season to copy from.
+  const offerPrevious = league.running
 
   const changeType = (nextType: SeasonType): void => {
     setType(nextType)
@@ -102,16 +95,19 @@ export function NewSeasonDialog({
       return
     }
 
+    const request: CreateSeasonRequest = {
+      day: league.day,
+      leagueFolder: league.folderName,
+      seasonName: parsed.name,
+      source: offerPrevious && copyDocuments ? 'previous' : 'templates',
+      // Never ask main to archive when the option was never shown.
+      archiveOldest: willArchive ? archiveOldest : false
+    }
+    if (roster) request.roster = { format, carryOver: offerPrevious && carryOver }
+
     const ticket = task.begin()
     try {
-      const outcome = await operation.run({
-        day: league.day,
-        leagueFolder: league.folderName,
-        seasonName: parsed.name,
-        source,
-        // Never ask main to archive when the option was never shown.
-        archiveOldest: willArchive ? archiveOldest : false
-      })
+      const outcome = await operation.run(request)
       if (outcome.status === 'refresh-failed') {
         task.settle(ticket, {
           type: 'failed',
@@ -130,7 +126,11 @@ export function NewSeasonDialog({
     <TaskDialog open={open} onOpenChange={task.handleOpenChange} size="lg">
       <TaskDialog.Header
         title={`New season — ${league.meta.name}`}
-        description="Choose the season name and starting documents."
+        description={
+          roster
+            ? 'Choose the season name, its format and what to carry over.'
+            : 'Choose the season name and starting documents.'
+        }
       />
 
       <TaskDialog.Body onSubmit={(event) => void submit(event)}>
@@ -163,14 +163,40 @@ export function NewSeasonDialog({
           </div>
         </div>
 
-        <Select
-          label="Starting documents"
-          value={source}
-          items={league.running ? RUNNING_SOURCE_ITEMS : STOPPED_SOURCE_ITEMS}
-          onValueChange={(value) => {
-            if (value && isSource(value)) setSource(value)
-          }}
-        />
+        {roster ? (
+          <Select
+            label="Format"
+            value={String(format)}
+            items={FORMAT_ITEMS}
+            onValueChange={(value) => {
+              const next = Number(value)
+              if (Number.isInteger(next) && next >= MIN_FORMAT && next <= MAX_FORMAT) {
+                setFormat(next)
+              }
+            }}
+          />
+        ) : null}
+
+        {offerPrevious ? (
+          <div className="grid gap-2">
+            <Checkbox
+              label="Copy documents from previous season"
+              checked={copyDocuments}
+              onCheckedChange={setCopyDocuments}
+            />
+            {roster ? (
+              <Checkbox
+                label="Carry over teams and players"
+                checked={carryOver}
+                onCheckedChange={setCarryOver}
+              />
+            ) : null}
+          </div>
+        ) : (
+          <Text variant="secondary" size="sm">
+            Documents are copied from the templates.
+          </Text>
+        )}
 
         {willArchive ? (
           <div className="grid gap-1.5">

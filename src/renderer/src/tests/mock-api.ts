@@ -115,6 +115,14 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
     listDir: vi.fn<RendererApi['listDir']>().mockResolvedValue([]),
     trashFolder: vi.fn<RendererApi['trashFolder']>().mockResolvedValue(undefined),
     pickFiles: vi.fn<RendererApi['pickFiles']>().mockResolvedValue([]),
+    enableMembers: vi.fn<RendererApi['enableMembers']>().mockResolvedValue(undefined),
+    membersSnapshot: vi.fn<RendererApi['membersSnapshot']>().mockResolvedValue({
+      enabled: false,
+      nextId: 1,
+      members: [],
+      seasons: [],
+      problems: []
+    }),
     ...overrides
   }
 

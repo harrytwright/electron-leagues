@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { isSingleSegment } from './path-segment'
 import { parseSeasonName } from './season'
 import { WEEKDAYS } from './weekday'
+import { MAX_FORMAT, MIN_FORMAT } from './members'
 import { isWorkflowId } from './workflows'
 
 // A non-string day is a shape failure; only a string outside the enum is the domain failure.
@@ -18,7 +19,16 @@ export const seasonCreateRequestSchema = z.object({
   leagueFolder: leagueFolderSchema,
   seasonName: seasonNameSchema,
   source: z.string().refine(isWorkflowId, { message: 'Unknown season workflow' }),
-  archiveOldest: z.boolean()
+  archiveOldest: z.boolean(),
+  /** Only honoured where the members database is enabled; see `roster`. */
+  roster: z
+    .object({
+      /** Players per team. */
+      format: z.number().int().min(MIN_FORMAT).max(MAX_FORMAT),
+      /** Copy the previous season's teams and players into the new season file. */
+      carryOver: z.boolean()
+    })
+    .optional()
 })
 
 export const seasonSyncRequestSchema = z.object({

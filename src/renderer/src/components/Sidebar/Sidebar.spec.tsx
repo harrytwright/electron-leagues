@@ -109,7 +109,22 @@ it('hints where to start when there are no leagues at all', () => {
   renderSidebar()
 
   expect(screen.getByText(/No leagues yet/)).toBeInTheDocument()
-  expect(screen.queryByRole('list')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: /pairs|triples/i })).not.toBeInTheDocument()
+})
+
+it('offers Members above the leagues and marks it when selected', async () => {
+  installMockApi()
+  const { onSelect } = renderSidebar({ tree: twoDayTree(), selection: { kind: 'members' } })
+  const user = userEvent.setup()
+
+  const members = screen.getByRole('button', { name: 'Members' })
+  expect(members).toHaveAttribute('aria-current', 'true')
+  expect(members.compareDocumentPosition(dayTrigger('Monday'))).toBe(
+    Node.DOCUMENT_POSITION_FOLLOWING
+  )
+
+  await user.click(members)
+  expect(onSelect).toHaveBeenCalledWith({ kind: 'members' })
 })
 
 it('uses compact weekday badges while keeping full accessible names', () => {

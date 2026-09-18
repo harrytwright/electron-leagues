@@ -5,7 +5,15 @@ import { expect, it, vi } from 'vitest'
 import type { DirEntry, LeagueNode, SeasonNode } from '@shared/tree'
 import { LeagueView } from './index'
 import { revealLabel } from '../../lib/os-labels'
-import { makeDirEntry, makeLeague, makeTree } from '../../tests/fixtures'
+import {
+  makeDirEntry,
+  makeLeague,
+  makeMember,
+  makeRosterSeason,
+  makeSeasonFile,
+  makeSnapshot,
+  makeTree
+} from '../../tests/fixtures'
 import { emitTreeChanged, installMockApi, type RendererApi } from '../../tests/mock-api'
 import { renderWithProviders } from '../../tests/render-helpers'
 import { createQueryClient } from '../../lib/query-client'
@@ -266,6 +274,81 @@ it('drills into a season and back out through the breadcrumbs', async () => {
 
   expect(await screen.findByRole('row', { name: /^2024-25/ })).toBeInTheDocument()
   expect(onCurrentDirChange).toHaveBeenLastCalledWith(LEAGUE_PATH)
+})
+
+it('adds roster tabs to a season that has a season file, and only there', async () => {
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    listDir: vi.fn(
+      listingFor({
+        [`${LEAGUE_PATH}/2025-26`]: [
+          makeDirEntry({ name: 'Rules.docx', path: `${LEAGUE_PATH}/2025-26/Rules.docx` })
+        ],
+        [`${LEAGUE_PATH}/2024-25`]: []
+      })
+    ),
+    membersSnapshot: vi.fn().mockResolvedValue(
+      makeSnapshot({
+        nextId: 3,
+        members: [
+          makeMember({ id: 1, firstName: 'Ann', lastName: 'Lee' }),
+          makeMember({ id: 2, firstName: 'Bob', lastName: 'Kay' })
+        ],
+        seasons: [
+          makeRosterSeason({
+            path: `${LEAGUE_PATH}/2025-26`,
+            file: makeSeasonFile({
+              format: 2,
+              startDate: '2025-09-01',
+              weeks: 30,
+              fees: { total: 12.5, breakdown: [{ label: 'Lineage', amount: 9 }] },
+              teams: [
+                { id: 'team_b', teamNo: 2, name: 'Bees' },
+                { id: 'team_a', teamNo: 1, name: 'Ants' }
+              ],
+              players: [
+                { memberId: 1, teamId: 'team_b' },
+                { memberId: 2, teamId: null },
+                { memberId: 9, teamId: 'team_a' }
+              ]
+            })
+          })
+        ]
+      })
+    )
+  })
+  const user = userEvent.setup()
+  renderLeague()
+
+  await user.dblClick(screen.getByRole('row', { name: /^2025-26/ }))
+  await screen.findByRole('row', { name: /^Rules.docx/ })
+  expect(await screen.findByRole('tab', { name: 'Players' })).toBeInTheDocument()
+
+  await user.click(screen.getByRole('tab', { name: 'Players' }))
+  const players = screen.getByRole('table', { name: 'Players' })
+  const rows = within(players).getAllByRole('row').slice(1)
+  expect(rows.map((row) => row.textContent)).toEqual([
+    '1. Ants000009Unknown memberUnlinked—',
+    '2. Bees000001Ann Lee—',
+    'Subs000002Bob Kay—'
+  ])
+
+  await user.click(screen.getByRole('tab', { name: 'Teams' }))
+  expect(
+    within(screen.getByRole('table', { name: 'Teams' })).getByRole('row', { name: /Ants/ })
+  ).toHaveTextContent('1Ants1 player of 2')
+
+  await user.click(screen.getByRole('tab', { name: 'Settings' }))
+  const settings = screen.getByRole('region', { name: 'Settings' })
+  expect(settings).toHaveTextContent('Doubles')
+  expect(settings).toHaveTextContent('1 September 2025')
+  expect(settings).toHaveTextContent('£12.50 (Lineage £9.00)')
+
+  // The previous season has no season file, so it keeps the plain file browser.
+  await user.click(screen.getAllByRole('link', { name: 'Mixed triples' })[0])
+  await user.dblClick(await screen.findByRole('row', { name: /^2024-25/ }))
+  await screen.findByText('This folder is empty')
+  expect(screen.queryByRole('tab', { name: 'Players' })).not.toBeInTheDocument()
 })
 
 it('reports the league root when backing out of an unreadable folder', async () => {

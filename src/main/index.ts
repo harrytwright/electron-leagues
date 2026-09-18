@@ -38,6 +38,7 @@ import {
   resolveImportDestination
 } from './lib/paths'
 import { pruneRecents, seedRecents, updateRecents, type RootProbe } from './lib/recents'
+import { buildMembersSnapshot, enableMembers } from './lib/members'
 import { listDirEntries, scanLeaguesRoot } from './lib/scanner'
 import { executeTrashPlan } from './lib/trash'
 import { createRootWatcher, type RootWatcher } from './lib/watcher'
@@ -375,6 +376,16 @@ function registerIpc(): void {
 
   register('openHelp', (_e, target) => {
     helpWindows.open(target)
+  })
+
+  register('enableMembers', async () => {
+    if (await enableMembers(requireRoot())) capture('members_enabled')
+  })
+
+  register('membersSnapshot', async () => {
+    const root = currentRoot()
+    if (!root) return null
+    return buildMembersSnapshot(root, await scanLeaguesRoot(root))
   })
 }
 

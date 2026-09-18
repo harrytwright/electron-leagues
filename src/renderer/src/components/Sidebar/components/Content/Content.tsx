@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { Sidebar, Text, useSidebar } from '@cloudflare/kumo'
+import { UsersIcon } from '@phosphor-icons/react/dist/csr/Users'
 
 import { sentenceCase } from '@renderer/lib/sentence-case'
 import { useWorkspace } from '@renderer/hooks/use-workspace'
+import { MEMBERS } from '@renderer/lib/selection'
 import { WEEKDAYS, type Weekday } from '@shared/weekday'
 
 import type { Props } from './interface'
@@ -40,8 +42,26 @@ export function Content({ tree, selection, onSelect }: Props): React.JSX.Element
   const daysWithLeagues = WEEKDAYS.filter((day) => tree.days[day].length > 0)
   const rail = state === 'collapsed'
 
+  const membersActive = selection.kind === 'members'
+
   return (
     <Sidebar.Content>
+      <Sidebar.Group>
+        <Sidebar.GroupLabel>Location</Sidebar.GroupLabel>
+        <Sidebar.Menu>
+          <Sidebar.MenuItem>
+            <Sidebar.MenuButton
+              icon={<UsersIcon aria-hidden size={16} />}
+              tooltip="Members"
+              active={membersActive}
+              aria-current={membersActive ? 'true' : undefined}
+              onClick={() => onSelect(MEMBERS)}
+            >
+              Members
+            </Sidebar.MenuButton>
+          </Sidebar.MenuItem>
+        </Sidebar.Menu>
+      </Sidebar.Group>
       <Sidebar.Group>
         <Sidebar.GroupLabel>Leagues</Sidebar.GroupLabel>
         {daysWithLeagues.length === 0 ? (

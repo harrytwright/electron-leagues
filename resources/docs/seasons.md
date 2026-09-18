@@ -26,13 +26,14 @@ The new season wizard suggests the next name in the same style as the league's l
 
 ## Creating a season
 
-**New season…** in a league asks for the season type, the name and the starting documents:
+**New season…** in a league asks for the season type and the name, then how to start it:
 
-- **Copy from templates** copies every visible, direct file in `_templates`.
-- **Copy from previous season** takes the previous season's direct files first, then fills missing names from templates, so previous filenames always win. It is only offered while the league has a running season.
-- **Start empty** copies nothing.
+- **Copy documents from previous season**, ticked by default, takes the previous season's direct files first and fills missing names from templates, so previous filenames always win. Untick it to copy only the templates. A league with no running season always starts from the templates.
+- Where the members database is on for the location, the dialog also asks for the **format** (players per team) and offers **Carry over teams and players**, which copies last season's teams and roster into the new season. Start date, weeks and fees are set afterwards on the season's Settings tab.
 
 Every copy is a snapshot, not a live link. Editing a template later never changes a season that already copied it.
+
+A season created while the members database is on carries its own settings, teams and roster in a file the app manages; that file is never shown among the season's documents and never copied between seasons.
 
 ## Archiving
 
