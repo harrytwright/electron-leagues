@@ -31,11 +31,13 @@ import { registerInvokeHandler, type InvokeListener, type IpcErrorReporter } fro
 import type { AppCommand } from '../shared/app-command'
 import { helpRequested, helpTargetToSearch, type HelpTarget } from '../shared/help'
 import type { ImportFilesResult, InvokeName } from '../shared/ipc'
+import type { SeasonSyncRequest } from '../shared/season-create'
 import {
   assertAbsolutePath,
   assertInsideRoot,
   planTrash,
-  resolveImportDestination
+  resolveImportDestination,
+  resolveLiveSeasonRoot
 } from './lib/paths'
 import { pruneRecents, seedRecents, updateRecents, type RootProbe } from './lib/recents'
 import {
@@ -47,7 +49,9 @@ import {
   saveMember,
   saveSeason
 } from './lib/members'
+import { renderPdfWithElectron } from './lib/pdf'
 import { listDirEntries, scanLeaguesRoot } from './lib/scanner'
+import { refreshSignInSheet, signInSheetPath, signInSheetState } from './lib/sign-in-sheet'
 import { executeTrashPlan } from './lib/trash'
 import { createRootWatcher, type RootWatcher } from './lib/watcher'
 import * as Sentry from '@sentry/electron/main'
@@ -420,9 +424,39 @@ function registerIpc(): void {
   })
 
   register('saveSeason', async (_e, ref, file, revision) => {
-    await saveSeason(requireRoot(), ref, file, revision)
+    const root = requireRoot()
+    await saveSeason(root, ref, file, revision)
     capture('season_roster_saved', { players: file.players.length, teams: file.teams.length })
+    // The sheet follows the roster; a failure here leaves the save intact and is retried on open.
+    try {
+      await regenerateSignInSheet(root, ref)
+      return { signInSheet: 'updated' }
+    } catch (err) {
+      console.warn('Could not refresh the sign-in sheet:', err)
+      Sentry.captureException(err, {
+        tags: { ipc_channel: 'season:save', sign_in_sheet: 'refresh-after-save' }
+      })
+      return { signInSheet: 'failed' }
+    }
   })
+
+  register('openSignInSheet', async (_e, ref) => {
+    const root = requireRoot()
+    const seasonPath = await resolveLiveSeasonRoot(root, ref.day, ref.leagueFolder, ref.seasonName)
+    const state = await signInSheetState(seasonPath)
+    const path =
+      state === 'fresh' ? signInSheetPath(seasonPath) : await regenerateSignInSheet(root, ref)
+    const failure = await shell.openPath(path)
+    if (failure) throw new UserFacingError(`Couldn’t open “${basename(path)}”: ${failure}`)
+    capture('signin_opened', { generated: state !== 'fresh' })
+    return path
+  })
+}
+
+async function regenerateSignInSheet(root: string, ref: SeasonSyncRequest): Promise<string> {
+  const path = await refreshSignInSheet(root, ref, renderPdfWithElectron)
+  capture('signin_generated')
+  return path
 }
 
 function windowBackground(): string {

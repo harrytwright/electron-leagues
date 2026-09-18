@@ -3,6 +3,12 @@ export function pathBasename(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path
 }
 
+/** Append a name to a folder path using whichever separator the path already uses. */
+export function joinPathLike(folder: string, name: string): string {
+  const separator = folder.includes('\\') ? '\\' : '/'
+  return folder.endsWith(separator) ? `${folder}${name}` : `${folder}${separator}${name}`
+}
+
 /** A compact path tail that preserves the path's native-looking separator. */
 export function pathTail(path: string, maximumSegments = 3): string {
   const segments = path.split(/[\\/]/).filter(Boolean)

@@ -277,12 +277,16 @@ it('drills into a season and back out through the breadcrumbs', async () => {
 })
 
 it('adds roster tabs to a season that has a season file, and only there', async () => {
-  installMockApi({
+  const api = installMockApi({
     getRoot: vi.fn().mockResolvedValue('/root'),
     listDir: vi.fn(
       listingFor({
         [`${LEAGUE_PATH}/2025-26`]: [
-          makeDirEntry({ name: 'Rules.docx', path: `${LEAGUE_PATH}/2025-26/Rules.docx` })
+          makeDirEntry({ name: 'Rules.docx', path: `${LEAGUE_PATH}/2025-26/Rules.docx` }),
+          makeDirEntry({
+            name: 'Sign-In Sheet.docx',
+            path: `${LEAGUE_PATH}/2025-26/Sign-In Sheet.docx`
+          })
         ],
         [`${LEAGUE_PATH}/2024-25`]: []
       })
@@ -344,6 +348,24 @@ it('adds roster tabs to a season that has a season file, and only there', async 
   expect(settings.getByLabelText(/start date/i)).toHaveValue('2025-09-01')
   expect(settings.getByLabelText(/fee per week/i)).toHaveValue('12.5')
   expect(settings.getByLabelText('Fee line 1 label')).toHaveValue('Lineage')
+
+  // The sheet is listed before it exists, opens through main, and marks the docx superseded.
+  await user.click(screen.getByRole('tab', { name: 'Files' }))
+  const sheet = await screen.findByRole('row', { name: /^Sign-In Sheet.pdf/ })
+  expect(sheet).toHaveAccessibleName('Sign-In Sheet.pdf Generated')
+  expect(within(sheet).getByText('—')).toBeInTheDocument()
+  await user.dblClick(sheet)
+  await waitFor(() =>
+    expect(api.openSignInSheet).toHaveBeenCalledExactlyOnceWith({
+      day: 'monday',
+      leagueFolder: 'Mixed triples',
+      seasonName: '2025-26'
+    })
+  )
+  expect(api.openFile).not.toHaveBeenCalled()
+  expect(screen.getByRole('row', { name: /^Sign-In Sheet.docx/ })).toHaveAccessibleName(
+    'Sign-In Sheet.docx Superseded'
+  )
 
   // The previous season has no season file, so it keeps the plain file browser.
   await user.click(screen.getAllByRole('link', { name: 'Mixed triples' })[0])
@@ -592,6 +614,53 @@ it('drops files into the folder being viewed, but never into the archive', async
   fireEvent.drop(dropZone(), { dataTransfer: { files } })
 
   expect(api.importFiles).toHaveBeenCalledTimes(2)
+})
+
+it('shows an archived season its roster but never a sheet to generate', async () => {
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    listDir: vi.fn(
+      listingFor({
+        ...ARCHIVE_LISTING,
+        [`${ARCHIVE_PATH}/2023-24`]: [
+          makeDirEntry({ name: 'Rules.docx', path: `${ARCHIVE_PATH}/2023-24/Rules.docx` }),
+          makeDirEntry({
+            name: 'Sign-In Sheet.docx',
+            path: `${ARCHIVE_PATH}/2023-24/Sign-In Sheet.docx`
+          })
+        ]
+      })
+    ),
+    membersSnapshot: vi.fn().mockResolvedValue(
+      makeSnapshot({
+        members: [makeMember({ id: 1, firstName: 'Ann', lastName: 'Lee' })],
+        seasons: [
+          makeRosterSeason({
+            season: '2023-24',
+            path: `${ARCHIVE_PATH}/2023-24`,
+            archived: true,
+            file: makeSeasonFile({ players: [{ memberId: 1, teamId: null }] })
+          })
+        ]
+      })
+    )
+  })
+  const user = userEvent.setup()
+  renderLeague()
+
+  await user.dblClick(screen.getByRole('row', { name: /^Archive/ }))
+  await user.dblClick(await screen.findByRole('row', { name: /^2023-24/ }))
+  await screen.findByRole('row', { name: /^Rules.docx/ })
+  expect(await screen.findByRole('tab', { name: 'Players' })).toBeInTheDocument()
+  expect(screen.queryByRole('row', { name: /Sign-In Sheet.pdf/ })).not.toBeInTheDocument()
+  expect(screen.getByRole('row', { name: /^Sign-In Sheet.docx/ })).toHaveAccessibleName(
+    'Sign-In Sheet.docx'
+  )
+
+  await user.click(screen.getByRole('tab', { name: 'Players' }))
+  const players = screen.getByRole('table', { name: 'Players' })
+  expect(within(players).getByRole('row', { name: /Ann Lee/ })).toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Add player…' })).not.toBeInTheDocument()
 })
 
 it('keeps the archive read-only at every depth', async () => {

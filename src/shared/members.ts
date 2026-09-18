@@ -13,6 +13,15 @@ export function isReservedFileName(name: string): boolean {
   return RESERVED_FILE_NAMES.has(name)
 }
 
+/** The bundled template a location without the members database fills in by hand. */
+export const SIGN_IN_TEMPLATE_FILE = 'Sign-In Sheet.docx'
+/** Generated from the roster into the season root; shown as a document, never copied forward. */
+export const SIGN_IN_SHEET_FILE = 'Sign-In Sheet.pdf'
+
+export function isGeneratedFileName(name: string): boolean {
+  return name === SIGN_IN_SHEET_FILE
+}
+
 export const GENDERS = ['male', 'female', 'other'] as const
 
 export type Gender = (typeof GENDERS)[number]

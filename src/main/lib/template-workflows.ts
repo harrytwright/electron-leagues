@@ -2,7 +2,7 @@ import { constants } from 'node:fs'
 import { copyFile, lstat, readdir, realpath, stat } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import { isSingleSegment } from '../../shared/path-segment'
-import { isReservedFileName } from '../../shared/members'
+import { isGeneratedFileName, isReservedFileName } from '../../shared/members'
 import type { WorkflowId } from '../../shared/workflows'
 import { isAlreadyExists, isMissing, UserFacingError } from './fs-errors'
 import { relativeInside } from './paths'
@@ -25,7 +25,7 @@ export interface PlannedCopy {
 
 export interface PlannedSkip {
   relativePath: string
-  reason: 'hidden' | 'reserved' | 'not-file' | 'already-present'
+  reason: 'hidden' | 'reserved' | 'generated' | 'not-file' | 'already-present'
 }
 
 export interface RuleResult {
@@ -96,6 +96,9 @@ function usableFiles(files: readonly FileMetadata[]): UsableFiles {
     } else if (isReservedFileName(file.relativePath)) {
       // A season's own settings and roster are created for it, never copied from last year's.
       skips.push({ relativePath: file.relativePath, reason: 'reserved' })
+    } else if (isGeneratedFileName(file.relativePath)) {
+      // Last season's sheet lists last season's players; the new season makes its own.
+      skips.push({ relativePath: file.relativePath, reason: 'generated' })
     } else if (file.kind !== 'file') {
       skips.push({ relativePath: file.relativePath, reason: 'not-file' })
     } else {

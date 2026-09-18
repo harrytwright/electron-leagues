@@ -27,6 +27,11 @@ export interface ImportFilesResult {
   failed: { source: string; message: string }[]
 }
 
+export interface SeasonSaveResult {
+  /** The sheet is remade after every save; a failure is retried the next time it is opened. */
+  signInSheet: 'updated' | 'failed'
+}
+
 export interface InvokeOutputs {
   getAppUpdateStatus: AppUpdateStatus
   getAnalyticsConfig: { apiKey: string | null; distinctId: string }
@@ -56,7 +61,8 @@ export interface InvokeOutputs {
   mergeMembers: void
   deleteMember: 'hard' | 'soft'
   renumberDuplicates: number[]
-  saveSeason: void
+  saveSeason: SeasonSaveResult
+  openSignInSheet: string
 }
 
 interface InvokeDefinition {
@@ -216,6 +222,12 @@ export const invokeDefinitions = {
     channel: 'season:save',
     args: z.tuple([seasonSyncRequestSchema, seasonFileSchema, revisionSchema]),
     failureMessage: 'Invalid season file'
+  },
+  /** Makes the season's sheet when missing or older than its roster, then opens it. */
+  openSignInSheet: {
+    channel: 'season:sign-in-sheet',
+    args: z.tuple([seasonSyncRequestSchema]),
+    failureMessage: 'Invalid sign-in sheet request'
   }
 } as const satisfies Record<keyof InvokeOutputs, InvokeDefinition>
 

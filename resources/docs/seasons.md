@@ -35,6 +35,10 @@ Every copy is a snapshot, not a live link. Editing a template later never change
 
 A season created while the members database is on carries its own settings, teams and roster in a file the app manages; that file is never shown among the season's documents and never copied between seasons.
 
+## Sign-in sheet
+
+Where a season has a roster, its files list a **Sign-In Sheet.pdf** marked _Generated_. The sheet is made from the roster the first time it is opened, and again whenever the roster or teams change, so it is always the current line-up: one block per team in lane-draw order with Cash and Card columns, blank rows for subs, and a space to write the week and date. Print it each league night. The bundled `Sign-In Sheet.docx` stays for leagues that fill a sheet in by hand and is marked _Superseded_ once a roster exists. Archived seasons keep whatever sheet they had.
+
 ## Archiving
 
 When a league already has two live seasons, the wizard offers a pre ticked **Archive** option that moves the oldest live season into `_archives`. Archived seasons stay browsable under the league's Archive folder.

@@ -45,6 +45,13 @@ export function useSeasonSave(season: RosterSeason): SeasonSave {
           add({ title: message, variant: 'error' })
           return message
         }
+        if (outcome.result.signInSheet === 'failed') {
+          add({
+            title: done,
+            description: 'The sign-in sheet could not be updated; it is made again when opened.'
+          })
+          return null
+        }
         add({ title: done, variant: 'success' })
         return null
       } catch (caught) {

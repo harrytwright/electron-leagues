@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { Badge, Button, DropdownMenu, Tabs, Text, useKumoToastManager } from '@cloudflare/kumo'
 import { DotsThreeIcon } from '@phosphor-icons/react'
-import type { SeasonNode } from '@shared/tree'
+import { SIGN_IN_SHEET_FILE, SIGN_IN_TEMPLATE_FILE } from '@shared/members'
+import type { DirEntry, SeasonNode } from '@shared/tree'
+import { joinPathLike } from '@renderer/lib/path-basename'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { plural } from '@renderer/lib/plural'
 import { revealLabel } from '@renderer/lib/os-labels'
@@ -96,6 +98,52 @@ export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): Re
       ? (snapshot.seasons.find((season) => season.path === trail.currentDir) ?? null)
       : null
   const activeSeasonTab = rosterSeason ? seasonTab : 'files'
+  const liveRoster = rosterSeason && !rosterSeason.archived ? rosterSeason : null
+  const signInSheet = useWriteOperation({
+    label: () => 'Preparing the sign-in sheet',
+    write: (seasonName: string) =>
+      window.api.openSignInSheet({ day: league.day, leagueFolder: league.folderName, seasonName })
+  })
+  // The sheet is made from the roster on first open, so it is listed before it exists.
+  const pendingEntries: DirEntry[] = liveRoster
+    ? [
+        {
+          name: SIGN_IN_SHEET_FILE,
+          path: joinPathLike(liveRoster.path, SIGN_IN_SHEET_FILE),
+          kind: 'file',
+          mtime: 0
+        }
+      ]
+    : []
+  const decorateSeasonRow = (
+    entry: DirEntry
+  ): { badge?: React.ReactNode; open?: () => Promise<void> } | undefined => {
+    if (!liveRoster) return undefined
+    if (entry.name === SIGN_IN_SHEET_FILE) {
+      const seasonName = liveRoster.season
+      return {
+        badge: <Badge variant="info">Generated</Badge>,
+        open: async () => {
+          if (signInSheet.pending) return
+          try {
+            await signInSheet.run(seasonName)
+          } catch (caught) {
+            add({ title: ipcErrorMessage(caught), variant: 'error' })
+          }
+        }
+      }
+    }
+    if (entry.name === SIGN_IN_TEMPLATE_FILE) {
+      return {
+        badge: (
+          <span title={`Replaced by ${SIGN_IN_SHEET_FILE}, which is made from the roster`}>
+            <Badge variant="secondary">Superseded</Badge>
+          </span>
+        )
+      }
+    }
+    return undefined
+  }
   const previousSeasonFormat = snapshot?.seasons.find(
     (season) => season.path === league.seasons.at(-1)?.path
   )?.file.format
@@ -328,6 +376,8 @@ export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): Re
             consumeFocusRequest={trail.consumeFocusRequest}
             onDropFiles={inArchive ? undefined : importer.importPaths}
             onBack={{ label: `Back to ${league.meta.name}`, action: () => trail.jumpTo(0) }}
+            pendingEntries={pendingEntries}
+            decorate={decorateSeasonRow}
           />
         ) : (
           <DirectoryBrowser

@@ -1,4 +1,4 @@
-import { lstat, stat } from 'node:fs/promises'
+import { lstat, stat, utimes } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   applyAgeRules,
@@ -205,12 +205,14 @@ export async function saveMember(
     const { id, ...details } = input
     const ruled = applyAgeRules(details, today)
     let saved: Member
+    let renamed = false
     if (id === undefined) {
       saved = { id: mintNumber(file), ...ruled }
       file.members.push(saved)
     } else {
       const existing = liveMember(file, id)
       saved = { ...existing, ...ruled }
+      renamed = existing.firstName !== saved.firstName || existing.lastName !== saved.lastName
       for (const key of [
         'dob',
         'gender',
@@ -225,8 +227,24 @@ export async function saveMember(
       file.members[file.members.indexOf(existing)] = saved
     }
     await writeMaster(root, file)
+    if (renamed) await touchLiveRostersWith(root, saved.id)
     return saved
   })
+}
+
+/**
+ * A renamed member changes what every sheet naming them should say; touching their
+ * live rosters is what marks those sheets stale.
+ */
+async function touchLiveRostersWith(root: string, memberId: number): Promise<void> {
+  const now = new Date()
+  for (const location of seasonLocations(root, await scanLeaguesRoot(root))) {
+    if (location.archived) continue
+    const season = await readSeasonFile(location.path)
+    if (season.status !== 'ok') continue
+    if (!season.value.players.some((player) => player.memberId === memberId)) continue
+    await utimes(seasonFilePath(location.path), now, now)
+  }
 }
 
 /**
