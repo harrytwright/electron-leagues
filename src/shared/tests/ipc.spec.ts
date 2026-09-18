@@ -92,7 +92,7 @@ describe('invoke definitions', () => {
           day: 'monday',
           leagueFolder: '../Pairs',
           seasonName: '2025-26',
-          source: 'empty',
+          source: 'templates',
           archiveOldest: false
         }
       ],
@@ -105,7 +105,7 @@ describe('invoke definitions', () => {
           day: 'monday',
           leagueFolder: 'Pairs',
           seasonName: '2025-q1',
-          source: 'empty',
+          source: 'templates',
           archiveOldest: false
         }
       ],

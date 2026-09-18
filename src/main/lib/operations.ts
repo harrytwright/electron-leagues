@@ -22,10 +22,18 @@ import {
   type SeasonName
 } from '../../shared/season'
 import { sanitiseFolderName } from '../../shared/sanitise'
+import { DEFAULT_FORMAT, newSeasonFile, type Player, type SeasonFile } from '../../shared/members'
 import type { Weekday } from '../../shared/weekday'
-import type { SeasonCreateRequest, SeasonSyncRequest } from '../../shared/season-create'
+import type {
+  SeasonCreateRequest,
+  SeasonRosterRequest,
+  SeasonSyncRequest
+} from '../../shared/season-create'
 import { errorCode, isAlreadyExists, isMissing, toUserFacing, UserFacingError } from './fs-errors'
 import { assertMetaWritable, META_FILE, writeLeagueMeta } from './league-meta'
+import { withRootLock } from './root-lock'
+import { writeAppJson } from './app-json'
+import { membersEnabled, readSeasonFile, seasonFilePath, writeSeasonFile } from './members'
 import {
   ARCHIVES_FOLDER,
   assertInsideRoot,
@@ -48,34 +56,12 @@ const SPECIAL_FOLDERS = ['_templates', '_shared', ARCHIVES_FOLDER] as const
 const REQUIRED_TEMPLATES = ['Rules.docx', 'Sign-In Sheet.docx'] as const
 const REQUIRED_TEMPLATE_NAMES: ReadonlySet<string> = new Set(REQUIRED_TEMPLATES)
 
-const templateTasks = new Map<string, Promise<void>>()
-
 export interface RepairResult {
   repaired: string[]
   warnings: string[]
 }
 
 export type RootSelectionMode = 'select' | 'init'
-
-/** Keep repair and its dependent readers together, including aliases of the same root. */
-export async function withTemplateLock<T>(root: string, run: () => Promise<T>): Promise<T> {
-  const key = await realpath(root).catch((err) => {
-    throw toUserFacing(err)
-  })
-  const previous = templateTasks.get(key) ?? Promise.resolve()
-  const task = previous.then(run)
-  // A failed operation releases the queue too; each caller still receives its own error.
-  const settled = task.then(
-    () => {},
-    () => {}
-  )
-  templateTasks.set(key, settled)
-  try {
-    return await task
-  } finally {
-    if (templateTasks.get(key) === settled) templateTasks.delete(key)
-  }
-}
 
 async function exists(path: string): Promise<boolean> {
   return stat(path).then(
@@ -90,9 +76,7 @@ export async function repairReservedLocations(
   templatesSource?: string
 ): Promise<RepairResult> {
   try {
-    return await withTemplateLock(root, () =>
-      repairReservedLocationsUnlocked(root, templatesSource)
-    )
+    return await withRootLock(root, () => repairReservedLocationsUnlocked(root, templatesSource))
   } catch (err) {
     // Unexpected repair faults remain reportable bugs rather than being
     // disguised as expected user mistakes.
@@ -296,7 +280,7 @@ export async function renameLeague(
   const displayName = opts.displayName.trim()
   const folderName = sanitiseFolderName(displayName)
   if (!folderName) throw new UserFacingError(`"${opts.displayName}" is not a usable league name`)
-  return withTemplateLock(opts.root, () =>
+  return withRootLock(opts.root, () =>
     renameLeagueUnlocked(opts, displayName, folderName, moveFolder)
   )
 }
@@ -433,7 +417,7 @@ export async function createSeason(opts: CreateSeasonOptions): Promise<CreateSea
   if (!season || season.name !== opts.seasonName) {
     throw new UserFacingError('Invalid season name')
   }
-  return withTemplateLock(opts.root, async () => {
+  return withRootLock(opts.root, async () => {
     // Resolve after waiting for earlier operations, not against a potentially stale pre-queue path.
     const seasonPath = await resolveNewLiveSeasonRoot(
       opts.root,
@@ -466,14 +450,17 @@ async function createSeasonUnlocked(
 
   await mkdir(seasonPath, { recursive: true })
   const previousDir =
-    opts.source === 'previous' && before.length > 0
-      ? join(leaguePath, before[before.length - 1].name)
-      : undefined
+    before.length > 0 ? join(leaguePath, before[before.length - 1].name) : undefined
   await runWorkflow(opts.source, {
-    current: previousDir,
+    current: opts.source === 'previous' ? previousDir : undefined,
     templates: join(opts.root, '_templates'),
     destination: seasonPath
   })
+  // Every season of a members-enabled location gets a file, because none is ever backfilled.
+  if (await membersEnabled(opts.root)) {
+    const roster = opts.roster ?? { format: DEFAULT_FORMAT, carryOver: false }
+    await writeSeasonFile(seasonPath, await startingSeasonFile(roster, previousDir))
+  }
 
   let archived: string | null = null
   if (oldest) {
@@ -494,6 +481,65 @@ async function createSeasonUnlocked(
   return { seasonPath, archived }
 }
 
+/** Everything about a player carries over except a LeagueSecretary id, which belongs to one season. */
+function carriedOverPlayer(player: Player): Player {
+  const carried: Player = { memberId: player.memberId, teamId: player.teamId }
+  if (player.position !== undefined) carried.position = player.position
+  return carried
+}
+
+/**
+ * A carried-over roster keeps last year's teams, with their ids and lane draw, and
+ * players; dates, weeks, fees and LeagueSecretary ids start blank because they are
+ * set each season.
+ */
+async function startingSeasonFile(
+  roster: NonNullable<SeasonCreateRequest['roster']>,
+  previousDir: string | undefined
+): Promise<SeasonFile> {
+  const file = newSeasonFile(roster.format)
+  if (!roster.carryOver || !previousDir) return file
+  const previous = await readSeasonFile(previousDir)
+  if (previous.status !== 'ok') return file
+  return {
+    ...file,
+    teams: previous.value.teams,
+    players: previous.value.players.map(carriedOverPlayer)
+  }
+}
+
+export interface CreateRosterOptions extends SeasonSyncRequest {
+  root: string
+  roster: SeasonRosterRequest
+}
+
+/** Give a live season made before the members database was on its own roster file. */
+export async function createSeasonRoster(opts: CreateRosterOptions): Promise<void> {
+  return withRootLock(opts.root, async () => {
+    if (!(await membersEnabled(opts.root))) {
+      throw new UserFacingError('The members database is not enabled for this location')
+    }
+    const seasonPath = await resolveLiveSeasonRoot(
+      opts.root,
+      opts.day,
+      opts.leagueFolder,
+      opts.seasonName
+    )
+    const leaguePath = join(opts.root, opts.day, opts.leagueFolder)
+    const seasons = await liveSeasonsOf(leaguePath)
+    const index = seasons.findIndex((season) => season.name === opts.seasonName)
+    const previousDir = index > 0 ? join(leaguePath, seasons[index - 1].name) : undefined
+    const file = await startingSeasonFile(opts.roster, previousDir)
+    try {
+      await writeAppJson(seasonFilePath(seasonPath), file, { exclusive: true })
+    } catch (err) {
+      if (isAlreadyExists(err)) throw new UserFacingError('This season already has a roster')
+      if (err instanceof UserFacingError) throw err
+      throw toUserFacing(err)
+    }
+  })
+}
+
 export interface SyncSeasonOptions extends SeasonSyncRequest {
   root: string
 }
@@ -502,7 +548,7 @@ export interface SyncSeasonOptions extends SeasonSyncRequest {
 export async function syncSeasonWithTemplates(
   opts: SyncSeasonOptions
 ): Promise<CopyExecutionResult> {
-  return withTemplateLock(opts.root, async () => {
+  return withRootLock(opts.root, async () => {
     const seasonPath = await resolveLiveSeasonRoot(
       opts.root,
       opts.day,

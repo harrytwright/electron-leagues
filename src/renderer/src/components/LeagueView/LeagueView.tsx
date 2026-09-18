@@ -1,7 +1,9 @@
 import { useState } from 'react'
-import { Badge, Button, DropdownMenu, Text, useKumoToastManager } from '@cloudflare/kumo'
+import { Badge, Button, DropdownMenu, Tabs, Text, useKumoToastManager } from '@cloudflare/kumo'
 import { DotsThreeIcon } from '@phosphor-icons/react'
-import type { SeasonNode } from '@shared/tree'
+import { SIGN_IN_SHEET_FILE, SIGN_IN_TEMPLATE_FILE } from '@shared/members'
+import type { DirEntry, SeasonNode } from '@shared/tree'
+import { joinPathLike } from '@renderer/lib/path-basename'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { plural } from '@renderer/lib/plural'
 import { revealLabel } from '@renderer/lib/os-labels'
@@ -9,19 +11,36 @@ import { sentenceCase } from '@renderer/lib/sentence-case'
 import { useCrumbs } from '@renderer/hooks/use-crumbs'
 import { useDirListing } from '@renderer/hooks/use-dir-listing'
 import { useImportFiles } from '@renderer/hooks/use-import-files'
+import { useKeyedState } from '@renderer/hooks/use-keyed-state'
+import { useMembers } from '@renderer/hooks/use-members'
 import { useQueryRefresh } from '@renderer/hooks/use-query-refresh'
 import { useTreeFolders } from '@renderer/hooks/use-tree-folders'
 import { useWriteOperation } from '@renderer/hooks/use-write-operation'
 import { ImportFilesButton } from '../FileBrowser/components/ImportFilesButton'
+import { CreateRosterDialog } from '../CreateRosterDialog'
 import { CrumbTrail } from '../CrumbTrail'
 import { DeleteResourceDialog, type DeleteTarget } from '../DeleteResourceDialog'
 import { DirectoryBrowser, type BrowserRow } from '../DirectoryBrowser'
 import { IconButton } from '../IconButton'
 import { NewSeasonDialog } from '../NewSeasonDialog'
 import { RenameLeagueDialog } from '../RenameLeagueDialog'
+import { SeasonRoster, type SeasonRosterTab } from '../SeasonRoster'
 import { TreeFileBrowser } from '../TreeFileBrowser'
 import type { Sort } from '../TreeFileBrowser/interface'
 import type { Props } from './interface'
+
+type SeasonTab = 'files' | SeasonRosterTab
+
+const SEASON_TABS: { value: SeasonTab; label: string }[] = [
+  { value: 'files', label: 'Files' },
+  { value: 'players', label: 'Players' },
+  { value: 'teams', label: 'Teams' },
+  { value: 'settings', label: 'Settings' }
+]
+
+function isSeasonTab(value: string): value is SeasonTab {
+  return SEASON_TABS.some((tab) => tab.value === value)
+}
 
 function seasonBadgeVariant(status: SeasonNode['status']): 'success' | 'info' {
   switch (status) {
@@ -36,12 +55,16 @@ function seasonBadgeVariant(status: SeasonNode['status']): 'success' | 'info' {
 export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): React.JSX.Element {
   const trail = useCrumbs(league.path, onCurrentDirChange)
   const [newSeason, setNewSeason] = useState(false)
+  const [settingUpRoster, setSettingUpRoster] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState<DeleteTarget | null>(null)
   const [zipping, setZipping] = useState<string | null>(null)
   const [syncingTemplates, setSyncingTemplates] = useState(false)
   const [treeSort, setTreeSort] = useState<Sort>({ column: 'name', direction: 'ascending' })
+  // Each season opens on its files; the tab is not carried from one season to another.
+  const [seasonTab, setSeasonTab] = useKeyedState<string, SeasonTab>(trail.currentDir, 'files')
   const tree = useTreeFolders(trail.currentDir)
+  const members = useMembers()
   const { add } = useKumoToastManager()
   const coordinator = useQueryRefresh()
   const zipOperation = useWriteOperation({
@@ -70,6 +93,70 @@ export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): Re
   const atLiveSeasonRoot = trail.crumbs.length === 1 && liveSeason !== undefined
   const listing = useDirListing(trail.atBase ? null : trail.currentDir)
   const importer = useImportFiles(inArchive ? undefined : trail.currentDir)
+  // A season with a season file gains roster tabs; older seasons keep the plain file browser.
+  const snapshot = members.data?.enabled ? members.data : null
+  const rosterSeason =
+    snapshot && inSeason
+      ? (snapshot.seasons.find((season) => season.path === trail.currentDir) ?? null)
+      : null
+  const activeSeasonTab = rosterSeason ? seasonTab : 'files'
+  // A season made before the database was on can be given a roster from its own menu.
+  const canSetUpRoster = atLiveSeasonRoot && snapshot !== null && rosterSeason === null
+  const seasonBefore = liveSeason
+    ? league.seasons[league.seasons.findIndex((season) => season.path === liveSeason.path) - 1]
+    : undefined
+  const previousRoster = seasonBefore
+    ? (snapshot?.seasons.find((season) => season.path === seasonBefore.path) ?? null)
+    : null
+  const liveRoster = rosterSeason && !rosterSeason.archived ? rosterSeason : null
+  const signInSheet = useWriteOperation({
+    label: () => 'Preparing the sign-in sheet',
+    write: (seasonName: string) =>
+      window.api.openSignInSheet({ day: league.day, leagueFolder: league.folderName, seasonName })
+  })
+  // The sheet is made from the roster on first open, so it is listed before it exists.
+  const pendingEntries: DirEntry[] = liveRoster
+    ? [
+        {
+          name: SIGN_IN_SHEET_FILE,
+          path: joinPathLike(liveRoster.path, SIGN_IN_SHEET_FILE),
+          kind: 'file',
+          mtime: 0
+        }
+      ]
+    : []
+  const decorateSeasonRow = (
+    entry: DirEntry
+  ): { badge?: React.ReactNode; open?: () => Promise<void> } | undefined => {
+    if (!liveRoster) return undefined
+    if (entry.name === SIGN_IN_SHEET_FILE) {
+      const seasonName = liveRoster.season
+      return {
+        badge: <Badge variant="info">Generated</Badge>,
+        open: async () => {
+          if (signInSheet.pending) return
+          try {
+            await signInSheet.run(seasonName)
+          } catch (caught) {
+            add({ title: ipcErrorMessage(caught), variant: 'error' })
+          }
+        }
+      }
+    }
+    if (entry.name === SIGN_IN_TEMPLATE_FILE) {
+      return {
+        badge: (
+          <span title={`Replaced by ${SIGN_IN_SHEET_FILE}, which is made from the roster`}>
+            <Badge variant="secondary">Superseded</Badge>
+          </span>
+        )
+      }
+    }
+    return undefined
+  }
+  const previousSeasonFormat = snapshot?.seasons.find(
+    (season) => season.path === league.seasons.at(-1)?.path
+  )?.file.format
 
   const zip = async (name: string): Promise<void> => {
     if (zipping) return
@@ -233,6 +320,11 @@ export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): Re
                 <DropdownMenu.Content>
                   {atLiveSeasonRoot ? (
                     <>
+                      {canSetUpRoster ? (
+                        <DropdownMenu.Item onClick={() => setSettingUpRoster(true)}>
+                          Set up roster…
+                        </DropdownMenu.Item>
+                      ) : null}
                       <DropdownMenu.Item
                         disabled={syncingTemplates}
                         onClick={() => void syncTemplates()}
@@ -270,7 +362,23 @@ export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): Re
       </div>
 
       <div className="flex min-h-0 w-full flex-1 flex-col">
-        {inSeason ? (
+        {rosterSeason ? (
+          <Tabs
+            aria-label={`${rosterSeason.season} season`}
+            tabs={SEASON_TABS}
+            value={activeSeasonTab}
+            onValueChange={(value) => {
+              if (isSeasonTab(value)) setSeasonTab(value)
+            }}
+            activateOnFocus
+            variant="underline"
+            size="base"
+            className="shrink-0 border-b border-kumo-line px-4"
+          />
+        ) : null}
+        {rosterSeason && snapshot && activeSeasonTab !== 'files' ? (
+          <SeasonRoster season={rosterSeason} snapshot={snapshot} tab={activeSeasonTab} />
+        ) : inSeason ? (
           <TreeFileBrowser
             currentDir={trail.currentDir}
             name={trail.crumbs[trail.crumbs.length - 1].name}
@@ -283,6 +391,8 @@ export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): Re
             consumeFocusRequest={trail.consumeFocusRequest}
             onDropFiles={inArchive ? undefined : importer.importPaths}
             onBack={{ label: `Back to ${league.meta.name}`, action: () => trail.jumpTo(0) }}
+            pendingEntries={pendingEntries}
+            decorate={decorateSeasonRow}
           />
         ) : (
           <DirectoryBrowser
@@ -308,10 +418,22 @@ export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): Re
 
       <NewSeasonDialog
         league={league}
+        roster={snapshot ? { defaultFormat: previousSeasonFormat } : null}
         open={newSeason}
         onOpenChange={setNewSeason}
         onCreated={() => setNewSeason(false)}
       />
+
+      {liveSeason ? (
+        <CreateRosterDialog
+          season={{ day: league.day, leagueFolder: league.folderName, seasonName: liveSeason.name }}
+          defaultFormat={previousRoster?.file.format}
+          previousHasRoster={previousRoster !== null}
+          open={settingUpRoster}
+          onOpenChange={setSettingUpRoster}
+          onCreated={() => setSettingUpRoster(false)}
+        />
+      ) : null}
 
       <RenameLeagueDialog
         league={league}

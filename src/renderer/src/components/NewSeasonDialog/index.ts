@@ -1,2 +1,2 @@
 export { NewSeasonDialog } from './NewSeasonDialog'
-export type { NewSeasonDialogProps, Props, SeasonTypeOption, Source } from './interface'
+export type { NewSeasonDialogProps, RosterOptions, SeasonTypeOption } from './interface'

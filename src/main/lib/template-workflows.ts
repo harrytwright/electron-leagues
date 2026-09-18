@@ -2,6 +2,7 @@ import { constants } from 'node:fs'
 import { copyFile, lstat, readdir, realpath, stat } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import { isSingleSegment } from '../../shared/path-segment'
+import { isGeneratedFileName, isReservedFileName } from '../../shared/members'
 import type { WorkflowId } from '../../shared/workflows'
 import { isAlreadyExists, isMissing, UserFacingError } from './fs-errors'
 import { relativeInside } from './paths'
@@ -24,7 +25,7 @@ export interface PlannedCopy {
 
 export interface PlannedSkip {
   relativePath: string
-  reason: 'hidden' | 'not-file' | 'already-present'
+  reason: 'hidden' | 'reserved' | 'generated' | 'not-file' | 'already-present'
 }
 
 export interface RuleResult {
@@ -92,6 +93,12 @@ function usableFiles(files: readonly FileMetadata[]): UsableFiles {
   for (const file of files) {
     if (file.relativePath.startsWith('.')) {
       skips.push({ relativePath: file.relativePath, reason: 'hidden' })
+    } else if (isReservedFileName(file.relativePath)) {
+      // A season's own settings and roster are created for it, never copied from last year's.
+      skips.push({ relativePath: file.relativePath, reason: 'reserved' })
+    } else if (isGeneratedFileName(file.relativePath)) {
+      // Last season's sheet lists last season's players; the new season makes its own.
+      skips.push({ relativePath: file.relativePath, reason: 'generated' })
     } else if (file.kind !== 'file') {
       skips.push({ relativePath: file.relativePath, reason: 'not-file' })
     } else {
@@ -142,8 +149,7 @@ export const WORKFLOW_HANDLERS: Record<WorkflowId, Rule> = {
       copies: [...copiedPrevious.copies, ...filledTemplates.copies],
       skips: [...copiedPrevious.skips, ...filledTemplates.skips]
     }
-  },
-  empty: async () => ({ copies: [], skips: [] })
+  }
 }
 
 function safeDirectName(relativePath: string): boolean {
@@ -212,7 +218,7 @@ export async function runWorkflow(
 ): Promise<CopyExecutionResult> {
   const [current, templates] = await Promise.all([
     directories.current ? readDirectMetadata(directories.current) : Promise.resolve([]),
-    action === 'empty' ? Promise.resolve([]) : readDirectMetadata(directories.templates)
+    readDirectMetadata(directories.templates)
   ])
   const result = await WORKFLOW_HANDLERS[action](current, templates)
   return executeCopyPlan(result, directories)
