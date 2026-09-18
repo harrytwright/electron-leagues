@@ -27,6 +27,7 @@ import type { Weekday } from '../../shared/weekday'
 import type { SeasonCreateRequest, SeasonSyncRequest } from '../../shared/season-create'
 import { errorCode, isAlreadyExists, isMissing, toUserFacing, UserFacingError } from './fs-errors'
 import { assertMetaWritable, META_FILE, writeLeagueMeta } from './league-meta'
+import { withRootLock } from './root-lock'
 import { membersEnabled, readSeasonFile, writeSeasonFile } from './members'
 import {
   ARCHIVES_FOLDER,
@@ -50,34 +51,12 @@ const SPECIAL_FOLDERS = ['_templates', '_shared', ARCHIVES_FOLDER] as const
 const REQUIRED_TEMPLATES = ['Rules.docx', 'Sign-In Sheet.docx'] as const
 const REQUIRED_TEMPLATE_NAMES: ReadonlySet<string> = new Set(REQUIRED_TEMPLATES)
 
-const templateTasks = new Map<string, Promise<void>>()
-
 export interface RepairResult {
   repaired: string[]
   warnings: string[]
 }
 
 export type RootSelectionMode = 'select' | 'init'
-
-/** Keep repair and its dependent readers together, including aliases of the same root. */
-export async function withTemplateLock<T>(root: string, run: () => Promise<T>): Promise<T> {
-  const key = await realpath(root).catch((err) => {
-    throw toUserFacing(err)
-  })
-  const previous = templateTasks.get(key) ?? Promise.resolve()
-  const task = previous.then(run)
-  // A failed operation releases the queue too; each caller still receives its own error.
-  const settled = task.then(
-    () => {},
-    () => {}
-  )
-  templateTasks.set(key, settled)
-  try {
-    return await task
-  } finally {
-    if (templateTasks.get(key) === settled) templateTasks.delete(key)
-  }
-}
 
 async function exists(path: string): Promise<boolean> {
   return stat(path).then(
@@ -92,9 +71,7 @@ export async function repairReservedLocations(
   templatesSource?: string
 ): Promise<RepairResult> {
   try {
-    return await withTemplateLock(root, () =>
-      repairReservedLocationsUnlocked(root, templatesSource)
-    )
+    return await withRootLock(root, () => repairReservedLocationsUnlocked(root, templatesSource))
   } catch (err) {
     // Unexpected repair faults remain reportable bugs rather than being
     // disguised as expected user mistakes.
@@ -298,7 +275,7 @@ export async function renameLeague(
   const displayName = opts.displayName.trim()
   const folderName = sanitiseFolderName(displayName)
   if (!folderName) throw new UserFacingError(`"${opts.displayName}" is not a usable league name`)
-  return withTemplateLock(opts.root, () =>
+  return withRootLock(opts.root, () =>
     renameLeagueUnlocked(opts, displayName, folderName, moveFolder)
   )
 }
@@ -435,7 +412,7 @@ export async function createSeason(opts: CreateSeasonOptions): Promise<CreateSea
   if (!season || season.name !== opts.seasonName) {
     throw new UserFacingError('Invalid season name')
   }
-  return withTemplateLock(opts.root, async () => {
+  return withRootLock(opts.root, async () => {
     // Resolve after waiting for earlier operations, not against a potentially stale pre-queue path.
     const seasonPath = await resolveNewLiveSeasonRoot(
       opts.root,
@@ -534,7 +511,7 @@ export interface SyncSeasonOptions extends SeasonSyncRequest {
 export async function syncSeasonWithTemplates(
   opts: SyncSeasonOptions
 ): Promise<CopyExecutionResult> {
-  return withTemplateLock(opts.root, async () => {
+  return withRootLock(opts.root, async () => {
     const seasonPath = await resolveLiveSeasonRoot(
       opts.root,
       opts.day,

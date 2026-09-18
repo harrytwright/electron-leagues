@@ -50,6 +50,13 @@ export const memberSchema = z.object({
 
 export type Member = z.infer<typeof memberSchema>
 
+/** What the member editor sends: everything a person types, plus the number when editing. */
+export const memberInputSchema = memberSchema
+  .omit({ id: true, mergedInto: true, deleted: true })
+  .extend({ id: z.number().int().positive().optional() })
+
+export type MemberInput = z.infer<typeof memberInputSchema>
+
 export const membersFileSchema = z.object({
   schemaVersion: z.literal(1),
   /** TRANSITIONAL: the next number to mint locally; the SBC system mints later. */
@@ -88,6 +95,8 @@ export const feeBreakdownSchema = z.object({
   label: z.string(),
   amount: z.number().nonnegative()
 })
+
+export type FeeBreakdown = z.infer<typeof feeBreakdownSchema>
 
 export const seasonFileSchema = z.object({
   schemaVersion: z.literal(1),
@@ -180,6 +189,9 @@ export function resolveMember(members: readonly Member[], id: number): Member | 
   return current
 }
 
+/** A file's identity on disk at read time; a write that names a stale one is refused. */
+export type FileRevision = string
+
 export interface RosterSeason {
   day: Weekday
   leagueFolder: string
@@ -187,6 +199,7 @@ export interface RosterSeason {
   season: string
   path: string
   archived: boolean
+  revision: FileRevision
   file: SeasonFile
 }
 
@@ -199,6 +212,7 @@ export type MembersProblem =
 export interface MembersSnapshot {
   /** False when the location has no `members.json`; every list is then empty. */
   enabled: boolean
+  revision: FileRevision
   nextId: number
   members: Member[]
   seasons: RosterSeason[]
@@ -206,7 +220,54 @@ export interface MembersSnapshot {
 }
 
 export function disabledMembersSnapshot(): MembersSnapshot {
-  return { enabled: false, nextId: 1, members: [], seasons: [], problems: [] }
+  return { enabled: false, revision: '', nextId: 1, members: [], seasons: [], problems: [] }
+}
+
+/**
+ * Under-18s keep no contact details of their own. A guardian contact is kept
+ * past 18 because it may be the only contact on file until a new one is collected.
+ */
+export function applyAgeRules<T extends Omit<MemberInput, 'id'>>(input: T, on: Date): T {
+  const trimmed = { ...input }
+  if (isUnder18(input, on)) {
+    delete trimmed.email
+    delete trimmed.phone
+  }
+  return trimmed
+}
+
+/**
+ * The surviving record after a merge: every id and spelling from both, and any
+ * blank the survivor had filled from the record being merged away.
+ */
+export function mergeMemberRecords(into: Member, from: Member): Member {
+  const aliases = new Set(into.aliases)
+  for (const alias of from.aliases) aliases.add(alias)
+  const fromName = memberDisplayName(from)
+  if (
+    normaliseName(from.firstName, from.lastName) !== normaliseName(into.firstName, into.lastName)
+  ) {
+    aliases.add(fromName)
+  }
+  const merged: Member = {
+    ...into,
+    mbdIds: [...new Set([...into.mbdIds, ...from.mbdIds])],
+    aliases: [...aliases]
+  }
+  if (merged.dob === undefined && from.dob !== undefined) merged.dob = from.dob
+  if (merged.gender === undefined && from.gender !== undefined) merged.gender = from.gender
+  if (merged.email === undefined && from.email !== undefined) merged.email = from.email
+  if (merged.phone === undefined && from.phone !== undefined) merged.phone = from.phone
+  if (merged.guardianContact === undefined && from.guardianContact !== undefined) {
+    merged.guardianContact = from.guardianContact
+  }
+  if (merged.notes === undefined && from.notes !== undefined) merged.notes = from.notes
+  return merged
+}
+
+/** Team ids never repeat within a location; the random part keeps two machines apart. */
+export function newTeamId(random: () => string): string {
+  return `team_${random()}`
 }
 
 export interface Membership {

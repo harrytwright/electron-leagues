@@ -101,10 +101,19 @@ export function makeRosterSeason(overrides: Partial<RosterSeason> = {}): RosterS
     season,
     path: overrides.path ?? `/root/${day}/${leagueFolder}/${season}`,
     archived: overrides.archived ?? false,
+    revision: overrides.revision ?? 'season-r1',
     file: overrides.file ?? makeSeasonFile()
   }
 }
 
 export function makeSnapshot(overrides: Partial<MembersSnapshot> = {}): MembersSnapshot {
-  return { enabled: true, nextId: 1, members: [], seasons: [], problems: [], ...overrides }
+  return {
+    enabled: true,
+    revision: 'members-r1',
+    nextId: 1,
+    members: [],
+    seasons: [],
+    problems: [],
+    ...overrides
+  }
 }

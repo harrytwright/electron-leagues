@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { helpTargetSchema } from './help'
 import type { DirEntry, LeaguesTree } from './tree'
 import type { AppUpdateStatus } from './app-update'
-import type { MembersSnapshot } from './members'
+import { memberInputSchema, seasonFileSchema, type Member, type MembersSnapshot } from './members'
 import {
   leagueFolderSchema,
   seasonCreateRequestSchema,
@@ -14,6 +14,8 @@ import {
 } from './season-create'
 
 const pathSchema = z.string().min(1)
+const revisionSchema = z.string()
+const memberIdSchema = z.number().int().positive()
 
 export interface ZipArchiveResult {
   zips: string[]
@@ -50,6 +52,11 @@ export interface InvokeOutputs {
   openHelp: void
   enableMembers: void
   membersSnapshot: MembersSnapshot | null
+  saveMember: Member
+  mergeMembers: void
+  deleteMember: 'hard' | 'soft'
+  renumberDuplicates: number[]
+  saveSeason: void
 }
 
 interface InvokeDefinition {
@@ -183,6 +190,32 @@ export const invokeDefinitions = {
     channel: 'members:snapshot',
     args: z.tuple([]),
     failureMessage: 'Invalid members request'
+  },
+  /** Every members write names the file revision it started from; a stale one is refused. */
+  saveMember: {
+    channel: 'members:save',
+    args: z.tuple([memberInputSchema, revisionSchema]),
+    failureMessage: 'Invalid member details'
+  },
+  mergeMembers: {
+    channel: 'members:merge',
+    args: z.tuple([memberIdSchema, memberIdSchema, revisionSchema]),
+    failureMessage: 'Invalid merge request'
+  },
+  deleteMember: {
+    channel: 'members:delete',
+    args: z.tuple([memberIdSchema, revisionSchema]),
+    failureMessage: 'Invalid delete request'
+  },
+  renumberDuplicates: {
+    channel: 'members:renumber',
+    args: z.tuple([memberIdSchema, z.number().int().nonnegative(), revisionSchema]),
+    failureMessage: 'Invalid renumber request'
+  },
+  saveSeason: {
+    channel: 'season:save',
+    args: z.tuple([seasonSyncRequestSchema, seasonFileSchema, revisionSchema]),
+    failureMessage: 'Invalid season file'
   }
 } as const satisfies Record<keyof InvokeOutputs, InvokeDefinition>
 

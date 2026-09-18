@@ -118,11 +118,19 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
     enableMembers: vi.fn<RendererApi['enableMembers']>().mockResolvedValue(undefined),
     membersSnapshot: vi.fn<RendererApi['membersSnapshot']>().mockResolvedValue({
       enabled: false,
+      revision: '',
       nextId: 1,
       members: [],
       seasons: [],
       problems: []
     }),
+    saveMember: vi.fn<RendererApi['saveMember']>((input) =>
+      Promise.resolve({ id: input.id ?? 1, ...input })
+    ),
+    mergeMembers: vi.fn<RendererApi['mergeMembers']>().mockResolvedValue(undefined),
+    deleteMember: vi.fn<RendererApi['deleteMember']>().mockResolvedValue('hard'),
+    renumberDuplicates: vi.fn<RendererApi['renumberDuplicates']>().mockResolvedValue([]),
+    saveSeason: vi.fn<RendererApi['saveSeason']>().mockResolvedValue(undefined),
     ...overrides
   }
 

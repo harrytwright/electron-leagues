@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest'
 import {
   ageOn,
+  applyAgeRules,
   deriveMemberships,
   disabledMembersSnapshot,
   findRosterProblems,
@@ -44,13 +45,22 @@ function rosterSeason(overrides: Partial<RosterSeason> = {}): RosterSeason {
     season: '2025-26',
     path: '/root/monday/Mixed triples/2025-26',
     archived: false,
+    revision: 'r1',
     file: seasonFile(),
     ...overrides
   }
 }
 
 function snapshot(overrides: Partial<MembersSnapshot> = {}): MembersSnapshot {
-  return { enabled: true, nextId: 1, members: [], seasons: [], problems: [], ...overrides }
+  return {
+    enabled: true,
+    revision: 'r0',
+    nextId: 1,
+    members: [],
+    seasons: [],
+    problems: [],
+    ...overrides
+  }
 }
 
 describe('schemas', () => {
@@ -123,6 +133,33 @@ describe('ages', () => {
     )
     expect(needsDetails(member({ id: 1, mergedInto: 2 }), on)).toBe(false)
     expect(needsDetails(member({ id: 1, deleted: true }), on)).toBe(false)
+  })
+})
+
+describe('applyAgeRules', () => {
+  const on = new Date(2026, 8, 18)
+  const details = {
+    firstName: 'Kid',
+    lastName: 'Lee',
+    email: 'k@x.org',
+    phone: '0770',
+    guardianContact: 'Dad',
+    mbdIds: [],
+    aliases: [],
+    marketing: true
+  }
+
+  test('strips a junior’s own contact and keeps a guardian contact past 18', () => {
+    expect(applyAgeRules({ ...details, dob: '2015-01-01' }, on)).toEqual({
+      ...details,
+      dob: '2015-01-01',
+      email: undefined,
+      phone: undefined
+    })
+    expect(applyAgeRules({ ...details, dob: '2000-01-01' }, on)).toEqual({
+      ...details,
+      dob: '2000-01-01'
+    })
   })
 })
 

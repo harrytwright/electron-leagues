@@ -1,9 +1,20 @@
 import { useMemo, useRef, useState } from 'react'
-import { Badge, Button, Input, Select, Table, Text, useKumoToastManager } from '@cloudflare/kumo'
+import {
+  Badge,
+  Button,
+  DropdownMenu,
+  Input,
+  Select,
+  Table,
+  Text,
+  useKumoToastManager
+} from '@cloudflare/kumo'
+import { DotsThreeIcon } from '@phosphor-icons/react/dist/csr/DotsThree'
+import { UserPlusIcon } from '@phosphor-icons/react/dist/csr/UserPlus'
 import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/csr/MagnifyingGlass'
 import { XIcon } from '@phosphor-icons/react/dist/csr/X'
 import { WarningCircleIcon } from '@phosphor-icons/react/dist/csr/WarningCircle'
-import type { MembersProblem, MembersSnapshot } from '@shared/members'
+import type { Member, MembersProblem, MembersSnapshot } from '@shared/members'
 import { useAppCommandHandler } from '@renderer/hooks/use-app-commands'
 import { useMembers } from '@renderer/hooks/use-members'
 import { useQueryRefresh } from '@renderer/hooks/use-query-refresh'
@@ -22,8 +33,11 @@ import {
 } from '@renderer/lib/members-filter'
 import { pathTail } from '@renderer/lib/path-basename'
 import { plural } from '@renderer/lib/plural'
+import { DeleteMemberDialog } from '../DeleteMemberDialog'
 import { ErrorState } from '../ErrorState'
 import { IconButton } from '../IconButton'
+import { MemberDialog } from '../MemberDialog'
+import { MergeMemberDialog } from '../MergeMemberDialog'
 import { FILE_TABLE_CLASS, STATIC_ROW_CLASS } from '../FileBrowser/styles'
 import type { Props } from './interface'
 
@@ -106,12 +120,50 @@ function EnableMembers({ root }: { root: string }): React.JSX.Element {
   )
 }
 
+type MemberAction =
+  | { kind: 'new' }
+  | { kind: 'edit'; member: Member }
+  | { kind: 'merge'; member: Member }
+  | { kind: 'delete'; member: Member }
+
 function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.Element {
   const [query, setQuery] = useState('')
   const [quick, setQuick] = useState<QuickFilter>('all')
   const [leagueFolder, setLeagueFolder] = useState<string>(ALL_LEAGUES)
+  const [action, setAction] = useState<MemberAction | null>(null)
   const filterRef = useRef<HTMLInputElement>(null)
   const coordinator = useQueryRefresh()
+  const { add } = useKumoToastManager()
+  const renumber = useWriteOperation({
+    label: () => 'Renumbering members',
+    write: ({ id, keepIndex }: { id: number; keepIndex: number }) =>
+      window.api.renumberDuplicates(id, keepIndex, snapshot.revision)
+  })
+
+  const keepNumber = async (member: Member): Promise<void> => {
+    const holders = snapshot.members.filter((candidate) => candidate.id === member.id)
+    try {
+      const outcome = await renumber.run({ id: member.id, keepIndex: holders.indexOf(member) })
+      const done = `Gave ${plural(outcome.result.length, 'other record')} a new number`
+      add({
+        title:
+          outcome.status === 'refresh-failed'
+            ? `${done}, but the list could not be refreshed: ${outcome.refreshError}`
+            : done,
+        variant: outcome.status === 'refresh-failed' ? 'error' : 'success'
+      })
+    } catch (caught) {
+      add({ title: ipcErrorMessage(caught), variant: 'error' })
+    }
+  }
+  const duplicatedIds = new Set(
+    snapshot.problems.flatMap((problem) =>
+      problem.kind === 'duplicate-number' ? [problem.id] : []
+    )
+  )
+  const closeAction = (open: boolean): void => {
+    if (!open) setAction(null)
+  }
 
   useAppCommandHandler('refresh', () => void coordinator.refresh())
   useAppCommandHandler('focus-filter', () => {
@@ -188,6 +240,15 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
             Showing {visible.length} of {population.length}
           </Text>
         </span>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          icon={<UserPlusIcon aria-hidden size={14} />}
+          onClick={() => setAction({ kind: 'new' })}
+        >
+          New member…
+        </Button>
       </div>
       {snapshot.problems.length > 0 ? (
         <section
@@ -211,12 +272,15 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
               <Table.Head className="w-28">Born</Table.Head>
               <Table.Head>Contact</Table.Head>
               <Table.Head>Leagues</Table.Head>
+              <Table.Head className="w-12">
+                <span className="sr-only">Actions</span>
+              </Table.Head>
             </Table.Row>
           </Table.Header>
           <Table.Body>
             {visible.length === 0 ? (
               <Table.Row>
-                <Table.Cell colSpan={5} className="py-10 text-center text-kumo-subtle">
+                <Table.Cell colSpan={6} className="py-10 text-center text-kumo-subtle">
                   {nothingYet
                     ? 'No members yet. New seasons add players here as you build their rosters.'
                     : 'No members match this filter.'}
@@ -255,12 +319,83 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
                       ))}
                     </div>
                   </Table.Cell>
+                  <Table.Cell>
+                    <DropdownMenu>
+                      <DropdownMenu.Trigger
+                        render={
+                          <IconButton
+                            variant="ghost"
+                            size="sm"
+                            icon={<DotsThreeIcon aria-hidden size={16} weight="bold" />}
+                            aria-label={`Actions for ${row.name}`}
+                          />
+                        }
+                      />
+                      <DropdownMenu.Content>
+                        {duplicatedIds.has(row.member.id) ? (
+                          // Main addresses a member by number, so a shared number must be
+                          // resolved before any other action can be trusted to hit this record.
+                          <DropdownMenu.Item
+                            disabled={renumber.pending}
+                            onClick={() => void keepNumber(row.member)}
+                          >
+                            Keep this number, renumber the others
+                          </DropdownMenu.Item>
+                        ) : (
+                          <>
+                            <DropdownMenu.Item
+                              disabled={row.member.deleted}
+                              onClick={() => setAction({ kind: 'edit', member: row.member })}
+                            >
+                              Edit…
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Item
+                              disabled={row.member.deleted}
+                              onClick={() => setAction({ kind: 'merge', member: row.member })}
+                            >
+                              Merge into…
+                            </DropdownMenu.Item>
+                            <DropdownMenu.Separator />
+                            <DropdownMenu.Item
+                              variant="danger"
+                              disabled={row.member.deleted}
+                              onClick={() => setAction({ kind: 'delete', member: row.member })}
+                            >
+                              Delete…
+                            </DropdownMenu.Item>
+                          </>
+                        )}
+                      </DropdownMenu.Content>
+                    </DropdownMenu>
+                  </Table.Cell>
                 </Table.Row>
               ))
             )}
           </Table.Body>
         </Table>
       </div>
+
+      <MemberDialog
+        snapshot={snapshot}
+        member={action?.kind === 'edit' ? action.member : null}
+        open={action?.kind === 'new' || action?.kind === 'edit'}
+        onOpenChange={closeAction}
+        onSaved={() => setAction(null)}
+      />
+      <MergeMemberDialog
+        snapshot={snapshot}
+        member={action?.kind === 'merge' ? action.member : null}
+        open={action?.kind === 'merge'}
+        onOpenChange={closeAction}
+        onMerged={() => setAction(null)}
+      />
+      <DeleteMemberDialog
+        snapshot={snapshot}
+        member={action?.kind === 'delete' ? action.member : null}
+        open={action?.kind === 'delete'}
+        onOpenChange={closeAction}
+        onDeleted={() => setAction(null)}
+      />
     </div>
   )
 }

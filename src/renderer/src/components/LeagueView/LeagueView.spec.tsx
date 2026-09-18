@@ -339,10 +339,11 @@ it('adds roster tabs to a season that has a season file, and only there', async 
   ).toHaveTextContent('1Ants1 player of 2')
 
   await user.click(screen.getByRole('tab', { name: 'Settings' }))
-  const settings = screen.getByRole('region', { name: 'Settings' })
-  expect(settings).toHaveTextContent('Doubles')
-  expect(settings).toHaveTextContent('1 September 2025')
-  expect(settings).toHaveTextContent('£12.50 (Lineage £9.00)')
+  const settings = within(screen.getByRole('region', { name: 'Settings' }))
+  expect(settings.getByLabelText(/format/i)).toHaveTextContent('Doubles')
+  expect(settings.getByLabelText(/start date/i)).toHaveValue('2025-09-01')
+  expect(settings.getByLabelText(/fee per week/i)).toHaveValue('12.5')
+  expect(settings.getByLabelText('Fee line 1 label')).toHaveValue('Lineage')
 
   // The previous season has no season file, so it keeps the plain file browser.
   await user.click(screen.getAllByRole('link', { name: 'Mixed triples' })[0])

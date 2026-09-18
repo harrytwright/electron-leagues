@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import { MembersView } from './index'
@@ -109,4 +109,106 @@ it('reports a failed read with a retry', async () => {
   await user.click(screen.getByRole('button', { name: 'Try again' }))
 
   expect(await screen.findByRole('row', { name: /Jane Doe/ })).toBeInTheDocument()
+})
+
+function twoMembersSnapshot(): ReturnType<typeof makeSnapshot> {
+  return makeSnapshot({
+    revision: 'rev-2',
+    nextId: 3,
+    members: [
+      makeMember({ id: 1, firstName: 'Ann', lastName: 'Lee' }),
+      makeMember({ id: 2, firstName: 'Bob', lastName: 'Kay' })
+    ]
+  })
+}
+
+async function openRowMenu(user: ReturnType<typeof userEvent.setup>, name: string): Promise<void> {
+  await user.click(await screen.findByRole('button', { name: `Actions for ${name}` }))
+  await screen.findByRole('menu')
+}
+
+it('adds a new member from the toolbar', async () => {
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot())
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: 'New member…' }))
+  await user.type(screen.getByLabelText(/first name/i), 'Cy')
+  await user.type(screen.getByLabelText(/last name/i), 'Dee')
+  await user.click(screen.getByRole('button', { name: 'Add member' }))
+
+  await waitFor(() => expect(api.saveMember).toHaveBeenCalledOnce())
+  expect(api.saveMember).toHaveBeenCalledWith(
+    expect.objectContaining({ firstName: 'Cy', lastName: 'Dee' }),
+    'rev-2'
+  )
+  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+})
+
+it('merges one member into another from the row menu', async () => {
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot())
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await openRowMenu(user, 'Bob Kay')
+  await user.click(screen.getByRole('menuitem', { name: 'Merge into…' }))
+  expect(await screen.findByRole('dialog')).toHaveTextContent('Merge Bob Kay into…')
+  screen.getByLabelText(/keep/i).focus()
+  await user.keyboard('{ArrowDown}')
+  await user.click(await screen.findByRole('option', { name: '000001 Ann Lee' }))
+  await user.click(screen.getByRole('button', { name: 'Merge members' }))
+
+  await waitFor(() => expect(api.mergeMembers).toHaveBeenCalledExactlyOnceWith(2, 1, 'rev-2'))
+})
+
+it('deletes a member, explaining whether they are hidden or removed', async () => {
+  const snapshot = twoMembersSnapshot()
+  snapshot.seasons = [
+    makeRosterSeason({ file: makeSeasonFile({ players: [{ memberId: 1, teamId: null }] }) })
+  ]
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(snapshot),
+    deleteMember: vi.fn().mockResolvedValue('soft')
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await openRowMenu(user, 'Ann Lee')
+  await user.click(screen.getByRole('menuitem', { name: 'Delete…' }))
+  const dialog = await screen.findByRole('dialog')
+  expect(dialog).toHaveTextContent('hidden from the list rather than removed')
+  await user.click(screen.getByRole('button', { name: 'Hide member' }))
+
+  await waitFor(() => expect(api.deleteMember).toHaveBeenCalledExactlyOnceWith(1, 'rev-2'))
+})
+
+it('lets one holder of a duplicated number keep it', async () => {
+  const snapshot = makeSnapshot({
+    revision: 'rev-3',
+    nextId: 4,
+    members: [
+      makeMember({ id: 3, firstName: 'First', lastName: 'Holder' }),
+      makeMember({ id: 3, firstName: 'Second', lastName: 'Holder' })
+    ],
+    problems: [{ kind: 'duplicate-number', id: 3, count: 2 }]
+  })
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(snapshot),
+    renumberDuplicates: vi.fn().mockResolvedValue([4])
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await openRowMenu(user, 'Second Holder')
+  await user.click(screen.getByRole('menuitem', { name: /keep this number/i }))
+
+  await waitFor(() => expect(api.renumberDuplicates).toHaveBeenCalledExactlyOnceWith(3, 1, 'rev-3'))
 })

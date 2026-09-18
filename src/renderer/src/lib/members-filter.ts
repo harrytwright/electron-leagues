@@ -15,6 +15,7 @@ export const QUICK_FILTERS = [
   'needs-details',
   'possible-duplicates',
   'duplicate-numbers',
+  'mbd-duplicates',
   'deleted'
 ] as const
 
@@ -25,6 +26,7 @@ export const QUICK_FILTER_LABELS: Record<QuickFilter, string> = {
   'needs-details': 'Needs details',
   'possible-duplicates': 'Possible duplicates',
   'duplicate-numbers': 'Duplicate numbers',
+  'mbd-duplicates': 'More than one MBD id',
   deleted: 'Deleted'
 }
 
@@ -114,6 +116,10 @@ export function filterMemberRows(
       kept = kept.filter((row) => duplicated.has(row.member.id))
       break
     }
+    case 'mbd-duplicates':
+      // Two MBD ids on one member is the MBD holding the same bowler twice; a clean-up list.
+      kept = kept.filter((row) => !row.member.deleted && row.member.mbdIds.length > 1)
+      break
     case 'deleted':
       kept = kept.filter((row) => row.member.deleted === true)
       break

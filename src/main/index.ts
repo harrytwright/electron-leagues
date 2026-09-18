@@ -38,7 +38,15 @@ import {
   resolveImportDestination
 } from './lib/paths'
 import { pruneRecents, seedRecents, updateRecents, type RootProbe } from './lib/recents'
-import { buildMembersSnapshot, enableMembers } from './lib/members'
+import {
+  buildMembersSnapshot,
+  deleteMember,
+  enableMembers,
+  mergeMembers,
+  renumberDuplicates,
+  saveMember,
+  saveSeason
+} from './lib/members'
 import { listDirEntries, scanLeaguesRoot } from './lib/scanner'
 import { executeTrashPlan } from './lib/trash'
 import { createRootWatcher, type RootWatcher } from './lib/watcher'
@@ -386,6 +394,34 @@ function registerIpc(): void {
     const root = currentRoot()
     if (!root) return null
     return buildMembersSnapshot(root, await scanLeaguesRoot(root))
+  })
+
+  register('saveMember', async (_e, input, revision) => {
+    const saved = await saveMember(requireRoot(), input, revision)
+    capture(input.id === undefined ? 'member_created' : 'member_updated')
+    return saved
+  })
+
+  register('mergeMembers', async (_e, fromId, intoId, revision) => {
+    await mergeMembers(requireRoot(), fromId, intoId, revision)
+    capture('members_merged')
+  })
+
+  register('deleteMember', async (_e, id, revision) => {
+    const outcome = await deleteMember(requireRoot(), id, revision)
+    capture('member_deleted', { outcome })
+    return outcome
+  })
+
+  register('renumberDuplicates', async (_e, id, keepIndex, revision) => {
+    const renumbered = await renumberDuplicates(requireRoot(), id, keepIndex, revision)
+    capture('members_renumbered', { count: renumbered.length })
+    return renumbered
+  })
+
+  register('saveSeason', async (_e, ref, file, revision) => {
+    await saveSeason(requireRoot(), ref, file, revision)
+    capture('season_roster_saved', { players: file.players.length, teams: file.teams.length })
   })
 }
 
