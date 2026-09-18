@@ -3,7 +3,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from 'e
 import Store from 'electron-store'
 import { autoUpdater } from 'electron-updater'
 import { randomUUID } from 'node:crypto'
-import { stat } from 'node:fs/promises'
+import { stat, writeFile } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import icon from '../../resources/icon.png?asset'
 import { updateDiagnosticsMenu } from './lib/diagnostics-menu'
@@ -30,6 +30,8 @@ import { isMissing, toUserFacing, UserFacingError } from './lib/fs-errors'
 import { registerInvokeHandler, type InvokeListener, type IpcErrorReporter } from './lib/ipc-handle'
 import type { AppCommand } from '../shared/app-command'
 import { helpRequested, helpTargetToSearch, type HelpTarget } from '../shared/help'
+import { membersFileSchema } from '../shared/members'
+import { membersCsv } from '../shared/members-csv'
 import type { ImportFilesResult, InvokeName } from '../shared/ipc'
 import type { SeasonSyncRequest } from '../shared/season-create'
 import {
@@ -44,6 +46,9 @@ import {
   buildMembersSnapshot,
   deleteMember,
   enableMembers,
+  markCardsIssued,
+  membersFilePath,
+  readMasterForWrite,
   mergeMembers,
   renumberDuplicates,
   saveMember,
@@ -58,6 +63,8 @@ import {
   syncMbd,
   type MappingMemory
 } from './lib/imports'
+import { readAppJson } from './lib/app-json'
+import { clearCardSheets, generateCardSheet } from './lib/cards'
 import { renderPdfWithElectron } from './lib/pdf'
 import { listDirEntries, scanLeaguesRoot } from './lib/scanner'
 import { refreshSignInSheet, signInSheetPath, signInSheetState } from './lib/sign-in-sheet'
@@ -555,6 +562,59 @@ function registerIpc(): void {
       return summary
     }
   )
+
+  register('printCards', async (_e, ids, revision) => {
+    const root = requireRoot()
+    // A list that moved on is refused before any sheet of names is written anywhere.
+    const master = await readMasterForWrite(root, revision)
+    const wanted = new Set(ids)
+    const members = master.members.filter((member) => wanted.has(member.id))
+    if (members.length !== wanted.size) throw new UserFacingError('A chosen member is missing')
+    const path = await generateCardSheet({
+      members,
+      nextId: master.nextId,
+      title: basename(root),
+      tempRoot: app.getPath('temp'),
+      renderPdf: renderPdfWithElectron,
+      now: new Date()
+    })
+    await markCardsIssued(root, ids, revision)
+    const failure = await shell.openPath(path)
+    if (failure) throw new UserFacingError(`Couldn’t open “${basename(path)}”: ${failure}`)
+    capture('cards_printed', { count: members.length })
+    return path
+  })
+
+  register('exportMembersCsv', async (_e, ids, options) => {
+    if (!mainWindow) return null
+    const root = requireRoot()
+    const master = await readAppJson(membersFilePath(root), membersFileSchema)
+    if (master.status !== 'ok') {
+      throw new UserFacingError(
+        master.status === 'missing' ? 'The members database is not enabled' : master.message
+      )
+    }
+    const byId = new Map(master.value.members.map((member) => [member.id, member]))
+    const chosen = ids.map((id) => byId.get(id))
+    if (chosen.some((member) => member === undefined)) {
+      throw new UserFacingError('A chosen member is missing')
+    }
+    const members = chosen.flatMap((member) =>
+      member && (!options.marketingOnly || member.marketing) ? [member] : []
+    )
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export members',
+      defaultPath: join(app.getPath('documents'), 'Members.csv'),
+      filters: [{ name: 'CSV', extensions: ['csv'] }]
+    })
+    if (result.canceled || !result.filePath) return null
+    await writeFile(
+      result.filePath,
+      membersCsv(members, { nextId: master.value.nextId, today: new Date() })
+    )
+    capture('members_exported', { count: members.length })
+    return { path: result.filePath, count: members.length }
+  })
 }
 
 async function regenerateSignInSheet(root: string, ref: SeasonSyncRequest): Promise<string> {
@@ -767,5 +827,9 @@ app.on('before-quit', (event) => {
   if (flushedOnQuit) return
   flushedOnQuit = true
   event.preventDefault()
-  void Promise.allSettled([rootWatcher?.close(), shutdownAnalytics()]).then(() => app.quit())
+  void Promise.allSettled([
+    rootWatcher?.close(),
+    shutdownAnalytics(),
+    clearCardSheets(app.getPath('temp'))
+  ]).then(() => app.quit())
 })

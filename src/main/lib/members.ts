@@ -371,3 +371,21 @@ export async function saveSeason(
     await writeSeasonFile(seasonPath, file)
   })
 }
+
+/** Printing a card records the day; the card itself is a PDF the desk prints and forgets. */
+export async function markCardsIssued(
+  root: string,
+  ids: readonly number[],
+  expected: FileRevision,
+  today = new Date()
+): Promise<void> {
+  const issued = today.toISOString().slice(0, 10)
+  return withRootLock(root, async () => {
+    const file = await readMasterForWrite(root, expected)
+    for (const id of ids) {
+      const member = liveMember(file, id)
+      file.members[file.members.indexOf(member)] = { ...member, cardIssued: issued }
+    }
+    await writeMaster(root, file)
+  })
+}

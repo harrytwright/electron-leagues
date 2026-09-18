@@ -2,16 +2,23 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test } from 'vitest'
-import { emptyMembersFile, type MemberInput, type SeasonFile } from '../../../shared/members'
+import {
+  emptyMembersFile,
+  membersFileSchema,
+  type MemberInput,
+  type SeasonFile
+} from '../../../shared/members'
 import {
   buildMembersSnapshot,
   deleteMember,
   enableMembers,
+  markCardsIssued,
   membersEnabled,
   mergeMembers,
   renumberDuplicates,
   saveMember,
   saveSeason,
+  STALE_MESSAGE,
   writeSeasonFile
 } from '../members'
 import { scanLeaguesRoot } from '../scanner'
@@ -488,5 +495,32 @@ describe('saveSeason', () => {
     await expect(
       saveSeason(root, { ...ref, seasonName: '2023-24' }, seasonFile(), '')
     ).rejects.toThrow()
+  })
+})
+
+describe('markCardsIssued', () => {
+  test('stamps the chosen live members with the day and refuses a stale list', async () => {
+    await enableMembers(root)
+    const master = join(root, 'members.json')
+    await writeFile(
+      master,
+      JSON.stringify({
+        schemaVersion: 1,
+        nextId: 3,
+        members: [
+          { id: 1, firstName: 'Ann', lastName: 'Lee', mbdIds: [], aliases: [], marketing: true },
+          { id: 2, firstName: 'Bob', lastName: 'Kay', mbdIds: [], aliases: [], marketing: true }
+        ]
+      })
+    )
+    const snapshot = await buildMembersSnapshot(root, await scanLeaguesRoot(root))
+
+    await markCardsIssued(root, [2], snapshot.revision, new Date('2026-09-18T20:00:00Z'))
+    const members = membersFileSchema.parse(JSON.parse(await readFile(master, 'utf8'))).members
+    expect(members.map((member) => member.cardIssued)).toEqual([undefined, '2026-09-18'])
+
+    await expect(markCardsIssued(root, [1], snapshot.revision)).rejects.toThrow(STALE_MESSAGE)
+    const fresh = await buildMembersSnapshot(root, await scanLeaguesRoot(root))
+    await expect(markCardsIssued(root, [9], fresh.revision)).rejects.toThrow('not in the list')
   })
 })

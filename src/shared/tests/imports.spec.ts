@@ -70,7 +70,7 @@ function rows(...entries: [string, string, string, string?, string?][]): ImportR
 describe('parseDelimited', () => {
   test('reads quoted fields, doubled quotes, CRLF and a byte order mark', () => {
     const table = parseDelimited(
-      '﻿MBD ID,Name,Notes\r\n10,"Lee, Ann","said ""hi""\nthen left"\r\n\r\n11,Bob Kay,\r\n'
+      '\uFEFFMBD ID,Name,Notes\r\n10,"Lee, Ann","said ""hi""\nthen left"\r\n\r\n11,Bob Kay,\r\n'
     )
     expect(table.columns).toEqual(['MBD ID', 'Name', 'Notes'])
     expect(table.rows).toEqual([

@@ -247,3 +247,34 @@ it('starts an MBD sync from the toolbar picker or a dropped export', async () =>
   ).toBeInTheDocument()
   await waitFor(() => expect(api.previewImport).toHaveBeenLastCalledWith('bowlers.csv'))
 })
+
+it('prints a card from the row menu and a sheet for everyone shown, and opens the export', async () => {
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(
+      makeSnapshot({
+        revision: 'rev-5',
+        nextId: 4,
+        members: [
+          makeMember({ id: 1, firstName: 'Ann', lastName: 'Lee' }),
+          makeMember({ id: 2, firstName: 'Bob', lastName: 'Kay' }),
+          makeMember({ id: 3, firstName: 'Gone', lastName: 'Away', deleted: true })
+        ]
+      })
+    )
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await openRowMenu(user, 'Ann Lee')
+  await user.click(screen.getByRole('menuitem', { name: 'Print card' }))
+  await waitFor(() => expect(api.printCards).toHaveBeenCalledExactlyOnceWith([1], 'rev-5'))
+  expect(await screen.findByText(/Made a sheet of 1 card/)).toBeInTheDocument()
+
+  // Hidden members are never on the sheet, so the count reads two, not three.
+  await user.click(screen.getByRole('button', { name: 'Print 2 cards' }))
+  await waitFor(() => expect(api.printCards).toHaveBeenLastCalledWith([2, 1], 'rev-5'))
+
+  await user.click(screen.getByRole('button', { name: 'Export CSV…' }))
+  expect(await screen.findByRole('dialog', { name: 'Export members to CSV' })).toBeInTheDocument()
+})

@@ -172,6 +172,8 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
       seasonRevision: 'season-r1',
       sourceRevision: 'export-r1'
     }),
+    printCards: vi.fn<RendererApi['printCards']>().mockResolvedValue('/tmp/Member cards.pdf'),
+    exportMembersCsv: vi.fn<RendererApi['exportMembersCsv']>().mockResolvedValue(null),
     addPlayersFromExport: vi.fn<RendererApi['addPlayersFromExport']>().mockResolvedValue({
       rows: 0,
       added: 0,

@@ -23,7 +23,7 @@ export const renderPdfWithElectron: PdfRenderer = async (html) => {
   let timer: NodeJS.Timeout | undefined
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(
-      () => reject(new Error('The sign-in sheet took too long to render')),
+      () => reject(new Error('The document took too long to render')),
       RENDER_TIMEOUT_MS
     )
   })

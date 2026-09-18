@@ -93,6 +93,10 @@ export interface InvokeOutputs {
   syncMbd: SyncSummary
   planPlayersImport: RosterPlanOutput
   addPlayersFromExport: ImportSummary
+  /** The card sheet's path, opened for printing. */
+  printCards: string
+  /** Where the file was saved and how many rows it holds, or null when the dialog was cancelled. */
+  exportMembersCsv: { path: string; count: number } | null
 }
 
 interface InvokeDefinition {
@@ -304,6 +308,17 @@ export const invokeDefinitions = {
       revisionSchema
     ]),
     failureMessage: 'Invalid player import request'
+  },
+  printCards: {
+    channel: 'members:print-cards',
+    args: z.tuple([z.array(memberIdSchema).min(1), revisionSchema]),
+    failureMessage: 'Invalid card request'
+  },
+  /** The given members in the given order; the renderer owns the filter and sort. */
+  exportMembersCsv: {
+    channel: 'members:export-csv',
+    args: z.tuple([z.array(memberIdSchema), z.object({ marketingOnly: z.boolean() })]),
+    failureMessage: 'Invalid export request'
   }
 } as const satisfies Record<keyof InvokeOutputs, InvokeDefinition>
 

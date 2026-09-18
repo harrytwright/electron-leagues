@@ -330,8 +330,11 @@ POS sets its customer-card value from a scan; nothing else is integrated in this
   details_ so contact can be collected; nothing is automatic.
 - `marketing` is opt-out (default on). While under 18 it governs the guardian contact (YBC and
   youth-tournament updates); it carries over unchanged at 18. CSV export respects it.
-- Personal data stays in `members.json` and season files. Nothing member-level is sent to
-  analytics or Sentry; `capture` calls carry counts only. Dropped exports are never kept.
+- Personal data stays in `members.json` and season files, apart from the copies the desk asks
+  for: a CSV export saved where they choose, and a card sheet written to a folder only that user
+  can read under the system temporary folder, which the app clears when it quits. Nothing
+  member-level is sent to analytics or Sentry; `capture` calls carry counts only. Dropped
+  exports are never kept.
 
 ### Transitional fields
 
@@ -350,32 +353,43 @@ These exist to bridge to the SBC Members system and are expected to move or go. 
 ### IPC surface
 
 New entries in `invokeDefinitions`, each with a zod argument schema and an `InvokeOutputs`
-type; the preload methods follow from the table.
+type; the preload methods follow from the table. Every write names the file revision
+(`mtime:size`) the renderer loaded, and a stale one is refused with a message that says so.
 
-| Name                   | Channel                 | Arguments                                 | Result                    |
-| ---------------------- | ----------------------- | ----------------------------------------- | ------------------------- |
-| `membersEnabled`       | `members:enabled`       | none                                      | `boolean`                 |
-| `enableMembers`        | `members:enable`        | none                                      | `void` (creates the file) |
-| `membersSnapshot`      | `members:snapshot`      | none                                      | `MembersSnapshot \| null` |
-| `saveMember`           | `members:save`          | `MemberInput`                             | `Member`                  |
-| `mergeMembers`         | `members:merge`         | `fromId`, `intoId`                        | `void`                    |
-| `deleteMember`         | `members:delete`        | `id`                                      | `'hard' \| 'soft'`        |
-| `saveSeason`           | `season:save`           | `SeasonRef`, `SeasonFile`                 | `void`                    |
-| `previewMapping`       | `import:preview`        | `sourcePath`                              | `MappingPreview`          |
-| `syncMbd`              | `members:sync-mbd`      | `sourcePath`, `Mapping`, `SyncDecision[]` | `SyncSummary`             |
-| `addPlayersFromExport` | `season:import-players` | `SeasonRef`, `sourcePath`, `Mapping`      | `ImportSummary`           |
-| `openSignInSheet`      | `season:sign-in-sheet`  | `SeasonRef`                               | path (generated if stale) |
-| `printCards`           | `members:print-cards`   | `id[]`                                    | path                      |
-| `exportMembersCsv`     | `members:export-csv`    | `MembersFilter`                           | path                      |
+| Name                   | Channel                 | Arguments                                                                   | Result                          |
+| ---------------------- | ----------------------- | --------------------------------------------------------------------------- | ------------------------------- |
+| `enableMembers`        | `members:enable`        | none                                                                        | `void` (creates the file)       |
+| `membersSnapshot`      | `members:snapshot`      | none                                                                        | `MembersSnapshot \| null`       |
+| `saveMember`           | `members:save`          | `MemberInput`, revision                                                     | `Member`                        |
+| `mergeMembers`         | `members:merge`         | `fromId`, `intoId`, revision                                                | `void`                          |
+| `deleteMember`         | `members:delete`        | `id`, revision                                                              | `'hard' \| 'soft'`              |
+| `renumberDuplicates`   | `members:renumber`      | `id`, `keepIndex`, revision                                                 | the new numbers                 |
+| `saveSeason`           | `season:save`           | `SeasonRef`, `SeasonFile`, revision                                         | whether the sheet was remade    |
+| `openSignInSheet`      | `season:sign-in-sheet`  | `SeasonRef`                                                                 | path (generated if stale)       |
+| `pickImportFile`       | `import:pick`           | none                                                                        | path or null                    |
+| `previewImport`        | `import:preview`        | `sourcePath`                                                                | `MappingPreview`                |
+| `planMbdSync`          | `members:plan-sync`     | `sourcePath`, `ImportMapping`                                               | `SyncPlan` and the revision     |
+| `syncMbd`              | `members:sync-mbd`      | `sourcePath`, `ImportMapping`, `SyncDecision[]`, revision                   | `SyncSummary`                   |
+| `planPlayersImport`    | `season:plan-import`    | `SeasonRef`, `sourcePath`, `ImportMapping`                                  | `RosterPlan` and both revisions |
+| `addPlayersFromExport` | `season:import-players` | `SeasonRef`, `sourcePath`, `ImportMapping`, lines to create, both revisions | `ImportSummary`                 |
+| `printCards`           | `members:print-cards`   | `id[]`, revision                                                            | path                            |
+| `exportMembersCsv`     | `members:export-csv`    | `id[]` in table order, `{ marketingOnly }`                                  | path, or null when cancelled    |
+
+Whether the feature is on is part of the snapshot (`enabled`), so there is no separate query.
+A sync is planned outside the lock and planned again under it from the same revision, so the
+decisions the desk made apply to exactly the list they were made on; the plan for a season
+import carries both revisions for the same reason.
 
 `SeasonRef` is the existing `seasonSyncRequestSchema` shape (`day`, `leagueFolder`,
 `seasonName`), validated in main by `resolveLiveSeasonRoot`. `SyncSummary` and
 `ImportSummary` follow the partial-result shape of `ZipArchiveResult` and
 `ImportFilesResult`: counts of what succeeded plus a `failed` list naming each row that did
-not, so one bad row never discards a batch. The snapshot is small (hundreds of members, tens of seasons) so one object over IPC replaces
-queries; the renderer groups and filters in memory. Analytics: `members_enabled`,
-`member_created`, `members_merged`, `mbd_synced { rows, created, merged }`,
-`players_imported { rows }`, `signin_generated`, `cards_printed { count }`.
+not, so one bad row never discards a batch. The snapshot is small (hundreds of members, tens of
+seasons) so one object over IPC replaces queries; the renderer groups and filters in memory,
+which is why the CSV export takes the ids in table order rather than a filter. Analytics:
+`members_enabled`, `member_created`, `members_merged`, `member_deleted`, `members_renumbered`,
+`season_roster_saved`, `mbd_synced { rows, created, merged }`, `players_imported { rows, added }`,
+`signin_generated`, `signin_opened`, `cards_printed { count }`, `members_exported { count }`.
 
 ### Phased delivery
 
@@ -388,11 +402,20 @@ queries; the renderer groups and filters in memory. Analytics: `members_enabled`
    mint under lock and re-read, padding, merge rewrites live seasons only, delete rules.
 3. **Sign-in sheet.** HTML layout, `printToPDF`, virtual row, regenerate-on-save and stale-on-
    open, `Superseded` badge on the docx. Tests: generated text contains teams in `teamNo`
-   order and the Subs block; archive never generates.
+   order and the Subs block; archive never generates. As built, the sheet is stamped with the
+   roster file's own modification time rather than compared against the clock, so a roster
+   saved on the other machine reads as stale whatever its clock says, and renaming a member
+   touches the rosters that list them.
 4. **MBD sync and export drop.** Column-mapping preview, matching rules, alias capture, drop
    handling. Needs one real all-bowlers export and one per-league export as fixtures. Tests:
-   each rule, repeat-sync asks nothing new, unknown-id rows.
-5. **Cards and CSV export.** Code 128 encoder, card sheet, `cardIssued`, filtered export.
+   each rule, repeat-sync asks nothing new, unknown-id rows. As built, exports are dropped on
+   the Members page or the Players tab (never the Files tab, which keeps copy-in) and read as
+   delimited text, with synthetic fixtures until a real export is to hand.
+5. **Cards and CSV export.** Code 128 encoder, card sheet, `cardIssued`, filtered export. As
+   built, the card sheet is a PDF opened from a private temporary folder for the desk to print
+   and cleared on quit; the barcode carries the raw id while the card prints the padded number;
+   the export takes the listed ids in table order with a marketing-only tick, skips hidden
+   records and gives an adult only their own contact.
 
 Phase 1 stands alone: a location can enable the feature, create seasons with teams, and see the
 empty structure; nothing in phases 2–5 changes the files' shape.

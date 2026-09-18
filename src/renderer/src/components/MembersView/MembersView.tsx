@@ -10,6 +10,8 @@ import {
   useKumoToastManager
 } from '@cloudflare/kumo'
 import { ArrowsClockwiseIcon } from '@phosphor-icons/react/dist/csr/ArrowsClockwise'
+import { DownloadSimpleIcon } from '@phosphor-icons/react/dist/csr/DownloadSimple'
+import { IdentificationCardIcon } from '@phosphor-icons/react/dist/csr/IdentificationCard'
 import { DotsThreeIcon } from '@phosphor-icons/react/dist/csr/DotsThree'
 import { UserPlusIcon } from '@phosphor-icons/react/dist/csr/UserPlus'
 import { MagnifyingGlassIcon } from '@phosphor-icons/react/dist/csr/MagnifyingGlass'
@@ -37,6 +39,7 @@ import { pathTail } from '@renderer/lib/path-basename'
 import { plural } from '@renderer/lib/plural'
 import { DeleteMemberDialog } from '../DeleteMemberDialog'
 import { ErrorState } from '../ErrorState'
+import { ExportCsvDialog } from '../ExportCsvDialog'
 import { MbdSyncDialog } from '../MbdSyncDialog'
 import { IconButton } from '../IconButton'
 import { MemberDialog } from '../MemberDialog'
@@ -135,6 +138,7 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
   const [leagueFolder, setLeagueFolder] = useState<string>(ALL_LEAGUES)
   const [action, setAction] = useState<MemberAction | null>(null)
   const [syncPath, setSyncPath] = useState<string | null>(null)
+  const [exporting, setExporting] = useState(false)
   const drop = useImportDrop(setSyncPath)
   const filterRef = useRef<HTMLInputElement>(null)
   const coordinator = useQueryRefresh()
@@ -144,6 +148,28 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
     write: ({ id, keepIndex }: { id: number; keepIndex: number }) =>
       window.api.renumberDuplicates(id, keepIndex, snapshot.revision)
   })
+
+  const cards = useWriteOperation({
+    label: (ids: number[]) => `Printing ${plural(ids.length, 'card')}`,
+    write: (ids) => window.api.printCards(ids, snapshot.revision)
+  })
+
+  const printCards = async (ids: number[]): Promise<void> => {
+    if (ids.length === 0 || cards.pending) return
+    try {
+      const outcome = await cards.run(ids)
+      const done = `Made a sheet of ${plural(ids.length, 'card')} and opened it for printing`
+      add({
+        title:
+          outcome.status === 'refresh-failed'
+            ? `${done}, but the list could not be refreshed: ${outcome.refreshError}`
+            : done,
+        variant: outcome.status === 'refresh-failed' ? 'error' : 'success'
+      })
+    } catch (caught) {
+      add({ title: ipcErrorMessage(caught), variant: 'error' })
+    }
+  }
 
   const keepNumber = async (member: Member): Promise<void> => {
     const holders = snapshot.members.filter((candidate) => candidate.id === member.id)
@@ -196,6 +222,8 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
     leagueFolder: leagueFolder === ALL_LEAGUES ? null : leagueFolder
   }).sort(compareMemberRows)
   const nothingYet = quick === 'all' && population.length === 0
+  // Cards and exports are for people on the list today; a hidden record is neither.
+  const listed = visible.flatMap((row) => (row.member.deleted ? [] : [row.member.id]))
   const leagueItems = {
     [ALL_LEAGUES]: 'All leagues',
     ...Object.fromEntries(leagues.map((league) => [league.folder, league.name]))
@@ -258,6 +286,30 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
             Showing {visible.length} of {population.length}
           </Text>
         </span>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          icon={<IdentificationCardIcon aria-hidden size={14} />}
+          disabled={cards.pending || listed.length === 0}
+          onClick={() => void printCards(listed)}
+        >
+          {cards.pending
+            ? 'Printing…'
+            : listed.length === 0
+              ? 'Print cards'
+              : `Print ${plural(listed.length, 'card')}`}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="secondary"
+          icon={<DownloadSimpleIcon aria-hidden size={14} />}
+          disabled={listed.length === 0}
+          onClick={() => setExporting(true)}
+        >
+          Export CSV…
+        </Button>
         <Button
           type="button"
           size="sm"
@@ -382,6 +434,12 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
                             >
                               Merge into…
                             </DropdownMenu.Item>
+                            <DropdownMenu.Item
+                              disabled={row.member.deleted || cards.pending}
+                              onClick={() => void printCards([row.member.id])}
+                            >
+                              Print card
+                            </DropdownMenu.Item>
                             <DropdownMenu.Separator />
                             <DropdownMenu.Item
                               variant="danger"
@@ -416,6 +474,7 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
         onOpenChange={closeAction}
         onMerged={() => setAction(null)}
       />
+      <ExportCsvDialog ids={listed} open={exporting} onOpenChange={setExporting} />
       <MbdSyncDialog
         snapshot={snapshot}
         path={syncPath}
