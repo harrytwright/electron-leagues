@@ -4,7 +4,8 @@ import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { DIR_QUERY_PREFIX } from '@renderer/queries/dir'
 import { ROOT_QUERY_KEY } from '@renderer/queries/root'
 import { treeQueryKey } from '@renderer/queries/tree'
-import { useOperationFeedback, type OperationScope } from './use-operation-feedback'
+import type { OperationScope } from '@renderer/contexts/OperationFeedbackContext'
+import { useOperationFeedback } from './use-operation-feedback'
 import { useQueryRefresh } from './use-query-refresh'
 
 export type WriteOutcome<TResult> =
