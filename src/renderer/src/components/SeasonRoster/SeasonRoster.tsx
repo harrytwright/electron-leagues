@@ -121,45 +121,55 @@ function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element
       onDragOver={readOnly ? undefined : drop.onDragOver}
       onDrop={readOnly ? undefined : drop.onDrop}
     >
-      {readOnly ? null : (
-        <div className="flex shrink-0 items-center gap-2 border-b border-kumo-line px-4 py-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            icon={<PlusIcon aria-hidden size={14} />}
-            disabled={saver.pending}
-            onClick={() => setDialog({ kind: 'add' })}
-          >
-            Add player…
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            icon={<FileArrowUpIcon aria-hidden size={14} />}
-            disabled={saver.pending}
-            onClick={() => void pickExport()}
-          >
-            Add from export…
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            icon={<UserPlusIcon aria-hidden size={14} />}
-            disabled={saver.pending}
-            onClick={() => setDialog({ kind: 'new-member' })}
-          >
-            New member…
-          </Button>
-          <span className="ml-auto">
-            <Text variant="secondary" size="sm">
-              {plural(total, 'player')} · {formatLabel(season.file.format)}
+      <div className="flex shrink-0 items-start justify-between gap-4 border-b border-kumo-line px-4 py-3">
+        <div className="grid gap-0.5">
+          <div className="flex items-center gap-2">
+            <Text as="h2" variant="heading">
+              Players
             </Text>
-          </span>
+            <Badge variant="secondary">{plural(total, 'player')}</Badge>
+          </div>
+          <Text variant="secondary" size="sm">
+            {readOnly
+              ? `This archived roster used the ${formatLabel(season.file.format)} format.`
+              : `Build the ${formatLabel(season.file.format)} roster by adding members to teams or as subs.`}
+          </Text>
         </div>
-      )}
+        {readOnly ? null : (
+          <div className="flex shrink-0 items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="primary"
+              icon={<PlusIcon aria-hidden size={14} />}
+              disabled={saver.pending}
+              onClick={() => setDialog({ kind: 'add' })}
+            >
+              Add player…
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              icon={<FileArrowUpIcon aria-hidden size={14} />}
+              disabled={saver.pending}
+              onClick={() => void pickExport()}
+            >
+              Add from export…
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              icon={<UserPlusIcon aria-hidden size={14} />}
+              disabled={saver.pending}
+              onClick={() => setDialog({ kind: 'new-member' })}
+            >
+              New member…
+            </Button>
+          </div>
+        )}
+      </div>
       <div className="min-h-0 flex-1 overflow-auto">
         <Table aria-label="Players" layout="fixed" className={FILE_TABLE_CLASS}>
           <Table.Header sticky>
@@ -335,20 +345,31 @@ function TeamsTab({ season }: Omit<Props, 'tab' | 'snapshot'>): React.JSX.Elemen
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {readOnly ? null : (
-        <div className="flex shrink-0 items-center gap-2 border-b border-kumo-line px-4 py-2">
+      <div className="flex shrink-0 items-start justify-between gap-4 border-b border-kumo-line px-4 py-3">
+        <div className="grid gap-0.5">
+          <div className="flex items-center gap-2">
+            <Text as="h2" variant="heading">
+              Teams
+            </Text>
+            <Badge variant="secondary">{plural(teams.length, 'team')}</Badge>
+          </div>
+          <Text variant="secondary" size="sm">
+            Team numbers control the lane draw for this season.
+          </Text>
+        </div>
+        {readOnly ? null : (
           <Button
             type="button"
             size="sm"
-            variant="secondary"
+            variant="primary"
             icon={<PlusIcon aria-hidden size={14} />}
             disabled={saver.pending}
             onClick={() => setDialog({ kind: 'add' })}
           >
             Add team…
           </Button>
-        </div>
-      )}
+        )}
+      </div>
       <div className="min-h-0 flex-1 overflow-auto">
         <Table aria-label="Teams" layout="fixed" className={FILE_TABLE_CLASS}>
           <Table.Header sticky>
@@ -431,14 +452,24 @@ function TeamsTab({ season }: Omit<Props, 'tab' | 'snapshot'>): React.JSX.Elemen
 function SettingsTab({ season }: Omit<Props, 'tab' | 'snapshot'>): React.JSX.Element {
   const saver = useSeasonSave(season)
   return (
-    <div className="min-h-0 flex-1 overflow-auto" role="region" aria-label="Settings">
-      <SettingsForm
-        file={season.file}
-        revision={season.revision}
-        readOnly={season.archived}
-        busy={saver.pending}
-        onSave={(file) => saver.save(file, 'Saved settings')}
-      />
+    <div className="flex min-h-0 flex-1 flex-col" role="region" aria-label="Settings">
+      <div className="grid shrink-0 gap-0.5 border-b border-kumo-line px-4 py-3">
+        <Text as="h2" variant="heading">
+          Season settings
+        </Text>
+        <Text variant="secondary" size="sm">
+          Keep the format, schedule and fees used at the desk in one place.
+        </Text>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto">
+        <SettingsForm
+          file={season.file}
+          revision={season.revision}
+          readOnly={season.archived}
+          busy={saver.pending}
+          onSave={(file) => saver.save(file, 'Saved settings')}
+        />
+      </div>
     </div>
   )
 }

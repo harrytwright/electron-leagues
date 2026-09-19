@@ -1,11 +1,10 @@
-import { createContext, useContext, type ComponentPropsWithoutRef } from 'react'
+import { useContext, type ComponentPropsWithoutRef } from 'react'
 import { Link } from '@cloudflare/kumo'
 import { Markdown as TanStackMarkdown, type MarkdownComponents } from '@tanstack/markdown/react'
 import { formatShortcut, SHORTCUT_TAG } from '@renderer/lib/help/shortcut'
+import { MarkdownNavigationContext } from '@renderer/contexts/MarkdownNavigationContext'
 import { resolveMarkdownLink } from './link'
-import type { MarkdownNavigation, MarkdownProps } from './interface'
-
-const NavigationContext = createContext<MarkdownNavigation | null>(null)
+import type { MarkdownProps } from './interface'
 
 type HeadingLevel = 1 | 2 | 3 | 4 | 5 | 6
 
@@ -44,7 +43,7 @@ function MarkdownLink({
   children,
   ...props
 }: ComponentPropsWithoutRef<'a'>): React.JSX.Element {
-  const navigation = useContext(NavigationContext)
+  const navigation = useContext(MarkdownNavigationContext)
   const resolved = href === undefined ? null : resolveMarkdownLink(href)
   if (resolved?.kind === 'external') {
     // The window open handler in main turns the new-window request into the system browser.
@@ -224,11 +223,11 @@ const components = {
 
 function MarkdownRoot({ document, navigation, className }: MarkdownProps): React.JSX.Element {
   return (
-    <NavigationContext.Provider value={navigation ?? null}>
+    <MarkdownNavigationContext.Provider value={navigation ?? null}>
       <div className={join('text-base leading-relaxed text-kumo-default', className)}>
         <TanStackMarkdown components={components}>{document}</TanStackMarkdown>
       </div>
-    </NavigationContext.Provider>
+    </MarkdownNavigationContext.Provider>
   )
 }
 

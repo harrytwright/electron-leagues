@@ -22,6 +22,9 @@ npm run typecheck
 npm run lint
 ```
 
+See [the renderer structure](docs/renderer-structure.md) for where apps, views, components, providers
+and contexts belong.
+
 On macOS, using `npm run dev` with a OneDrive-synced leagues folder requires folder access for your terminal app under System Settings, Privacy & Security, Files and Folders. Without it, reads fail with `EPERM`.
 
 Two environment variables change how the app runs:
