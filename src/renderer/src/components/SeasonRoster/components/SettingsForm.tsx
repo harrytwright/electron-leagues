@@ -136,115 +136,150 @@ export function SettingsForm({
       onSubmit={(event) => void submit(event)}
     >
       <fieldset disabled={readOnly || busy} className="contents">
-        <Select
-          label="Format"
-          value={draft.format}
-          items={FORMAT_ITEMS}
-          onValueChange={(value) => {
-            if (value) update('format', value)
-          }}
-        />
-        <div className="grid grid-cols-3 gap-3">
-          <Input
-            label="Start date"
-            name="start-date"
-            type="date"
-            value={draft.startDate}
-            onChange={(event) => update('startDate', event.target.value)}
+        <section className="grid gap-3" aria-labelledby="season-structure-heading">
+          <div className="grid gap-0.5">
+            <Text as="h3" id="season-structure-heading" variant="heading">
+              League structure
+            </Text>
+            <Text variant="secondary" size="sm">
+              The team size and when the season runs.
+            </Text>
+          </div>
+          <Select
+            label="Format"
+            value={draft.format}
+            items={FORMAT_ITEMS}
+            onValueChange={(value) => {
+              if (value) update('format', value)
+            }}
           />
-          <Input
-            label="Start time"
-            name="start-time"
-            type="time"
-            value={draft.startTime}
-            onChange={(event) => update('startTime', event.target.value)}
-          />
-          <Input
-            label="Weeks"
-            name="weeks"
-            type="number"
-            min={1}
-            value={draft.weeks}
-            onChange={(event) => update('weeks', event.target.value)}
-          />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Input
-            label="Fee per week (£)"
-            name="fee-total"
-            inputMode="decimal"
-            value={draft.feeTotal}
-            onChange={(event) => update('feeTotal', event.target.value)}
-          />
-          <Input
-            label="Sub fee (£)"
-            name="sub-fee"
-            inputMode="decimal"
-            value={draft.subFee}
-            onChange={(event) => update('subFee', event.target.value)}
-          />
-        </div>
-        <div className="grid gap-2">
-          <Text variant="secondary" size="sm">
-            Fee breakdown, for quick look-up; it is not printed.
-          </Text>
-          {draft.breakdown.map((line, index) => (
-            <div key={line.key} className="grid grid-cols-[1fr_8rem_auto] items-end gap-2">
-              <Input
-                aria-label={`Fee line ${index + 1} label`}
-                placeholder="Lineage"
-                value={line.label}
-                onChange={(event) => updateLine(index, { ...line, label: event.target.value })}
-              />
-              <Input
-                aria-label={`Fee line ${index + 1} amount`}
-                inputMode="decimal"
-                placeholder="0.00"
-                value={line.amount}
-                onChange={(event) => updateLine(index, { ...line, amount: event.target.value })}
-              />
+          <div className="grid grid-cols-3 gap-3">
+            <Input
+              label="Start date"
+              name="start-date"
+              type="date"
+              value={draft.startDate}
+              onChange={(event) => update('startDate', event.target.value)}
+            />
+            <Input
+              label="Start time"
+              name="start-time"
+              type="time"
+              value={draft.startTime}
+              onChange={(event) => update('startTime', event.target.value)}
+            />
+            <Input
+              label="Weeks"
+              name="weeks"
+              type="number"
+              min={1}
+              value={draft.weeks}
+              onChange={(event) => update('weeks', event.target.value)}
+            />
+          </div>
+        </section>
+
+        <section
+          className="grid gap-3 border-t border-kumo-line pt-4"
+          aria-labelledby="season-fees-heading"
+        >
+          <div className="grid gap-0.5">
+            <Text as="h3" id="season-fees-heading" variant="heading">
+              Weekly fees
+            </Text>
+            <Text variant="secondary" size="sm">
+              The totals used at the desk. The optional breakdown is for quick reference only.
+            </Text>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="Player fee (£)"
+              name="fee-total"
+              inputMode="decimal"
+              value={draft.feeTotal}
+              onChange={(event) => update('feeTotal', event.target.value)}
+            />
+            <Input
+              label="Sub fee (£)"
+              name="sub-fee"
+              inputMode="decimal"
+              value={draft.subFee}
+              onChange={(event) => update('subFee', event.target.value)}
+            />
+          </div>
+          <div className="grid gap-2">
+            {draft.breakdown.map((line, index) => (
+              <div key={line.key} className="grid grid-cols-[1fr_8rem_auto] items-end gap-2">
+                <Input
+                  aria-label={`Fee line ${index + 1} label`}
+                  placeholder="Lineage"
+                  value={line.label}
+                  onChange={(event) => updateLine(index, { ...line, label: event.target.value })}
+                />
+                <Input
+                  aria-label={`Fee line ${index + 1} amount`}
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  value={line.amount}
+                  onChange={(event) => updateLine(index, { ...line, amount: event.target.value })}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() =>
+                    update(
+                      'breakdown',
+                      draft.breakdown.filter((_, position) => position !== index)
+                    )
+                  }
+                >
+                  Remove
+                </Button>
+              </div>
+            ))}
+            <div>
               <Button
                 type="button"
                 variant="secondary"
                 size="sm"
                 onClick={() =>
-                  update(
-                    'breakdown',
-                    draft.breakdown.filter((_, position) => position !== index)
-                  )
+                  update('breakdown', [
+                    ...draft.breakdown,
+                    {
+                      key: draft.breakdown.reduce((max, line) => Math.max(max, line.key), -1) + 1,
+                      label: '',
+                      amount: ''
+                    }
+                  ])
                 }
               >
-                Remove
+                Add fee line
               </Button>
             </div>
-          ))}
-          <div>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() =>
-                update('breakdown', [
-                  ...draft.breakdown,
-                  {
-                    key: draft.breakdown.reduce((max, line) => Math.max(max, line.key), -1) + 1,
-                    label: '',
-                    amount: ''
-                  }
-                ])
-              }
-            >
-              Add fee line
-            </Button>
           </div>
-        </div>
-        <Input
-          label="LeagueSecretary season id"
-          name="league-secretary-id"
-          autoComplete="off"
-          value={draft.leagueSecretaryId}
-          onChange={(event) => update('leagueSecretaryId', event.target.value)}
-        />
+        </section>
+
+        <section
+          className="grid gap-3 border-t border-kumo-line pt-4"
+          aria-labelledby="season-link-heading"
+        >
+          <div className="grid gap-0.5">
+            <Text as="h3" id="season-link-heading" variant="heading">
+              LeagueSecretary link
+            </Text>
+            <Text variant="secondary" size="sm">
+              Only needed when this season is linked to LeagueSecretary.
+            </Text>
+          </div>
+          <Input
+            label="Season ID"
+            name="league-secretary-id"
+            autoComplete="off"
+            value={draft.leagueSecretaryId}
+            onChange={(event) => update('leagueSecretaryId', event.target.value)}
+          />
+        </section>
       </fieldset>
       {error ? (
         <Text variant="error" role="alert">

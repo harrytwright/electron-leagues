@@ -346,7 +346,7 @@ it('adds roster tabs to a season that has a season file, and only there', async 
   const settings = within(screen.getByRole('region', { name: 'Settings' }))
   expect(settings.getByLabelText(/format/i)).toHaveTextContent('Doubles')
   expect(settings.getByLabelText(/start date/i)).toHaveValue('2025-09-01')
-  expect(settings.getByLabelText(/fee per week/i)).toHaveValue('12.5')
+  expect(settings.getByLabelText(/player fee/i)).toHaveValue('12.5')
   expect(settings.getByLabelText('Fee line 1 label')).toHaveValue('Lineage')
 
   // The sheet is listed before it exists, opens through main, and marks the docx superseded.

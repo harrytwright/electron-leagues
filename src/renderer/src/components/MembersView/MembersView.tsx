@@ -7,12 +7,8 @@ import {
   Table,
   Text,
   Toolbar,
-  Tooltip,
   useKumoToastManager
 } from '@cloudflare/kumo'
-import { ArrowsClockwiseIcon } from '@phosphor-icons/react/dist/csr/ArrowsClockwise'
-import { DownloadSimpleIcon } from '@phosphor-icons/react/dist/csr/DownloadSimple'
-import { IdentificationCardIcon } from '@phosphor-icons/react/dist/csr/IdentificationCard'
 import { DotsThreeIcon } from '@phosphor-icons/react/dist/csr/DotsThree'
 import { UserPlusIcon } from '@phosphor-icons/react/dist/csr/UserPlus'
 import { WarningCircleIcon } from '@phosphor-icons/react/dist/csr/WarningCircle'
@@ -49,7 +45,7 @@ import type { Props } from './interface'
 const ALL_LEAGUES = '*'
 
 const QUICK_FILTER_ITEMS = Object.fromEntries(
-  QUICK_FILTERS.map((filter) => [filter, QUICK_FILTER_LABELS[filter]])
+  QUICK_FILTERS.map((filter) => [filter, `Show: ${QUICK_FILTER_LABELS[filter]}`])
 )
 
 const born = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium' })
@@ -235,75 +231,66 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
       onDragOver={drop.onDragOver}
       onDrop={drop.onDrop}
     >
-      <div className="flex shrink-0 items-center justify-between gap-4 border-b border-kumo-line px-4 pt-3 pb-2">
-        <Text as="h1" variant="heading" size="lg">
-          Members
-        </Text>
-        <div role="group" aria-label="Member actions" className="flex shrink-0 items-center gap-1">
-          <Tooltip
-            content="Sync from MBD…"
-            render={
-              <IconButton
-                variant="ghost"
-                size="sm"
-                aria-label="Sync from MBD…"
-                icon={<ArrowsClockwiseIcon aria-hidden size={16} />}
-                onClick={() => void pickExport()}
-              />
-            }
-          />
-          <Tooltip
-            content={
-              cards.pending
-                ? 'Printing…'
-                : listed.length === 0
-                  ? 'Print cards'
-                  : `Print ${plural(listed.length, 'card')}`
-            }
-            render={
-              <IconButton
-                variant="ghost"
-                size="sm"
-                aria-label="Print cards"
-                icon={<IdentificationCardIcon aria-hidden size={16} />}
-                loading={cards.pending}
-                disabled={cards.pending || listed.length === 0}
-                onClick={() => void printCards(listed)}
-              />
-            }
-          />
-          <Tooltip
-            content="Export CSV…"
-            render={
-              <IconButton
-                variant="ghost"
-                size="sm"
-                aria-label="Export CSV…"
-                icon={<DownloadSimpleIcon aria-hidden size={16} />}
-                disabled={listed.length === 0}
-                onClick={() => setExporting(true)}
-              />
-            }
-          />
-          <Button
-            type="button"
-            size="sm"
-            variant="primary"
-            icon={<UserPlusIcon aria-hidden size={14} />}
-            className="ml-1"
-            onClick={() => setAction({ kind: 'new' })}
+      <div className="shrink-0 border-b border-kumo-line bg-kumo-base px-4 pt-3 pb-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="grid min-w-0 gap-0.5">
+            <Text as="h1" variant="heading" size="lg">
+              Members
+            </Text>
+            <Text variant="secondary" size="sm">
+              Find contact details, manage records and prepare member cards.
+            </Text>
+          </div>
+          <div
+            role="group"
+            aria-label="Member actions"
+            className="flex shrink-0 items-center gap-2"
           >
-            New member…
-          </Button>
+            <DropdownMenu>
+              <DropdownMenu.Trigger
+                render={
+                  <Button type="button" size="sm" variant="secondary">
+                    More actions
+                  </Button>
+                }
+              />
+              <DropdownMenu.Content align="end">
+                <DropdownMenu.Item onClick={() => void pickExport()}>
+                  Sync from MBD…
+                </DropdownMenu.Item>
+                <DropdownMenu.Item
+                  disabled={cards.pending || listed.length === 0}
+                  onClick={() => void printCards(listed)}
+                >
+                  {cards.pending ? 'Printing cards…' : `Print ${plural(listed.length, 'card')}`}
+                </DropdownMenu.Item>
+                <DropdownMenu.Item
+                  disabled={listed.length === 0}
+                  onClick={() => setExporting(true)}
+                >
+                  Export list to CSV…
+                </DropdownMenu.Item>
+              </DropdownMenu.Content>
+            </DropdownMenu>
+            <Button
+              type="button"
+              size="sm"
+              variant="primary"
+              icon={<UserPlusIcon aria-hidden size={14} />}
+              onClick={() => setAction({ kind: 'new' })}
+            >
+              New member…
+            </Button>
+          </div>
         </div>
       </div>
-      <div className="shrink-0 border-b border-kumo-line px-4 py-2">
-        <Toolbar aria-label="Find members" className="w-full">
+      <div className="shrink-0 border-b border-kumo-line px-4 py-3">
+        <Toolbar aria-label="Find members" className="w-full gap-2">
           <Toolbar.Input
             ref={filterRef}
             type="search"
             aria-label="Filter members"
-            placeholder="Filter by name, alias or number"
+            placeholder="Search by name or member number"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             className="min-w-0 flex-1"
@@ -331,14 +318,19 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
       {snapshot.problems.length > 0 ? (
         <section
           aria-label="Problems"
-          className="flex shrink-0 items-start gap-2 border-b border-kumo-line px-4 py-2 text-sm"
+          className="flex shrink-0 items-start gap-2 border-b border-kumo-line bg-kumo-tint px-4 py-2.5 text-sm"
         >
           <WarningCircleIcon aria-hidden size={16} className="mt-0.5 shrink-0 text-kumo-danger" />
-          <ul className="grid gap-0.5">
-            {snapshot.problems.map((problem, index) => (
-              <li key={index}>{describeProblem(problem)}</li>
-            ))}
-          </ul>
+          <div className="grid gap-1">
+            <Text as="h2" variant="heading">
+              Some records need attention
+            </Text>
+            <ul className="grid gap-0.5 text-kumo-subtle">
+              {snapshot.problems.map((problem, index) => (
+                <li key={index}>{describeProblem(problem)}</li>
+              ))}
+            </ul>
+          </div>
         </section>
       ) : null}
       <div className="min-h-0 flex-1 overflow-auto">
@@ -346,7 +338,7 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
           <Table.Header sticky>
             <Table.Row className="text-kumo-subtle">
               <Table.Head className="w-24">Number</Table.Head>
-              <Table.Head>Name</Table.Head>
+              <Table.Head>Member</Table.Head>
               <Table.Head className="w-28">Born</Table.Head>
               <Table.Head>Contact</Table.Head>
               <Table.Head>Leagues</Table.Head>
@@ -370,18 +362,25 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
                 <Table.Row key={`${row.member.id}-${index}`} className={STATIC_ROW_CLASS}>
                   <Table.Cell className="font-mono text-kumo-subtle">{row.number}</Table.Cell>
                   <Table.Cell>
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="truncate font-medium">{row.name}</span>
-                      {row.member.deleted ? <Badge variant="secondary">Deleted</Badge> : null}
-                      {row.needsDetails && !row.member.deleted ? (
-                        <Badge variant="warning">Needs details</Badge>
+                    <div className="grid min-w-0 gap-0.5">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="truncate font-medium">{row.name}</span>
+                        {row.member.deleted ? <Badge variant="secondary">Deleted</Badge> : null}
+                        {row.needsDetails && !row.member.deleted ? (
+                          <Badge variant="warning">Needs details</Badge>
+                        ) : null}
+                      </div>
+                      {row.member.aliases.length > 0 ? (
+                        <span className="truncate text-xs text-kumo-subtle">
+                          Also known as {row.member.aliases.join(', ')}
+                        </span>
                       ) : null}
                     </div>
                   </Table.Cell>
                   <Table.Cell className="whitespace-nowrap text-kumo-subtle">
                     {formatBorn(row.member.dob)}
                   </Table.Cell>
-                  <Table.Cell className="truncate text-kumo-subtle">
+                  <Table.Cell className="truncate text-kumo-subtle" title={contactSummary(row)}>
                     {contactSummary(row)}
                   </Table.Cell>
                   <Table.Cell>
@@ -458,10 +457,26 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
           </Table.Body>
         </Table>
       </div>
-      <div className="shrink-0 border-t border-kumo-line px-4 py-1.5">
+      <div className="flex shrink-0 items-center justify-between border-t border-kumo-line px-4 py-1.5">
         <Text variant="secondary" size="sm">
-          Showing {visible.length} of {population.length}
+          {visible.length === population.length
+            ? plural(visible.length, 'member')
+            : `Showing ${visible.length} of ${population.length} members`}
         </Text>
+        {query || quick !== 'all' || leagueFolder !== ALL_LEAGUES ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setQuery('')
+              setQuick('all')
+              setLeagueFolder(ALL_LEAGUES)
+            }}
+          >
+            Clear filters
+          </Button>
+        ) : null}
       </div>
 
       <MemberDialog

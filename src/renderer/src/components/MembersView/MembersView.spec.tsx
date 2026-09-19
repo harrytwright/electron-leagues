@@ -77,7 +77,7 @@ it('lists members with numbers, contact, leagues and flags, and filters them', a
   expect(screen.getByRole('region', { name: 'Problems' })).toHaveTextContent(
     'monday/Pairs/2025-26 lists member 9, who is not in the master list'
   )
-  expect(screen.getByText('Showing 2 of 2')).toBeInTheDocument()
+  expect(screen.getByText('2 members')).toBeInTheDocument()
 
   await user.type(screen.getByRole('searchbox', { name: 'Filter members' }), 'ann')
   expect(screen.queryByRole('row', { name: /Kid Lee/ })).not.toBeInTheDocument()
@@ -92,7 +92,7 @@ it('explains an empty list', async () => {
   renderMembers()
 
   expect(await screen.findByText(/No members yet/)).toBeInTheDocument()
-  expect(screen.getByText('Showing 0 of 0')).toBeInTheDocument()
+  expect(screen.getByText('0 members')).toBeInTheDocument()
 })
 
 it('reports a failed read with a retry', async () => {
@@ -223,7 +223,8 @@ it('starts an MBD sync from the toolbar picker or a dropped export', async () =>
   renderMembers()
 
   await screen.findByRole('row', { name: /Jane Doe/ })
-  await user.click(screen.getByRole('button', { name: 'Sync from MBD…' }))
+  await user.click(screen.getByRole('button', { name: 'More actions' }))
+  await user.click(await screen.findByRole('menuitem', { name: 'Sync from MBD…' }))
   expect(await screen.findByRole('dialog')).toHaveTextContent(
     'Sync from the Master Bowler Database'
   )
@@ -272,9 +273,11 @@ it('prints a card from the row menu and a sheet for everyone shown, and opens th
   expect(await screen.findByText(/Made a sheet of 1 card/)).toBeInTheDocument()
 
   // Hidden members are never on the sheet, so only the two listed go.
-  await user.click(screen.getByRole('button', { name: 'Print cards' }))
+  await user.click(screen.getByRole('button', { name: 'More actions' }))
+  await user.click(await screen.findByRole('menuitem', { name: 'Print 2 cards' }))
   await waitFor(() => expect(api.printCards).toHaveBeenLastCalledWith([2, 1], 'rev-5'))
 
-  await user.click(screen.getByRole('button', { name: 'Export CSV…' }))
+  await user.click(screen.getByRole('button', { name: 'More actions' }))
+  await user.click(await screen.findByRole('menuitem', { name: 'Export list to CSV…' }))
   expect(await screen.findByRole('dialog', { name: 'Export members to CSV' })).toBeInTheDocument()
 })
