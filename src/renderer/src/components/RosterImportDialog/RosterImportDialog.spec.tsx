@@ -16,7 +16,16 @@ const PREVIEW: MappingPreview = {
   columns: ['ID', 'Name', 'Team'],
   sample: [['10', 'Lee, Ann', 'Ants']],
   rowCount: 3,
-  mapping: { mbdId: 0, firstName: null, lastName: null, fullName: 1, gender: null, team: 2 },
+  choices: [],
+  mapping: {
+    mbdId: 0,
+    firstName: null,
+    lastName: null,
+    fullName: 1,
+    gender: null,
+    team: 2,
+    league: null
+  },
   remembered: false
 }
 
@@ -84,7 +93,7 @@ it('previews, plans and adds the players, creating only the ticked unknowns', as
   await user.click(screen.getByRole('button', { name: 'Continue' }))
 
   await waitFor(() =>
-    expect(api.planPlayersImport).toHaveBeenCalledExactlyOnceWith(REF, PATH, PREVIEW.mapping)
+    expect(api.planPlayersImport).toHaveBeenCalledExactlyOnceWith(REF, PATH, PREVIEW.mapping, null)
   )
   expect(await screen.findByText('1 player to add: Bob Kay')).toBeInTheDocument()
   expect(screen.getByText('1 already on the roster')).toBeInTheDocument()
@@ -100,6 +109,7 @@ it('previews, plans and adds the players, creating only the ticked unknowns', as
       REF,
       PATH,
       PREVIEW.mapping,
+      null,
       [4],
       'members-r2',
       'season-r5',

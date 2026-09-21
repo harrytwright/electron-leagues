@@ -277,9 +277,7 @@ function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element
         </Table>
       </div>
       <div className="min-h-9 shrink-0 border-t border-kumo-line px-4 py-2">
-        <Text variant="secondary">
-          {plural(total, 'player')}
-        </Text>
+        <Text variant="secondary">{plural(total, 'player')}</Text>
       </div>
 
       <RosterImportDialog

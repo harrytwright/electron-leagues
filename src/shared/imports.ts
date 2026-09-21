@@ -11,8 +11,12 @@ import {
   type Team
 } from './members'
 
-/** Exports are read as delimited text; a spreadsheet is saved as CSV first. */
-export const IMPORT_EXTENSIONS = ['.csv', '.tsv', '.txt'] as const
+/** The MBD exports a workbook; delimited text is read too for anything saved out of one. */
+export const IMPORT_EXTENSIONS = ['.xlsx', '.csv', '.tsv', '.txt'] as const
+
+export function isWorkbookFileName(name: string): boolean {
+  return name.toLowerCase().endsWith('.xlsx')
+}
 
 export function isImportFileName(name: string): boolean {
   const lower = name.toLowerCase()
@@ -92,7 +96,9 @@ export const importMappingSchema = z.object({
   /** One column holding the whole name, used when first and last are not separate. */
   fullName: columnIndexSchema,
   gender: columnIndexSchema,
-  team: columnIndexSchema
+  team: columnIndexSchema,
+  /** The league a row belongs to, in a dump that covers several leagues at once. */
+  league: columnIndexSchema
 })
 
 export type ImportMapping = z.infer<typeof importMappingSchema>
@@ -104,7 +110,8 @@ export const IMPORT_FIELDS: readonly ImportField[] = [
   'lastName',
   'fullName',
   'gender',
-  'team'
+  'team',
+  'league'
 ]
 
 export const IMPORT_FIELD_LABELS: Record<ImportField, string> = {
@@ -113,7 +120,8 @@ export const IMPORT_FIELD_LABELS: Record<ImportField, string> = {
   lastName: 'Last name',
   fullName: 'Full name',
   gender: 'Gender',
-  team: 'Team'
+  team: 'Team',
+  league: 'League'
 }
 
 const HEADER_PATTERNS: Record<ImportField, RegExp> = {
@@ -122,7 +130,8 @@ const HEADER_PATTERNS: Record<ImportField, RegExp> = {
   lastName: /^(?:last|sur|family)(?:name)?$/,
   fullName: /^(?:full|bowler|player|member)?name$/,
   gender: /^(?:gender|sex)$/,
-  team: /^team(?:name)?$/
+  team: /^team(?:name)?$/,
+  league: /^league(?:name)?$/
 }
 
 function normaliseHeader(column: string): string {
@@ -142,7 +151,8 @@ export function suggestMapping(columns: readonly string[]): ImportMapping {
     lastName: find('lastName'),
     fullName: find('fullName'),
     gender: find('gender'),
-    team: find('team')
+    team: find('team'),
+    league: find('league')
   }
   if (mapping.firstName !== null && mapping.lastName !== null) mapping.fullName = null
   return mapping
@@ -172,6 +182,11 @@ export interface MappingPreview {
   /** The first few data rows, so the mapping can be checked against real values. */
   sample: string[][]
   rowCount: number
+  /**
+   * The distinct values of each column that has few enough to choose from, in order
+   * of appearance; a column with more, or none, has an empty list. Picks a league.
+   */
+  choices: string[][]
   mapping: ImportMapping
   /** True when the mapping came from an earlier import of a file with these columns. */
   remembered: boolean
@@ -185,6 +200,7 @@ export interface ImportRow {
   lastName: string
   gender?: Gender
   team?: string
+  league?: string
 }
 
 export interface ImportRowProblem {
@@ -209,10 +225,11 @@ export function splitFullName(full: string): Pick<ImportRow, 'firstName' | 'last
   return { firstName: words.slice(0, -1).join(' '), lastName: words[words.length - 1] }
 }
 
+/** The MBD writes M, W, B and G: men, women, boys and girls. */
 export function parseGender(text: string): Gender | undefined {
   const value = text.trim().toLowerCase()
-  if (['m', 'male', 'man', 'boy'].includes(value)) return 'male'
-  if (['f', 'female', 'woman', 'girl'].includes(value)) return 'female'
+  if (['m', 'male', 'man', 'men', 'b', 'boy'].includes(value)) return 'male'
+  if (['f', 'female', 'w', 'woman', 'women', 'g', 'girl'].includes(value)) return 'female'
   if (['o', 'other', 'x', 'nb', 'non-binary', 'nonbinary'].includes(value)) return 'other'
   return undefined
 }
@@ -221,17 +238,47 @@ function cell(row: readonly string[], index: number | null): string {
   return index === null ? '' : (row[index] ?? '')
 }
 
-/** Rows the mapping can read; the rest are reported by line and never guessed at. */
-export function readImportRows(table: DelimitedTable, mapping: ImportMapping): ImportRows {
+export interface ReadImportRowsOptions {
+  /** Keep only rows whose league column reads this; null keeps every row. */
+  league: string | null
+}
+
+/**
+ * The MBD leaves the last name blank for a bowler entered as one field; split it as
+ * one when it reads as a name, and leave a placeholder such as "Team 1" alone.
+ */
+function nameFromColumns(first: string, last: string): NameParts {
+  const words = first.split(/\s+/).filter(Boolean)
+  const wordy = words.every((word) => /^[^\d]+$/.test(word))
+  if (last || words.length < 2 || !wordy) return { firstName: first, lastName: last }
+  return splitFullName(first)
+}
+
+function sameLeague(a: string, b: string): boolean {
+  return normaliseName(a, '') === normaliseName(b, '')
+}
+
+/**
+ * Rows the mapping can read; the rest are reported by line and never guessed at.
+ * A bowler listed twice under one id with one name is read once, since a dump of
+ * several leagues repeats anyone who bowls in more than one.
+ */
+export function readImportRows(
+  table: DelimitedTable,
+  mapping: ImportMapping,
+  options: ReadImportRowsOptions = { league: null }
+): ImportRows {
   const rows: ImportRow[] = []
   const invalid: ImportRowProblem[] = []
-  const seen = new Map<string, number>()
+  const seen = new Map<string, ImportRow>()
   table.rows.forEach((values, index) => {
     const line = index + 2
+    const league = cell(values, mapping.league)
+    if (options.league !== null && !sameLeague(league, options.league)) return
     const mbdId = cell(values, mapping.mbdId)
     const name =
       mapping.firstName !== null && mapping.lastName !== null
-        ? { firstName: cell(values, mapping.firstName), lastName: cell(values, mapping.lastName) }
+        ? nameFromColumns(cell(values, mapping.firstName), cell(values, mapping.lastName))
         : splitFullName(cell(values, mapping.fullName))
     if (!mbdId) {
       invalid.push({ line, message: 'No MBD ID' })
@@ -241,20 +288,38 @@ export function readImportRows(table: DelimitedTable, mapping: ImportMapping): I
       invalid.push({ line, message: `No name for MBD ID ${mbdId}` })
       return
     }
-    const earlier = seen.get(mbdId)
+    const earlier = seen.get(normaliseMbdId(mbdId))
     if (earlier !== undefined) {
-      invalid.push({ line, message: `Repeats MBD ID ${mbdId} from line ${earlier}` })
+      if (!sameName(normaliseParts(earlier), normaliseParts(name))) {
+        invalid.push({
+          line,
+          message: `Repeats MBD ID ${mbdId} from line ${earlier.line} with a different name`
+        })
+      }
       return
     }
-    seen.set(mbdId, line)
     const row: ImportRow = { line, mbdId, ...name }
     const gender = parseGender(cell(values, mapping.gender))
     if (gender) row.gender = gender
     const team = cell(values, mapping.team)
     if (team) row.team = team
+    if (league) row.league = league
+    seen.set(normaliseMbdId(mbdId), row)
     rows.push(row)
   })
   return { rows, invalid }
+}
+
+/** The distinct values of a column, in order, or nothing when there are too many to pick from. */
+export function columnChoices(table: DelimitedTable, index: number, limit = 40): string[] {
+  const values: string[] = []
+  for (const row of table.rows) {
+    const value = row[index] ?? ''
+    if (!value || values.includes(value)) continue
+    values.push(value)
+    if (values.length > limit) return []
+  }
+  return values
 }
 
 export function levenshtein(a: string, b: string): number {

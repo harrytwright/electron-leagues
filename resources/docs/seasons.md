@@ -41,7 +41,7 @@ Where a season has a roster, its files list a **Sign-In Sheet.pdf** marked _Gene
 
 ## Players from an export
 
-On a season's **Players** tab, **Add from export…** (or dropping a per-league export from BLS onto the tab) fills the roster in one go. Choose which columns hold the MBD ID, the name and the team, check them against the first rows, and the app matches each bowler to the members list by MBD ID. Matched bowlers join the roster, a team name the season does not have yet is created, bowlers already on the roster are skipped, and any MBD ID the members list does not know is offered as a new member with just their name and id. The export is read where it is and never copied into the season. The mapping is remembered for the next export with the same columns.
+On a season's **Players** tab, **Add from export…** (or dropping the MBD's league export onto the tab) fills the roster in one go. The export covers every league you ticked in the MBD, so pick the league to take from it; the season's own league is offered first. Check the columns against the first rows, and the app matches each bowler to the members list by MBD ID. Matched bowlers join the roster, a team name the season does not have yet is created, bowlers already on the roster are skipped, and any MBD ID the members list does not know is offered as a new member with just their name and id. The export is read where it is and never copied into the season. Excel workbooks and delimited text are both read, and the mapping is remembered for the next export with the same columns.
 
 ## Archiving
 

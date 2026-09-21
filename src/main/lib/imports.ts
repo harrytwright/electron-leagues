@@ -4,7 +4,9 @@ import { randomUUID } from 'node:crypto'
 import {
   applyMbdSync,
   applyRosterImport,
+  columnChoices,
   isImportFileName,
+  isWorkbookFileName,
   mappingFitsColumns,
   mappingProblem,
   parseDelimited,
@@ -36,6 +38,7 @@ import {
 } from './members'
 import { assertAbsolutePath, resolveLiveSeasonRoot } from './paths'
 import { withRootLock } from './root-lock'
+import { readXlsxTable } from './xlsx'
 
 const MAX_IMPORT_BYTES = 20 * 1024 * 1024
 const SAMPLE_ROWS = 5
@@ -53,7 +56,7 @@ function decodeExport(bytes: Buffer): string {
 export async function readImportTable(path: string): Promise<DelimitedTable> {
   assertAbsolutePath(path, 'Invalid export path')
   if (!isImportFileName(basename(path))) {
-    throw new UserFacingError('Exports are read from .csv, .tsv or .txt files')
+    throw new UserFacingError('Exports are read from .xlsx, .csv, .tsv or .txt files')
   }
   let bytes: Buffer
   try {
@@ -67,7 +70,9 @@ export async function readImportTable(path: string): Promise<DelimitedTable> {
     if (err instanceof UserFacingError) throw err
     throw toUserFacing(err)
   }
-  const table = parseDelimited(decodeExport(bytes))
+  const table = isWorkbookFileName(basename(path))
+    ? readXlsxTable(bytes)
+    : parseDelimited(decodeExport(bytes))
   if (table.columns.length === 0) throw new UserFacingError(`“${basename(path)}” has no header row`)
   return table
 }
@@ -119,6 +124,7 @@ export async function previewImport(
     columns: table.columns,
     sample: table.rows.slice(0, SAMPLE_ROWS),
     rowCount: table.rows.length,
+    choices: table.columns.map((_, index) => columnChoices(table, index)),
     mapping: usable ? remembered : suggestMapping(table.columns),
     remembered: usable
   }
@@ -213,11 +219,12 @@ export async function planPlayersImport(
   root: string,
   ref: SeasonSyncRequest,
   path: string,
-  mapping: ImportMapping
+  mapping: ImportMapping,
+  league: string | null
 ): Promise<RosterPlanResult> {
   const sourceRevision = await fileRevision(path)
   const table = await readImportTable(path)
-  const rows = readImportRows(table, checkedMapping(mapping, table))
+  const rows = readImportRows(table, checkedMapping(mapping, table), { league })
   const { seasonPath, revision: seasonRevision } = await seasonForImport(root, ref)
   const season = await readSeasonFile(seasonPath)
   if (season.status === 'missing') {
@@ -239,6 +246,8 @@ export interface PlayersImportRequest {
   ref: SeasonSyncRequest
   path: string
   mapping: ImportMapping
+  /** The league to take from a dump of several, or null for every row. */
+  league: string | null
   /** Lines of unknown MBD IDs the desk chose to create members for. */
   createLines: readonly number[]
   membersRevision: FileRevision
@@ -252,7 +261,9 @@ export async function addPlayersFromExport(
   request: PlayersImportRequest
 ): Promise<ImportSummary> {
   const table = await readPlannedTable(request.path, request.sourceRevision)
-  const rows = readImportRows(table, checkedMapping(request.mapping, table))
+  const rows = readImportRows(table, checkedMapping(request.mapping, table), {
+    league: request.league
+  })
   return withRootLock(root, async () => {
     const master = await readMasterForWrite(root, request.membersRevision)
     const { seasonPath, revision } = await seasonForImport(root, request.ref)

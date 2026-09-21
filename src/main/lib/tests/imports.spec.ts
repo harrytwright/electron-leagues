@@ -1,3 +1,4 @@
+import AdmZip from 'adm-zip'
 import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -19,13 +20,93 @@ import { enableMembers, STALE_MESSAGE, writeSeasonFile } from '../members'
 let root: string
 let outside: string
 
+/**
+ * A workbook shaped like the MBD's own export: numbers with a thousands format,
+ * a date-formatted birthdate column and shared strings, including one with an
+ * ampersand and one bowler in two leagues.
+ */
+function mbdWorkbook(): Buffer {
+  const strings = [
+    'League Name',
+    'MBD ID',
+    'First Name',
+    'Middle Name',
+    'Last Name',
+    'Birthdate',
+    'Gender',
+    'Monday Pairs',
+    'Sam',
+    'Ash &amp; Co',
+    'W',
+    'Jo Bloggs',
+    'B',
+    'Thursday Trios'
+  ]
+  const cell = (ref: string, value: string | number, kind: 's' | 'n' | 'd' = 's'): string =>
+    kind === 's'
+      ? `<c r="${ref}" t="s"><v>${strings.indexOf(String(value))}</v></c>`
+      : `<c r="${ref}" s="${kind === 'd' ? 2 : 1}"><v>${value}</v></c>`
+  const header = strings
+    .slice(0, 7)
+    .map((name, index) => cell(`${String.fromCharCode(65 + index)}1`, name))
+    .join('')
+  const rows = [
+    ['Monday Pairs', 155, 'Sam', 'Ash &amp; Co', 1, 'W'],
+    ['Monday Pairs', 262, 'Jo Bloggs', null, 45318, 'B'],
+    ['Thursday Trios', 155, 'Sam', 'Ash &amp; Co', 1, 'W']
+  ]
+    .map(([league, id, first, last, born, gender], index) => {
+      const line = index + 2
+      return [
+        cell(`A${line}`, String(league)),
+        cell(`B${line}`, Number(id), 'n'),
+        cell(`C${line}`, String(first)),
+        // The MBD writes a blank surname as a shared-string cell with no value.
+        last === null ? `<c r="E${line}" t="s"/>` : cell(`E${line}`, String(last)),
+        cell(`F${line}`, Number(born), 'd'),
+        cell(`G${line}`, String(gender))
+      ].join('')
+    })
+    .map((cells, index) => `<row r="${index + 2}">${cells}</row>`)
+  const zip = new AdmZip()
+  const add = (name: string, xml: string): void => {
+    zip.addFile(name, Buffer.from(xml, 'utf8'))
+  }
+  add(
+    '[Content_Types].xml',
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>'
+  )
+  add(
+    'xl/workbook.xml',
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>'
+  )
+  add(
+    'xl/_rels/workbook.xml.rels',
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'
+  )
+  add(
+    'xl/styles.xml',
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="#,###,##0"/><numFmt numFmtId="165" formatCode="dd/mm/yyyy"/></numFmts><cellXfs count="3"><xf numFmtId="0"/><xf numFmtId="164" applyNumberFormat="1"/><xf numFmtId="165" applyNumberFormat="1"/></cellXfs></styleSheet>'
+  )
+  add(
+    'xl/sharedStrings.xml',
+    `<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${strings.map((text) => `<si><t>${text}</t></si>`).join('')}</sst>`
+  )
+  add(
+    'xl/worksheets/sheet1.xml',
+    `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1">${header}</row>${rows.join('')}</sheetData></worksheet>`
+  )
+  return zip.toBuffer()
+}
+
 const MAPPING: ImportMapping = {
   mbdId: 0,
   firstName: 1,
   lastName: 2,
   fullName: null,
   gender: 3,
-  team: 4
+  team: 4,
+  league: null
 }
 
 function member(id: number, firstName: string, lastName: string, mbdIds: string[]): Member {
@@ -68,11 +149,47 @@ describe('readImportTable', () => {
     const windows = await exportFile('b.txt', Buffer.from('ID\tName\n1\tZo\xeb\n', 'latin1'))
     expect((await readImportTable(windows)).rows).toEqual([['1', 'Zoë']])
 
-    await expect(readImportTable(await exportFile('c.xlsx', 'x'))).rejects.toThrow(
-      '.csv, .tsv or .txt'
+    await expect(readImportTable(await exportFile('c.docx', 'x'))).rejects.toThrow(
+      '.xlsx, .csv, .tsv or .txt'
     )
+    await expect(readImportTable(await exportFile('c.xlsx', 'x'))).rejects.toThrow('not a workbook')
     await expect(readImportTable(join(outside, 'missing.csv'))).rejects.toThrow()
     await expect(readImportTable('relative.csv')).rejects.toThrow('Invalid export path')
+  })
+})
+
+describe('readImportTable on a workbook', () => {
+  test('reads the MBD export as it comes: shared strings, formatted numbers and serial dates', async () => {
+    const path = join(outside, 'MBDExport.xlsx')
+    await writeFile(path, mbdWorkbook())
+    const table = await readImportTable(path)
+    expect(table.columns).toEqual([
+      'League Name',
+      'MBD ID',
+      'First Name',
+      'Middle Name',
+      'Last Name',
+      'Birthdate',
+      'Gender'
+    ])
+    expect(table.rows).toEqual([
+      ['Monday Pairs', '155', 'Sam', '', 'Ash & Co', '1900-01-01', 'W'],
+      ['Monday Pairs', '262', 'Jo Bloggs', '', '', '2024-01-27', 'B'],
+      ['Thursday Trios', '155', 'Sam', '', 'Ash & Co', '1900-01-01', 'W']
+    ])
+
+    const preview = await previewImport(root, path, [])
+    expect(preview.mapping).toEqual({
+      mbdId: 1,
+      firstName: 2,
+      lastName: 4,
+      fullName: null,
+      gender: 6,
+      team: null,
+      league: 0
+    })
+    expect(preview.choices[0]).toEqual(['Monday Pairs', 'Thursday Trios'])
+    expect(preview.choices[3]).toEqual([])
   })
 })
 
@@ -184,7 +301,7 @@ describe('addPlayersFromExport', () => {
       'MBD ID,First,Last,Sex,Team\n10,Ann,Lee,,Ants\n20,Bob,Kay,,Bees\n99,New,Person,F,Bees\n'
     )
 
-    const planned = await planPlayersImport(root, ref, path, MAPPING)
+    const planned = await planPlayersImport(root, ref, path, MAPPING, null)
     expect(planned.plan.rows.map(({ match }) => match.kind)).toEqual([
       'on-roster',
       'add',
@@ -196,6 +313,7 @@ describe('addPlayersFromExport', () => {
       ref,
       path,
       mapping: MAPPING,
+      league: null,
       createLines: [4],
       membersRevision: planned.membersRevision,
       seasonRevision: planned.seasonRevision,
@@ -220,6 +338,7 @@ describe('addPlayersFromExport', () => {
         ref,
         path,
         mapping: MAPPING,
+        league: null,
         createLines: [],
         membersRevision: planned.membersRevision,
         seasonRevision: planned.seasonRevision,
@@ -237,13 +356,14 @@ describe('addPlayersFromExport', () => {
     await mkdir(seasonPath, { recursive: true })
     await writeSeasonFile(seasonPath, { schemaVersion: 1, format: 2, teams: [], players: [] })
     const path = await exportFile('league.csv', 'MBD ID,First,Last,Sex,Team\n010,Ann,Lee,,\n')
-    const planned = await planPlayersImport(root, ref, path, MAPPING)
+    const planned = await planPlayersImport(root, ref, path, MAPPING, null)
     expect(planned.plan.rows[0].match).toEqual({ kind: 'add', memberId: 1 })
 
     const summary = await addPlayersFromExport(root, {
       ref,
       path,
       mapping: MAPPING,
+      league: null,
       createLines: [],
       membersRevision: planned.membersRevision,
       seasonRevision: planned.seasonRevision,
@@ -253,13 +373,58 @@ describe('addPlayersFromExport', () => {
     expect((await readMaster())[0].deleted).toBeUndefined()
   })
 
+  test('takes one league out of a dump that covers several', async () => {
+    await writeMaster([member(1, 'Sam', 'Ash', ['155'])])
+    const seasonPath = join(root, 'monday/Pairs/2025-26')
+    await mkdir(seasonPath, { recursive: true })
+    await writeSeasonFile(seasonPath, { schemaVersion: 1, format: 2, teams: [], players: [] })
+    const path = join(outside, 'MBDExport-leagues.xlsx')
+    await writeFile(path, mbdWorkbook())
+    const mapping: ImportMapping = {
+      mbdId: 1,
+      firstName: 2,
+      lastName: 4,
+      fullName: null,
+      gender: 6,
+      team: null,
+      league: 0
+    }
+
+    const planned = await planPlayersImport(root, ref, path, mapping, 'Monday Pairs')
+    expect(planned.plan.rows.map(({ row, match }) => [row.line, match.kind])).toEqual([
+      [2, 'add'],
+      [3, 'unknown']
+    ])
+    const summary = await addPlayersFromExport(root, {
+      ref,
+      path,
+      mapping,
+      league: 'Monday Pairs',
+      createLines: [3],
+      membersRevision: planned.membersRevision,
+      seasonRevision: planned.seasonRevision,
+      sourceRevision: planned.sourceRevision
+    })
+    expect(summary).toMatchObject({ rows: 2, added: 2, created: 1 })
+    const created = (await readMaster())[1]
+    expect(created).toMatchObject({
+      firstName: 'Jo',
+      lastName: 'Bloggs',
+      gender: 'male',
+      mbdIds: ['262']
+    })
+    expect(created.dob).toBeUndefined()
+  })
+
   test('refuses an archived season and one without a roster file', async () => {
     await mkdir(join(root, '_archives/Pairs/2024-25'), { recursive: true })
     await mkdir(join(root, 'monday/Pairs/2025-26'), { recursive: true })
     const path = await exportFile('league.csv', 'MBD ID,First,Last,Sex,Team\n10,Ann,Lee,,\n')
     await expect(
-      planPlayersImport(root, { ...ref, seasonName: '2024-25' }, path, MAPPING)
+      planPlayersImport(root, { ...ref, seasonName: '2024-25' }, path, MAPPING, null)
     ).rejects.toThrow()
-    await expect(planPlayersImport(root, ref, path, MAPPING)).rejects.toThrow('no roster file')
+    await expect(planPlayersImport(root, ref, path, MAPPING, null)).rejects.toThrow(
+      'no roster file'
+    )
   })
 })

@@ -237,7 +237,7 @@ it('starts an MBD sync from the toolbar picker or a dropped export', async () =>
   const zone = screen.getByRole('table', { name: 'Members' }).closest('[data-import-drop-target]')
   if (!zone) throw new Error('No drop target around the members table')
   fireEvent.drop(zone, {
-    dataTransfer: { files: [new File(['x'], 'scores.xlsx')], types: ['Files'] }
+    dataTransfer: { files: [new File(['x'], 'scores.docx')], types: ['Files'] }
   })
   expect(await screen.findByText(/Drop one bowler export/)).toBeInTheDocument()
   fireEvent.drop(zone, {

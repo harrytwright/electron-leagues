@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 import {
   applyMbdSync,
   applyRosterImport,
+  columnChoices,
   exactSpelling,
   isImportFileName,
   levenshtein,
@@ -46,7 +47,8 @@ const NO_MAPPING: ImportMapping = {
   lastName: null,
   fullName: null,
   gender: null,
-  team: null
+  team: null,
+  league: null
 }
 
 const SPLIT: ImportMapping = { ...NO_MAPPING, mbdId: 0, firstName: 1, lastName: 2, gender: 3 }
@@ -102,7 +104,8 @@ describe('suggestMapping', () => {
       lastName: 3,
       fullName: null,
       gender: 4,
-      team: 5
+      team: 5,
+      league: null
     })
     expect(suggestMapping(['ID', 'Bowler Name', 'Handicap'])).toEqual({
       ...NO_MAPPING,
@@ -123,7 +126,8 @@ describe('suggestMapping', () => {
   test('recognises export file names', () => {
     expect(isImportFileName('bowlers.CSV')).toBe(true)
     expect(isImportFileName('bowlers.tsv')).toBe(true)
-    expect(isImportFileName('bowlers.xlsx')).toBe(false)
+    expect(isImportFileName('MBDExport.xlsx')).toBe(true)
+    expect(isImportFileName('bowlers.docx')).toBe(false)
   })
 })
 
@@ -147,14 +151,55 @@ describe('readImportRows', () => {
     })
   })
 
-  test('reports rows without an id or a name and ids repeated in the file, by line', () => {
-    const result = rows(['', 'Ann', 'Lee'], ['8', '', ''], ['9', 'Bob', 'Kay'], ['9', 'Bob', 'Kay'])
+  test('reports rows without an id or a name, reads a repeated bowler once and flags a clash', () => {
+    const result = rows(
+      ['', 'Ann', 'Lee'],
+      ['8', '', ''],
+      ['9', 'Bob', 'Kay'],
+      ['09', 'Bob', 'Kay'],
+      ['9', 'Someone', 'Else']
+    )
     expect(result.rows.map((row) => row.line)).toEqual([4])
     expect(result.invalid).toEqual([
       { line: 2, message: 'No MBD ID' },
       { line: 3, message: 'No name for MBD ID 8' },
-      { line: 5, message: 'Repeats MBD ID 9 from line 4' }
+      { line: 6, message: 'Repeats MBD ID 9 from line 4 with a different name' }
     ])
+  })
+
+  test('reads the MBD gender codes and a one-field name left in the first name column', () => {
+    expect(parseGender('W')).toBe('female')
+    expect(parseGender('B')).toBe('male')
+    expect(parseGender('G')).toBe('female')
+    const result = rows(['1', 'Ann Marie Lee', ''], ['2', 'Cher', ''], ['3', 'Team 1', ''])
+    expect(result.rows.map((row) => [row.firstName, row.lastName])).toEqual([
+      ['Ann Marie', 'Lee'],
+      ['Cher', ''],
+      ['Team 1', '']
+    ])
+  })
+
+  test('keeps only the chosen league from a dump of several and lists what can be chosen', () => {
+    const table = {
+      columns: ['League Name', 'MBD ID', 'First', 'Last'],
+      rows: [
+        ['Monday Pairs', '1', 'Ann', 'Lee'],
+        ['Thursday Trios', '2', 'Bob', 'Kay'],
+        ['Monday Pairs', '3', 'Cy', 'Dee'],
+        ['Thursday Trios', '1', 'Ann', 'Lee']
+      ]
+    }
+    const mapping = { ...NO_MAPPING, league: 0, mbdId: 1, firstName: 2, lastName: 3 }
+    expect(suggestMapping(table.columns).league).toBe(0)
+    expect(columnChoices(table, 0)).toEqual(['Monday Pairs', 'Thursday Trios'])
+    expect(columnChoices(table, 1, 2)).toEqual([])
+    const monday = readImportRows(table, mapping, { league: 'monday pairs' })
+    expect(monday.rows.map((row) => [row.line, row.mbdId, row.league])).toEqual([
+      [2, '1', 'Monday Pairs'],
+      [4, '3', 'Monday Pairs']
+    ])
+    expect(monday.invalid).toEqual([])
+    expect(readImportRows(table, mapping).rows.map((row) => row.line)).toEqual([2, 3, 4])
   })
 })
 
@@ -223,7 +268,9 @@ describe('planMbdSync', () => {
       { kind: 'new' },
       { kind: 'known', memberId: 1, newSpelling: false }
     ])
-    expect(plan.invalid).toEqual([{ line: 4, message: 'Repeats MBD ID 20 from line 3' }])
+    expect(plan.invalid).toEqual([
+      { line: 4, message: 'Repeats MBD ID 20 from line 3 with a different name' }
+    ])
   })
 
   test('finds a candidate through an alias and offers every exact twin without choosing', () => {

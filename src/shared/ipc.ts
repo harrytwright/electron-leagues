@@ -299,9 +299,15 @@ export const invokeDefinitions = {
     ]),
     failureMessage: 'Invalid sync request'
   },
+  /** The league name picks one league out of a dump that covers several; null takes every row. */
   planPlayersImport: {
     channel: 'season:plan-import',
-    args: z.tuple([seasonSyncRequestSchema, pathSchema, importMappingSchema]),
+    args: z.tuple([
+      seasonSyncRequestSchema,
+      pathSchema,
+      importMappingSchema,
+      z.string().nullable()
+    ]),
     failureMessage: 'Invalid player import request'
   },
   addPlayersFromExport: {
@@ -310,6 +316,7 @@ export const invokeDefinitions = {
       seasonSyncRequestSchema,
       pathSchema,
       importMappingSchema,
+      z.string().nullable(),
       z.array(z.number().int().positive()),
       revisionSchema,
       revisionSchema,

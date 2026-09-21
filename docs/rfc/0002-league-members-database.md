@@ -413,8 +413,12 @@ which is why the CSV export takes the ids in table order rather than a filter. A
 4. **MBD sync and export drop.** Column-mapping preview, matching rules, alias capture, drop
    handling. Needs one real all-bowlers export and one per-league export as fixtures. Tests:
    each rule, repeat-sync asks nothing new, unknown-id rows. As built, exports are dropped on
-   the Members page or the Players tab (never the Files tab, which keeps copy-in) and read as
-   delimited text, with synthetic fixtures until a real export is to hand.
+   the Members page or the Players tab (never the Files tab, which keeps copy-in). Real exports
+   showed the MBD writes `.xlsx` workbooks with `MBD ID`, `First Name`, `Last Name`, `Gender`
+   (M, W, B and G) and, for leagues, a `League Name` column covering every league ticked at
+   export, so the reader takes workbooks as well as delimited text and the roster import picks
+   one league out of the dump. The MBD's `Birthdate` holds the day a bowler was entered and is
+   never read. The committed fixtures are synthetic copies of that shape.
 5. **Cards and CSV export.** Code 128 encoder, card sheet, `cardIssued`, filtered export. As
    built, the card sheet is a PDF opened from a private temporary folder for the desk to print
    and cleared on quit; the barcode carries the raw id while the card prints the padded number;
@@ -432,8 +436,8 @@ empty structure; nothing in phases 2–5 changes the files' shape.
 - **No spreadsheet editing.** Secretaries used to Excel lose that; the CSV export is one-way.
 - **The app becomes a data editor.** Until now it only added files. Rosters, teams and members
   are now state the app owns and must migrate with `schemaVersion`.
-- **Unverified export formats.** The MBD column names are guessed until a real export is
-  available; the mapping dialog is the mitigation, not a fix.
+- **Export formats verified once.** The MBD column names were confirmed against one centre's
+  exports; a different MBD version may differ, and the mapping dialog is the mitigation.
 - **Personal data in a shared folder.** Already true of BLS backups in `_archives`, but this
   adds DoB and guardian contacts. The under-18 rules and export filters limit what is held.
 

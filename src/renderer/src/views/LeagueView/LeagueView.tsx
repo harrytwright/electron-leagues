@@ -362,7 +362,7 @@ export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): Re
       </div>
 
       <div className="flex min-h-1 w-full flex-1 flex-col">
-        <div className="w-full px-4 border-b border-kumo-line">
+        <div className="w-full border-b border-kumo-line px-4">
           {rosterSeason ? (
             <Tabs
               aria-label={`${rosterSeason.season} season`}

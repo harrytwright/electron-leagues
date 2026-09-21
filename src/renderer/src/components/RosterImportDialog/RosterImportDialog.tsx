@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, Checkbox, Dialog, Text, useKumoToastManager } from '@cloudflare/kumo'
+import { Button, Checkbox, Dialog, Select, Text, useKumoToastManager } from '@cloudflare/kumo'
 import {
   mappingProblem,
   type ImportMapping,
@@ -8,6 +8,7 @@ import {
 } from '@shared/imports'
 import {
   memberDisplayName,
+  normaliseName,
   resolveMember,
   type MembersSnapshot,
   type RosterSeason
@@ -27,7 +28,26 @@ export interface RosterImportDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-const ROSTER_FIELDS = ['mbdId', 'firstName', 'lastName', 'fullName', 'team', 'gender'] as const
+const ROSTER_FIELDS = [
+  'mbdId',
+  'firstName',
+  'lastName',
+  'fullName',
+  'league',
+  'team',
+  'gender'
+] as const
+
+/** The league in the dump named most like this one, or the first when none is. */
+function suggestLeague(choices: readonly string[], leagueName: string): string | null {
+  const wanted = normaliseName(leagueName, '')
+  const exact = choices.find((choice) => normaliseName(choice, '') === wanted)
+  const partial = choices.find((choice) => {
+    const name = normaliseName(choice, '')
+    return name.includes(wanted) || wanted.includes(name)
+  })
+  return exact ?? partial ?? choices[0] ?? null
+}
 
 type Step =
   | { kind: 'mapping'; error: string | null }
@@ -36,6 +56,7 @@ type Step =
       kind: 'review'
       plan: RosterPlan
       mapping: ImportMapping
+      league: string | null
       membersRevision: string
       seasonRevision: string
       sourceRevision: string
@@ -45,6 +66,7 @@ type Step =
 
 interface ImportVariables {
   mapping: ImportMapping
+  league: string | null
   create: number[]
   membersRevision: string
   seasonRevision: string
@@ -81,6 +103,7 @@ export function RosterImportDialog({
         ref,
         path ?? '',
         variables.mapping,
+        variables.league,
         variables.create,
         variables.membersRevision,
         variables.seasonRevision,
@@ -88,12 +111,26 @@ export function RosterImportDialog({
       )
   })
   const [lastCreate, setLastCreate] = useState<number[]>([])
+  const [chosenLeague, setChosenLeague] = useState<string | null>(null)
 
   if (openedFor !== path) {
     setOpenedFor(path)
     setStep({ kind: 'mapping', error: null })
     setLastCreate([])
+    setChosenLeague(null)
   }
+
+  // A dump of several leagues needs one picked; the season's own league is the first guess.
+  const leagueChoices =
+    preview.state.status === 'ready' && preview.state.mapping.league !== null
+      ? (preview.state.preview.choices[preview.state.mapping.league] ?? [])
+      : []
+  const league =
+    leagueChoices.length === 0
+      ? null
+      : chosenLeague !== null && leagueChoices.includes(chosenLeague)
+        ? chosenLeague
+        : suggestLeague(leagueChoices, season.leagueName)
 
   const plan = async (): Promise<void> => {
     if (preview.state.status !== 'ready' || path === null) return
@@ -105,11 +142,12 @@ export function RosterImportDialog({
     }
     setStep({ kind: 'planning' })
     try {
-      const result = await window.api.planPlayersImport(ref, path, mapping)
+      const result = await window.api.planPlayersImport(ref, path, mapping, league)
       setStep({
         kind: 'review',
         plan: result.plan,
         mapping,
+        league,
         membersRevision: result.membersRevision,
         seasonRevision: result.seasonRevision,
         sourceRevision: result.sourceRevision,
@@ -128,6 +166,7 @@ export function RosterImportDialog({
     try {
       const outcome = await importer.run({
         mapping: step.mapping,
+        league: step.league,
         create: step.create,
         membersRevision: step.membersRevision,
         seasonRevision: step.seasonRevision,
@@ -169,8 +208,8 @@ export function RosterImportDialog({
         title={`Add players to ${season.season} from an export`}
         description={
           step.kind === 'review'
-            ? 'Bowlers are matched by MBD ID. The file itself is not kept.'
-            : 'Choose which columns hold the MBD ID, the name and, if the export has one, the team.'
+            ? `Bowlers${step.league ? ` in ${step.league}` : ''} are matched by MBD ID. The file itself is not kept.`
+            : 'Choose which columns hold the MBD ID, the name and, if the export has them, the league and the team.'
         }
       />
       <TaskDialog.Body
@@ -198,6 +237,16 @@ export function RosterImportDialog({
               onChange={preview.setMapping}
               fields={ROSTER_FIELDS}
             />
+            {leagueChoices.length > 0 ? (
+              <Select
+                label="League to take from this export"
+                value={league ?? ''}
+                items={Object.fromEntries(leagueChoices.map((choice) => [choice, choice]))}
+                onValueChange={(value) => {
+                  if (value) setChosenLeague(value)
+                }}
+              />
+            ) : null}
             {step.kind === 'mapping' && step.error ? (
               <Text variant="error" role="alert">
                 {step.error}

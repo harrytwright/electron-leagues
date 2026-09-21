@@ -141,13 +141,15 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
         columns: [],
         sample: [],
         rowCount: 0,
+        choices: [],
         mapping: {
           mbdId: null,
           firstName: null,
           lastName: null,
           fullName: null,
           gender: null,
-          team: null
+          team: null,
+          league: null
         },
         remembered: false
       })

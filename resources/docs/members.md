@@ -36,9 +36,9 @@ Creating a new season offers to carry over the previous season's teams and playe
 
 ## Syncing from the MBD
 
-**Sync from MBD…** on the Members page reads an all-bowlers export from the Master Bowler Database, or you can drop the file onto the page. Choose which columns hold the MBD ID, the name and the gender; the mapping is remembered for the next export with the same columns. Each row is matched by MBD ID first and then by a similar name; a row that matches neither creates a member with just the name and id. Where the export spells a known bowler differently you choose which spelling to keep, and the other is stored as an alias so the question never comes back. Nothing is written to the MBD, and the export itself is not kept.
+**Sync from MBD…** on the Members page reads the Master Bowler Database's bowler export, the `.xlsx` it produces, or you can drop the file onto the page. The columns are recognised from their headings and can be corrected; the mapping is remembered for the next export with the same columns. Only the MBD ID, the name and the gender are read. The MBD's birthdates are left alone, since it fills them with the day a bowler was entered, and contact details are entered here by hand. Each row is matched by MBD ID first and then by a similar name; a row that matches neither creates a member with just the name and id. Where the export spells a known bowler differently you choose which spelling to keep, and the other is stored as an alias so the question never comes back. Nothing is written to the MBD, and the export itself is not kept.
 
-A per-league export can fill a season's roster the same way: see [Players from an export](seasons.md#players-from-an-export).
+The MBD's league export can fill a season's roster the same way: see [Players from an export](seasons.md#players-from-an-export).
 
 ## Cards and the POS
 

@@ -15,7 +15,16 @@ const PREVIEW: MappingPreview = {
   columns: ['ID', 'First', 'Last', 'Sex'],
   sample: [['10', 'Ann', 'Lee', 'F']],
   rowCount: 4,
-  mapping: { mbdId: 0, firstName: 1, lastName: 2, fullName: null, gender: 3, team: null },
+  choices: [],
+  mapping: {
+    mbdId: 0,
+    firstName: 1,
+    lastName: 2,
+    fullName: null,
+    gender: 3,
+    team: null,
+    league: null
+  },
   remembered: false
 }
 

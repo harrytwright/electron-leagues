@@ -481,7 +481,7 @@ function registerIpc(): void {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: 'Choose a bowler export',
       properties: ['openFile'],
-      filters: [{ name: 'Exports', extensions: ['csv', 'tsv', 'txt'] }]
+      filters: [{ name: 'Exports', extensions: ['xlsx', 'csv', 'tsv', 'txt'] }]
     })
     return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
   })
@@ -512,9 +512,9 @@ function registerIpc(): void {
     return summary
   })
 
-  register('planPlayersImport', async (_e, ref, path, mapping) => {
+  register('planPlayersImport', async (_e, ref, path, mapping, league) => {
     const root = requireRoot()
-    const result = await planPlayersImport(root, ref, path, mapping)
+    const result = await planPlayersImport(root, ref, path, mapping, league)
     store.set(
       'importMappings',
       rememberMapping(store.get('importMappings') ?? [], {
@@ -538,6 +538,7 @@ function registerIpc(): void {
       ref,
       path,
       mapping,
+      league,
       createLines,
       membersRevision,
       seasonRevision,
@@ -548,6 +549,7 @@ function registerIpc(): void {
         ref,
         path,
         mapping,
+        league,
         createLines,
         membersRevision,
         seasonRevision,

@@ -21,7 +21,7 @@ export function useImportDrop(onFile: (path: string) => void): ImportDropHandler
       event.preventDefault()
       const files = Array.from(event.dataTransfer.files)
       if (files.length !== 1 || !isImportFileName(files[0].name)) {
-        add({ title: 'Drop one bowler export saved as .csv, .tsv or .txt' })
+        add({ title: 'Drop one bowler export: an .xlsx from the MBD, or a .csv, .tsv or .txt' })
         return
       }
       onFile(window.api.pathForFile(files[0]))

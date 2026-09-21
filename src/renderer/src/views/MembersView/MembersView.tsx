@@ -44,7 +44,6 @@ import { MergeMemberDialog } from '@renderer/components/MergeMemberDialog'
 import { FILE_TABLE_CLASS, STATIC_ROW_CLASS } from '@renderer/components/FileBrowser/styles'
 import type { Props } from './interface'
 
-
 const ALL_LEAGUES = '*'
 
 const QUICK_FILTER_ITEMS = Object.fromEntries(
@@ -244,17 +243,9 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
               Find contact details, manage records and prepare member cards.
             </Text>
           </div>
-          <Toolbar
-            aria-label="Member actions"
-          >
+          <Toolbar aria-label="Member actions">
             <DropdownMenu>
-              <DropdownMenu.Trigger
-                render={
-                  <Toolbar.Button>
-                    More actions
-                  </Toolbar.Button>
-                }
-              />
+              <DropdownMenu.Trigger render={<Toolbar.Button>More actions</Toolbar.Button>} />
               <DropdownMenu.Content align="end">
                 <DropdownMenu.Item onClick={() => void pickExport()}>
                   Sync from MBD…
