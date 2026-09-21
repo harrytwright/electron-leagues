@@ -298,6 +298,8 @@ describe('refreshSignInSheet', () => {
     expect(rendered[0]).toContain('<h1>Monday Pairs</h1>')
 
     const revision = await revisionOf(join(seasonPath, 'meta.json'))
+    // The stamp is whole milliseconds, so a save inside the same one would read as fresh.
+    await new Promise((resolve) => setTimeout(resolve, 2))
     await saveSeason(
       root,
       ref,

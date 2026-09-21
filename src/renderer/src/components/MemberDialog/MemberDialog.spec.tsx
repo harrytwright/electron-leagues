@@ -32,7 +32,7 @@ it('adds a member with the fields shaped for main and the snapshot revision', as
 
   await user.type(screen.getByLabelText(/first name/i), 'Ann')
   await user.type(screen.getByLabelText(/last name/i), 'Lee')
-  await user.type(screen.getByLabelText(/date of birth/i), '1990-05-04')
+  await user.type(screen.getByLabelText('Date of birth'), '1990-05-04')
   await user.type(screen.getByLabelText(/email/i), 'ann@example.org')
   await user.type(screen.getByLabelText(/mbd ids/i), '10, 11')
   await user.click(screen.getByRole('button', { name: 'Add member' }))
@@ -58,12 +58,12 @@ it('offers a calendar beside the date of birth that fills the field', async () =
   renderDialog()
   const user = userEvent.setup()
 
-  await user.type(screen.getByLabelText(/date of birth/i), '1990-05-04')
-  await user.click(screen.getByRole('button', { name: 'Open calendar' }))
+  await user.type(screen.getByLabelText('Date of birth'), '1990-05-04')
+  await user.click(screen.getByRole('button', { name: 'Open the date of birth calendar' }))
   expect(await screen.findByRole('combobox', { name: 'Choose the Year' })).toHaveValue('1990')
   await user.click(screen.getByRole('button', { name: /May 6th, 1990/ }))
 
-  expect(screen.getByLabelText(/date of birth/i)).toHaveValue('1990-05-06')
+  expect(screen.getByLabelText('Date of birth')).toHaveValue('1990-05-06')
   await waitFor(() =>
     expect(screen.queryByRole('combobox', { name: 'Choose the Year' })).not.toBeInTheDocument()
   )
@@ -76,7 +76,7 @@ it('swaps contact fields for a guardian contact once the date of birth makes the
 
   expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
   const thisYear = new Date().getFullYear()
-  await user.type(screen.getByLabelText(/date of birth/i), `${thisYear - 10}-01-01`)
+  await user.type(screen.getByLabelText('Date of birth'), `${thisYear - 10}-01-01`)
 
   expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument()
   expect(screen.getByLabelText(/parent or guardian contact/i)).toBeInTheDocument()

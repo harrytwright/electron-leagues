@@ -110,13 +110,20 @@ function defaultChoices(plan: SyncPlan, previous: Choices): Choices {
   return choices
 }
 
-/** A bowler with no surname is usually a placeholder in the MBD, so they start left out. */
-function defaultSkips(plan: SyncPlan, previous: Skips | null): Skips {
-  if (previous)
-    return new Set(
-      [...previous].filter((line) => plan.rows.some((entry) => entry.row.line === line))
-    )
-  return new Set(plan.rows.flatMap(({ row }) => (row.lastName ? [] : [row.line])))
+/** Lines the desk has ticked or unticked by hand, so a re-plan keeps their say. */
+type Ticks = ReadonlyMap<number, boolean>
+
+/**
+ * A bowler with no surname is usually a placeholder in the MBD, so they start left
+ * out; a line the desk has already decided keeps that decision through a Back.
+ */
+function defaultSkips(plan: SyncPlan, ticks: Ticks): Skips {
+  return new Set(
+    plan.rows.flatMap(({ row }) => {
+      const skipped = ticks.get(row.line) ?? !row.lastName
+      return skipped ? [row.line] : []
+    })
+  )
 }
 
 function decisionsFrom(review: Review): SyncDecision[] {
@@ -194,13 +201,13 @@ export function MbdSyncDialog({
       window.api.syncMbd(path ?? '', mapping, decisions, revision, sourceRevision)
   })
   const [lastChoices, setLastChoices] = useState<Choices>(new Map())
-  const [lastSkips, setLastSkips] = useState<Skips | null>(null)
+  const [ticks, setTicks] = useState<Ticks>(new Map())
 
   if (openedFor !== path) {
     setOpenedFor(path)
     setStep({ kind: 'mapping', error: null })
     setLastChoices(new Map())
-    setLastSkips(null)
+    setTicks(new Map())
   }
 
   const memberName = (id: number): string => {
@@ -228,7 +235,7 @@ export function MbdSyncDialog({
         sourceRevision: result.sourceRevision,
         mapping,
         choices: defaultChoices(result.plan, lastChoices),
-        skips: defaultSkips(result.plan, lastSkips)
+        skips: defaultSkips(result.plan, ticks)
       })
     } catch (caught) {
       setStep({ kind: 'mapping', error: ipcErrorMessage(caught) })
@@ -237,7 +244,6 @@ export function MbdSyncDialog({
 
   const backToMapping = (review: Review, error: string | null): void => {
     setLastChoices(review.choices)
-    setLastSkips(review.skips)
     setStep({ kind: 'mapping', error })
   }
 
@@ -271,11 +277,13 @@ export function MbdSyncDialog({
   const setSkipped = (lines: readonly number[], skipped: boolean): void => {
     if (step.kind !== 'review') return
     const skips = new Set(step.skips)
+    const chosen = new Map(ticks)
     for (const line of lines) {
       if (skipped) skips.add(line)
       else skips.delete(line)
+      chosen.set(line, skipped)
     }
-    setLastSkips(skips)
+    setTicks(chosen)
     setStep({ ...step, skips })
   }
 
@@ -383,7 +391,12 @@ export function MbdSyncDialog({
               <Button
                 type="submit"
                 variant="primary"
-                disabled={busy || preview.state.status !== 'ready' || undecided > 0}
+                disabled={
+                  busy ||
+                  preview.state.status !== 'ready' ||
+                  undecided > 0 ||
+                  (step.kind === 'review' && toSync === 0)
+                }
                 title={
                   undecided > 0 ? `${plural(undecided, 'row')} still need a decision` : undefined
                 }

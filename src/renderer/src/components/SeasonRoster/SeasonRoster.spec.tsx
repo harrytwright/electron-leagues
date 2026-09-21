@@ -226,7 +226,7 @@ it('saves settings with numbers parsed and blanks dropped', async () => {
   const user = userEvent.setup()
   const form = screen.getByRole('form', { name: 'Season settings' })
 
-  await user.type(within(form).getByLabelText(/start date/i), '2025-09-01')
+  await user.type(within(form).getByLabelText('Start date'), '2025-09-01')
   await user.type(within(form).getByLabelText(/weeks/i), '30')
   await user.type(within(form).getByLabelText(/player fee/i), '12.5')
   await user.click(within(form).getByRole('button', { name: 'Add fee line' }))
@@ -241,6 +241,29 @@ it('saves settings with numbers parsed and blanks dropped', async () => {
       startDate: '2025-09-01',
       weeks: 30,
       fees: { total: 12.5, breakdown: [{ label: 'Lineage', amount: 9 }] }
+    }),
+    'season-r9'
+  )
+})
+
+it('drops the teams and team ids when the format becomes singles', async () => {
+  const api = renderTab('settings')
+  const user = userEvent.setup()
+  const form = screen.getByRole('form', { name: 'Season settings' })
+
+  await chooseOption(user, /format/i, /singles/i)
+  await user.click(within(form).getByRole('button', { name: 'Save settings' }))
+
+  await waitFor(() => expect(api.saveSeason).toHaveBeenCalledOnce())
+  expect(api.saveSeason).toHaveBeenCalledWith(
+    REF,
+    file({
+      format: 1,
+      teams: [],
+      players: [
+        { memberId: 1, teamId: null, position: 1 },
+        { memberId: 2, teamId: null }
+      ]
     }),
     'season-r9'
   )

@@ -24,7 +24,7 @@ Every member gets the next number when they are created, shown padded to six dig
 
 ## The members list
 
-The list opens by surname. Click **Number** or **Member** to sort by that column, and again to turn it round. Drag the handle at the right edge of a column heading to change its width, or focus the handle and use the left and right arrow keys. The arrangement is remembered on this machine. A small warning mark after a name means the record still needs details: a date of birth, a contact, or a guardian's contact for a junior.
+The list opens by surname. Click **Number** or **Member** to sort by that column, and again to turn it round. Drag the handle at the right edge of a column heading to change its width, or focus the handle and use the left and right arrow keys. The arrangement is remembered on this machine. A small warning mark after a name means the record still needs details: a date of birth, a contact or a guardian's contact for a junior. Alias spellings are no longer shown under a name, but the search still finds them.
 
 ## Adding and editing members
 
@@ -46,7 +46,7 @@ The MBD's league export can fill a season's roster the same way: see [Players fr
 
 ## Cards and the POS
 
-**Print card** on a member, or **Print cards** in the toolbar for everyone on the list, will make a PDF of cards with the member's name, number and a barcode and open it for printing. Both actions are parked until a card template can be chosen, and say so. Hidden records are skipped. The barcode carries the raw number, so the POS reads the member from a scan. Printing marks the member's record with the date the card was issued. The sheet is kept in a folder only you can read under the system's temporary folder and is removed when the app closes.
+**Print card** on a member, and **Print cards** in the toolbar for everyone on the list, are parked until a card template can be chosen, and say so. Once they wake up they will make a PDF of cards with the member's name, number and a barcode and open it for printing, skipping hidden records. The barcode will carry the raw number, so the POS reads the member from a scan, printing will mark the member's record with the date the card was issued, and the sheet will sit in a folder only you can read under the system's temporary folder until the app closes.
 
 ## Exporting to a spreadsheet
 

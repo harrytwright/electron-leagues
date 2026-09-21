@@ -40,8 +40,7 @@ export function DateField({
             <IconButton
               type="button"
               variant="secondary"
-              // Named without the field so label queries still find the input alone.
-              aria-label="Open calendar"
+              aria-label={`Open the ${label.toLowerCase()} calendar`}
               disabled={disabled}
               icon={<CalendarBlankIcon aria-hidden size={16} />}
             />

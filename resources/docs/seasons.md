@@ -37,7 +37,7 @@ A season created while the members database is on carries its own settings, team
 
 ## Sign-in sheet
 
-Where a season has a roster, its files list a **Sign-In Sheet.pdf** marked _Generated_. The sheet is made from the roster the first time it is opened, and again whenever the roster or teams change, so it is always the current line-up: one block per team in lane-draw order with Cash and Card columns, blank rows for subs, and a space to write the week and date. Print it each league night. The bundled `Sign-In Sheet.docx` stays for leagues that fill a sheet in by hand and is marked _Superseded_ once a roster exists. Archived seasons keep whatever sheet they had.
+Where a season has a roster, its files list a **Sign-In Sheet.pdf** marked _Generated_. The sheet is made from the roster the first time it is opened, and again whenever the roster or teams change, so it is always the current line-up: one block per team in lane-draw order with Cash and Card columns, blank rows for subs, and a space to write the week and date. A singles season prints one block of names by surname with blank rows for anyone who turns up. Print it each league night. The bundled `Sign-In Sheet.docx` stays for leagues that fill a sheet in by hand and is marked _Superseded_ once a roster exists. Archived seasons keep whatever sheet they had.
 
 ## Players from an export
 

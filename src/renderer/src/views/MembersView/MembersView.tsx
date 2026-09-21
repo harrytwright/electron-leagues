@@ -75,7 +75,7 @@ function formatBorn(dob: string | undefined): string {
 
 const COLUMN_TITLES: Record<ResizableMemberColumn, string> = {
   number: 'Number',
-  member: 'Member',
+  name: 'Member',
   born: 'Born',
   contact: 'Contact',
   leagues: 'Leagues'
@@ -85,6 +85,25 @@ const COLUMN_TITLES: Record<ResizableMemberColumn, string> = {
 const DEFAULT_COLUMN_WIDTHS: MemberColumnWidths = { number: 96, born: 112 }
 
 const KEYBOARD_RESIZE_STEP = 16
+
+/**
+ * Kumo's own `Table.ResizeHandle` fixes its name to "Resize column" and hides itself
+ * with `visibility`, which also takes it out of the tab order. This one keeps Kumo's
+ * look but names the column and stays reachable from the keyboard.
+ */
+function ColumnResizeHandle(
+  props: React.ButtonHTMLAttributes<HTMLButtonElement>
+): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      {...props}
+      className="absolute top-0 right-0 m-0 flex h-full w-[10px] cursor-col-resize touch-none items-center justify-center bg-kumo-base p-0 opacity-0 select-none group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-kumo-brand"
+    >
+      <span className="h-5 w-[2px] rounded bg-kumo-hairline" />
+    </button>
+  )
+}
 
 interface ColumnDrag {
   column: ResizableMemberColumn
@@ -101,7 +120,7 @@ function leaguesSummary(row: MemberRow): React.JSX.Element | string {
           {index > 0 ? ', ' : ''}
           <span className="whitespace-nowrap">
             {membership.leagueName}
-            {membership.team ? '' : ' (sub)'}
+            {membership.team || membership.singles ? '' : ' (sub)'}
           </span>
         </span>
       ))}
@@ -199,28 +218,6 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
       window.api.renumberDuplicates(id, keepIndex, snapshot.revision)
   })
 
-  const cards = useWriteOperation({
-    label: (ids: number[]) => `Printing ${plural(ids.length, 'card')}`,
-    write: (ids) => window.api.printCards(ids, snapshot.revision)
-  })
-
-  const printCards = async (ids: number[]): Promise<void> => {
-    if (ids.length === 0 || cards.pending) return
-    try {
-      const outcome = await cards.run(ids)
-      const done = `Made a sheet of ${plural(ids.length, 'card')} and opened it for printing`
-      add({
-        title:
-          outcome.status === 'refresh-failed'
-            ? `${done}, but the list could not be refreshed: ${outcome.refreshError}`
-            : done,
-        variant: outcome.status === 'refresh-failed' ? 'error' : 'success'
-      })
-    } catch (caught) {
-      add({ title: ipcErrorMessage(caught), variant: 'error' })
-    }
-  }
-
   const keepNumber = async (member: Member): Promise<void> => {
     const holders = snapshot.members.filter((candidate) => candidate.id === member.id)
     try {
@@ -261,9 +258,12 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
   const sortBy = (column: MembersSortColumn): void => {
     arrange({ ...table, sort: nextMembersSort(table.sort, column) })
   }
-  const resize = (column: ResizableMemberColumn, width: number): void => {
+  // A drag redraws on every pointer move but is only remembered once it ends.
+  const resize = (column: ResizableMemberColumn, width: number): MembersTablePreference => {
     const rounded = Math.max(MIN_MEMBER_COLUMN_WIDTH, Math.round(width))
-    arrange({ ...table, widths: { ...table.widths, [column]: rounded } })
+    const next = { ...table, widths: { ...table.widths, [column]: rounded } }
+    setTable(next)
+    return next
   }
   const widthOf = (column: ResizableMemberColumn): number | undefined =>
     table.widths[column] ?? DEFAULT_COLUMN_WIDTHS[column]
@@ -279,9 +279,16 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
   }
   const moveDrag = (event: React.PointerEvent<HTMLButtonElement>): void => {
     const current = drag.current
-    if (current) resize(current.column, current.startWidth + event.clientX - current.startX)
+    if (!current) return
+    // A move with no button held means the release happened where we could not see it.
+    if (event.buttons === 0) {
+      drag.current = null
+      return
+    }
+    resize(current.column, current.startWidth + event.clientX - current.startX)
   }
   const endDrag = (event: React.PointerEvent<HTMLButtonElement>): void => {
+    if (drag.current) saveMembersTable(table)
     drag.current = null
     event.currentTarget.releasePointerCapture?.(event.pointerId)
   }
@@ -294,16 +301,18 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
           : 0
     if (step === 0) return
     event.preventDefault()
-    resize(column, (widthOf(column) ?? MIN_MEMBER_COLUMN_WIDTH * 2) + step)
+    saveMembersTable(resize(column, (widthOf(column) ?? MIN_MEMBER_COLUMN_WIDTH * 2) + step))
   }
   const resizeHandle = (column: ResizableMemberColumn): React.JSX.Element => (
-    // Kumo names every handle "Resize column"; the title says which one this is.
-    <Table.ResizeHandle
-      title={`Resize the ${COLUMN_TITLES[column]} column`}
+    <ColumnResizeHandle
+      aria-label={`Resize the ${COLUMN_TITLES[column]} column`}
       onPointerDown={(event) => startDrag(column, event)}
       onPointerMove={moveDrag}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
+      onLostPointerCapture={() => {
+        drag.current = null
+      }}
       onKeyDown={(event) => nudge(column, event)}
     />
   )
@@ -375,7 +384,8 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
                 <DropdownMenu.Item onClick={() => void pickExport()}>
                   Sync from MBD…
                 </DropdownMenu.Item>
-                <DropdownMenu.Item disabled onClick={() => void printCards(listed)}>
+                {/* The `printCards` channel is wired in main; this item wakes up with a template. */}
+                <DropdownMenu.Item disabled>
                   {`Print ${plural(listed.length, 'card')} (${CARDS_PARKED})`}
                 </DropdownMenu.Item>
                 <DropdownMenu.Item
@@ -468,7 +478,7 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
               </Table.Head>
               <Table.Head aria-sort={sortMark('name')} className="group relative">
                 {sortHead('name', 'Member')}
-                {resizeHandle('member')}
+                {resizeHandle('name')}
               </Table.Head>
               <Table.Head className="group relative">
                 Born
@@ -563,10 +573,7 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
                             </DropdownMenu.Item>
                             <DropdownMenu.Item
                               disabled
-                              onClick={() => void printCards([row.member.id])}
-                            >
-                              {`Print card (${CARDS_PARKED})`}
-                            </DropdownMenu.Item>
+                            >{`Print card (${CARDS_PARKED})`}</DropdownMenu.Item>
                             <DropdownMenu.Separator />
                             <DropdownMenu.Item
                               variant="danger"

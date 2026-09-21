@@ -7,7 +7,7 @@ import { DEFAULT_MEMBERS_SORT, membersSortSchema } from './members-filter'
  * guarded so a missing or stale value falls back to the defaults.
  */
 
-export const RESIZABLE_MEMBER_COLUMNS = ['number', 'member', 'born', 'contact', 'leagues'] as const
+export const RESIZABLE_MEMBER_COLUMNS = ['number', 'name', 'born', 'contact', 'leagues'] as const
 
 export type ResizableMemberColumn = (typeof RESIZABLE_MEMBER_COLUMNS)[number]
 
@@ -16,7 +16,7 @@ export const MIN_MEMBER_COLUMN_WIDTH = 64
 
 const columnWidthsSchema = z.object({
   number: z.number().int().min(MIN_MEMBER_COLUMN_WIDTH).optional(),
-  member: z.number().int().min(MIN_MEMBER_COLUMN_WIDTH).optional(),
+  name: z.number().int().min(MIN_MEMBER_COLUMN_WIDTH).optional(),
   born: z.number().int().min(MIN_MEMBER_COLUMN_WIDTH).optional(),
   contact: z.number().int().min(MIN_MEMBER_COLUMN_WIDTH).optional(),
   leagues: z.number().int().min(MIN_MEMBER_COLUMN_WIDTH).optional()

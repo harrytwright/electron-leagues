@@ -345,7 +345,7 @@ it('adds roster tabs to a season that has a season file, and only there', async 
   await user.click(screen.getByRole('tab', { name: 'Settings' }))
   const settings = within(screen.getByRole('region', { name: 'Settings' }))
   expect(settings.getByLabelText(/format/i)).toHaveTextContent('Doubles')
-  expect(settings.getByLabelText(/start date/i)).toHaveValue('2025-09-01')
+  expect(settings.getByLabelText('Start date')).toHaveValue('2025-09-01')
   expect(settings.getByLabelText(/player fee/i)).toHaveValue('12.5')
   expect(settings.getByLabelText('Fee line 1 label')).toHaveValue('Lineage')
 

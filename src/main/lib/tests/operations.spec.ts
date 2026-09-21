@@ -927,6 +927,25 @@ describe('createSeasonRoster', () => {
     ).rejects.toThrow('already has a roster')
   })
 
+  test('carries players into a singles season without their teams', async () => {
+    await enableMembers(root)
+    await makeTree(root, { 'monday/Pairs/2024-25': null, 'monday/Pairs/2025-26': null })
+    await writeSeasonFile(join(root, 'monday/Pairs/2024-25'), {
+      schemaVersion: 1,
+      format: 2,
+      teams: [{ id: 'team_a', teamNo: 1, name: 'Strikers' }],
+      players: [{ memberId: 1, teamId: 'team_a', position: 1 }]
+    })
+
+    await createSeasonRoster({ ...ref, root, roster: { format: 1, carryOver: true } })
+    expect(await seasonFileOf('monday/Pairs/2025-26')).toEqual({
+      schemaVersion: 1,
+      format: 1,
+      teams: [],
+      players: [{ memberId: 1, teamId: null, position: 1 }]
+    })
+  })
+
   test('refuses a location without the database, an archived season and a missing one', async () => {
     await makeTree(root, { 'monday/Pairs/2025-26': null, '_archives/Pairs/2023-24': null })
     await expect(

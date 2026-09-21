@@ -123,11 +123,18 @@ it('sorts by number or name from the headers and remembers the arrangement', asy
     'descending'
   )
 
-  const handle = screen.getByTitle('Resize the Born column')
-  fireEvent.pointerDown(handle, { clientX: 100, pointerId: 1 })
-  fireEvent.pointerMove(handle, { clientX: 160, pointerId: 1 })
-  fireEvent.pointerUp(handle, { clientX: 160, pointerId: 1 })
+  const handle = screen.getByRole('button', { name: 'Resize the Born column' })
+  fireEvent.pointerDown(handle, { clientX: 100, pointerId: 1, buttons: 1 })
+  fireEvent.pointerMove(handle, { clientX: 160, pointerId: 1, buttons: 1 })
   const cols = table.querySelectorAll('col')
+  expect(cols[2]).toHaveStyle({ width: '172px' })
+  // The width is drawn on every move but only remembered once the drag ends.
+  expect(localStorage.getItem('leagues:members-table:v1')).not.toContain('"born"')
+  fireEvent.pointerUp(handle, { clientX: 160, pointerId: 1, buttons: 0 })
+  expect(localStorage.getItem('leagues:members-table:v1')).toContain('"born":172')
+  // A move with no button held is a release we never saw, so it moves nothing.
+  fireEvent.pointerDown(handle, { clientX: 100, pointerId: 1, buttons: 1 })
+  fireEvent.pointerMove(handle, { clientX: 300, pointerId: 1, buttons: 0 })
   expect(cols[2]).toHaveStyle({ width: '172px' })
   handle.focus()
   await user.keyboard('{ArrowLeft}')

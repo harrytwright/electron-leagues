@@ -26,7 +26,10 @@ export function MergeMemberDialog({
   const errorId = useId()
   const coordinator = useQueryRefresh()
   const operation = useWriteOperation({
-    label: () => `Merging ${member ? memberDisplayName(member) : 'members'}`,
+    label: ({ from }: { from: number; into: number }) => {
+      const absorbed = snapshot.members.find((candidate) => candidate.id === from)
+      return `Merging ${absorbed ? memberDisplayName(absorbed) : 'members'}`
+    },
     write: ({ from, into }: { from: number; into: number }) =>
       window.api.mergeMembers(from, into, snapshot.revision)
   })

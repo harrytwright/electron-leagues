@@ -2,6 +2,7 @@ import { lstat, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/pr
 import { join } from 'node:path'
 import { parseLeagueMetaInput } from '../../shared/meta'
 import {
+  compareSinglesPlayers,
   isSingles,
   memberDisplayName,
   membersFileSchema,
@@ -69,12 +70,8 @@ ${rows.map((name) => `<tr><td>${name}</td><td></td><td></td></tr>`).join('\n')}
 
 /** Singles bowlers are listed by surname in one block, with room for anyone who turns up. */
 function singlesBlocks(file: SeasonFile, members: readonly Member[]): string[] {
-  const sortKey = (player: Player): string => {
-    const member = resolveMember(members, player.memberId)
-    return member ? `${member.lastName} ${member.firstName}` : `\uffff${player.memberId}`
-  }
   const names = [...file.players]
-    .sort((a, b) => sortKey(a).localeCompare(sortKey(b)))
+    .sort(compareSinglesPlayers(members))
     .map((player) => playerName(player, members))
   return [block('Players', names, BLANK_ROWS_FOR_SINGLES)]
 }

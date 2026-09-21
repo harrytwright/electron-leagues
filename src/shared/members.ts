@@ -107,6 +107,30 @@ export function isSingles(file: Pick<SeasonFile, 'format'>): boolean {
   return file.format === SINGLES_FORMAT
 }
 
+/**
+ * A singles file carries no teams and no team ids, whatever the roster held before
+ * its format changed or was carried over from a team season.
+ */
+export function fitToFormat(file: SeasonFile): SeasonFile {
+  if (!isSingles(file)) return file
+  return {
+    ...file,
+    teams: [],
+    players: file.players.map((player) => ({ ...player, teamId: null }))
+  }
+}
+
+/** Singles bowlers are listed by surname then first name, with anyone unresolved last. */
+export function compareSinglesPlayers(
+  members: readonly Member[]
+): (a: Player, b: Player) => number {
+  const key = (player: Player): string => {
+    const member = resolveMember(members, player.memberId)
+    return member ? `${member.lastName} ${member.firstName}` : `\uffff${player.memberId}`
+  }
+  return (a, b) => key(a).localeCompare(key(b), undefined, { sensitivity: 'base' })
+}
+
 export const feeBreakdownSchema = z.object({
   label: z.string(),
   amount: z.number().nonnegative()
@@ -303,6 +327,8 @@ export interface Membership {
   seasonPath: string
   archived: boolean
   team: Team | null
+  /** In a singles season nobody is a sub, so a missing team means nothing. */
+  singles: boolean
   position?: number
 }
 
@@ -325,6 +351,7 @@ export function deriveMemberships(snapshot: MembersSnapshot): Membership[] {
         seasonPath: season.path,
         archived: season.archived,
         team,
+        singles: isSingles(season.file),
         position: player.position
       })
     }

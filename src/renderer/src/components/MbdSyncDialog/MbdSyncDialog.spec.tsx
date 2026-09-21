@@ -91,7 +91,7 @@ it('walks from the mapping to the decisions and syncs with them', async () => {
           mbdId: '10',
           name: 'Annie Lee',
           action: 'renamed',
-          detail: 'Already Ann Lee (1); renamed from Ann Lee'
+          detail: 'Already Ann Lee (1); renamed to Annie Lee'
         },
         {
           line: 3,
@@ -157,7 +157,7 @@ it('walks from the mapping to the decisions and syncs with them', async () => {
       .slice(1)
       .map((row) => row.textContent)
   ).toEqual([
-    '2Annie Lee10RenamedAlready Ann Lee (1); renamed from Ann Lee',
+    '2Annie Lee10RenamedAlready Ann Lee (1); renamed to Annie Lee',
     '3Cy Dee30MergedId added to Cy Dee (2)',
     '4New Person40CreatedNew member 3',
     '5UnreadableNo MBD ID'
@@ -203,6 +203,34 @@ it('leaves a bowler with no surname out unless ticked, and sends skips for anyon
   expect(screen.getByText('(no surname)')).toBeInTheDocument()
   await user.click(screen.getByRole('checkbox', { name: 'Sync Other Person' }))
   expect(screen.getByRole('button', { name: 'Sync 1 row' })).toBeEnabled()
+
+  // Back and Continue: the desk's own ticks survive, and a row that has lost its surname
+  // through a changed mapping starts unticked like any other placeholder.
+  await user.click(screen.getByRole('button', { name: 'Back' }))
+  vi.mocked(api.planMbdSync).mockResolvedValueOnce({
+    plan: {
+      rows: [
+        {
+          row: { line: 2, mbdId: '70', firstName: 'Team 1', lastName: '' },
+          match: { kind: 'new' }
+        },
+        { row: { line: 3, mbdId: '80', firstName: 'New', lastName: '' }, match: { kind: 'new' } },
+        {
+          row: { line: 4, mbdId: '90', firstName: 'Other', lastName: 'Person' },
+          match: { kind: 'new' }
+        }
+      ],
+      invalid: []
+    },
+    revision: 'members-r4',
+    sourceRevision: 'export-r1'
+  })
+  await user.click(screen.getByRole('button', { name: 'Continue' }))
+  await screen.findByText('3 rows: 0 already known, 3 new, 0 to decide, 3 left out')
+  expect(screen.getByRole('checkbox', { name: 'Sync New' })).not.toBeChecked()
+  expect(screen.getByRole('checkbox', { name: 'Sync Other Person' })).not.toBeChecked()
+  expect(screen.getByRole('button', { name: 'Sync 0 rows' })).toBeDisabled()
+  await user.click(screen.getByRole('checkbox', { name: 'Sync New' }))
   await user.click(screen.getByRole('button', { name: 'Sync 1 row' }))
 
   await waitFor(() =>

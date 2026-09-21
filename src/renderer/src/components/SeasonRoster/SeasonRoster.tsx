@@ -5,6 +5,7 @@ import { FileArrowUpIcon } from '@phosphor-icons/react/dist/csr/FileArrowUp'
 import { PlusIcon } from '@phosphor-icons/react/dist/csr/Plus'
 import { UserPlusIcon } from '@phosphor-icons/react/dist/csr/UserPlus'
 import {
+  compareSinglesPlayers,
   formatMemberNumber,
   isSingles,
   memberDisplayName,
@@ -47,11 +48,7 @@ interface PlayerGroup {
 
 /** Singles bowlers are listed by name; there are no teams to group them under. */
 function singlesGroup(season: RosterSeason, members: readonly Member[]): PlayerGroup[] {
-  const nameOf = (player: Player): string => {
-    const member = resolveMember(members, player.memberId)
-    return member ? `${member.lastName} ${member.firstName}` : `\uffff${player.memberId}`
-  }
-  const players = [...season.file.players].sort((a, b) => nameOf(a).localeCompare(nameOf(b)))
+  const players = [...season.file.players].sort(compareSinglesPlayers(members))
   return [{ key: 'players', title: 'Players', team: null, players }]
 }
 

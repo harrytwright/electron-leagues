@@ -351,7 +351,7 @@ describe('applyMbdSync', () => {
     expect(
       summary.log.map((entry) => [entry.line, entry.name, entry.action, entry.detail])
     ).toEqual([
-      [2, 'Annie Lee', 'renamed', 'Already Annie Lee (1); renamed from Ann Lee'],
+      [2, 'Annie Lee', 'renamed', 'Already Ann Lee (1); renamed to Annie Lee'],
       [3, 'Cy Dee', 'restored', 'Already Cy Dee (2); brought back'],
       [4, 'Dea Sub', 'merged', 'Id added to Dee Sub (3)'],
       [5, 'New Person', 'created', 'New member 4'],

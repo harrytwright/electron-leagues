@@ -22,7 +22,13 @@ import {
   type SeasonName
 } from '../../shared/season'
 import { sanitiseFolderName } from '../../shared/sanitise'
-import { DEFAULT_FORMAT, newSeasonFile, type Player, type SeasonFile } from '../../shared/members'
+import {
+  fitToFormat,
+  DEFAULT_FORMAT,
+  newSeasonFile,
+  type Player,
+  type SeasonFile
+} from '../../shared/members'
 import type { Weekday } from '../../shared/weekday'
 import type {
   SeasonCreateRequest,
@@ -501,11 +507,11 @@ async function startingSeasonFile(
   if (!roster.carryOver || !previousDir) return file
   const previous = await readSeasonFile(previousDir)
   if (previous.status !== 'ok') return file
-  return {
+  return fitToFormat({
     ...file,
     teams: previous.value.teams,
     players: previous.value.players.map(carriedOverPlayer)
-  }
+  })
 }
 
 export interface CreateRosterOptions extends SeasonSyncRequest {

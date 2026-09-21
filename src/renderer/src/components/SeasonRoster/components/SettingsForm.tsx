@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button, Input, Select, Text } from '@cloudflare/kumo'
-import type { FeeBreakdown, SeasonFile } from '@shared/members'
+import { fitToFormat, type FeeBreakdown, type SeasonFile } from '@shared/members'
 import { useKeyedState } from '@renderer/hooks/use-keyed-state'
 import { FORMAT_ITEMS } from '@renderer/lib/season-format'
 import { DateField } from '../../DateField'
@@ -93,7 +93,7 @@ function fileFromDraft(draft: Draft, file: SeasonFile): { file: SeasonFile } | {
     next.subFee = subFee
   }
   if (draft.leagueSecretaryId.trim()) next.leagueSecretaryId = draft.leagueSecretaryId.trim()
-  return { file: next }
+  return { file: fitToFormat(next) }
 }
 
 export function SettingsForm({
@@ -160,7 +160,7 @@ export function SettingsForm({
               onChange={(value) => update('startDate', value)}
               fromYear={thisYear - SEASON_YEARS_BACK}
               toYear={thisYear + SEASON_YEARS_AHEAD}
-              disabled={readOnly}
+              disabled={readOnly || busy}
             />
             <Input
               label="Start time"

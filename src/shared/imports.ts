@@ -642,13 +642,17 @@ export function applyMbdSync(
         fail(row, `Member ${match.memberId} is missing`)
         continue
       }
+      const known = label(member)
       const notes: string[] = []
+      let renamed = false
+      let restored = false
       if (match.newSpelling && decision?.kind === 'spelling' && decision.keep === 'export') {
         const previous = { firstName: member.firstName, lastName: member.lastName }
         member.firstName = row.firstName
         member.lastName = row.lastName
         if (addAlias(member, previous)) summary.aliased += 1
-        notes.push(`renamed from ${memberDisplayName(previous)}`)
+        renamed = true
+        notes.push(`renamed to ${memberDisplayName(member)}`)
       } else if (addAlias(member, row)) {
         summary.aliased += 1
         notes.push('spelling kept as an alias')
@@ -657,15 +661,12 @@ export function applyMbdSync(
       if (member.deleted) {
         delete member.deleted
         summary.restored += 1
+        restored = true
         notes.push('brought back')
       }
       summary.matched += 1
-      const action: SyncAction = notes.includes('brought back')
-        ? 'restored'
-        : notes.some((note) => note.startsWith('renamed'))
-          ? 'renamed'
-          : 'matched'
-      record(row, action, [`Already ${label(member)}`, ...notes].join('; '))
+      const action: SyncAction = restored ? 'restored' : renamed ? 'renamed' : 'matched'
+      record(row, action, [`Already ${known}`, ...notes].join('; '))
       continue
     }
     if (decision?.kind === 'create') {

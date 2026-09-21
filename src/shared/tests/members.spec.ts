@@ -3,6 +3,7 @@ import {
   ageOn,
   applyAgeRules,
   deriveMemberships,
+  fitToFormat,
   disabledMembersSnapshot,
   findRosterProblems,
   formatMemberNumber,
@@ -200,8 +201,25 @@ describe('deriveMemberships', () => {
     )
     expect(memberships).toEqual([
       expect.objectContaining({ memberId: 2, team, position: 1, season: '2025-26' }),
-      expect.objectContaining({ memberId: 3, team: null })
+      expect.objectContaining({ memberId: 3, team: null, singles: false })
     ])
+  })
+})
+
+describe('fitToFormat', () => {
+  test('strips teams and team ids from a singles file and leaves a team file alone', () => {
+    const file = seasonFile({
+      format: 1,
+      teams: [{ id: 'team_a', teamNo: 1, name: 'Strikers' }],
+      players: [{ memberId: 1, teamId: 'team_a', position: 1 }]
+    })
+    expect(fitToFormat(file)).toEqual({
+      ...file,
+      teams: [],
+      players: [{ memberId: 1, teamId: null, position: 1 }]
+    })
+    const teams = { ...file, format: 2 }
+    expect(fitToFormat(teams)).toBe(teams)
   })
 })
 
