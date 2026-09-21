@@ -409,8 +409,8 @@ which is why the CSV export takes the ids in table order rather than a filter. A
    opened on into the other; the Members table sorts by number or name and its column widths
    drag, both remembered per machine; aliases are matched by the filter but not shown; and a
    singles season (format 1) has no Teams tab, team column or team choice anywhere, its sheet
-   printing one block of names. _Add player…_ is a filtered checklist rather than a select, so
-   several members join a team in one save. Development builds also offer _Delete all
+   printing one block of names. _Add player…_ searches members with a Kumo `Combobox` and queues each
+   pick in a ticked list rather than offering one select, so several join a team in one save. Development builds also offer _Delete all
    members…_, which empties every roster and then the master list so a sync can be rerun.
 3. **Sign-in sheet.** HTML layout, `printToPDF`, virtual row, regenerate-on-save and stale-on-
    open, `Superseded` badge on the docx. Tests: generated text contains teams in `teamNo`
