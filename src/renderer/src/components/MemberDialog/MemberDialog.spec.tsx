@@ -53,6 +53,22 @@ it('adds a member with the fields shaped for main and the snapshot revision', as
   expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ id: 1, firstName: 'Ann' }))
 })
 
+it('offers a calendar beside the date of birth that fills the field', async () => {
+  installMockApi()
+  renderDialog()
+  const user = userEvent.setup()
+
+  await user.type(screen.getByLabelText(/date of birth/i), '1990-05-04')
+  await user.click(screen.getByRole('button', { name: 'Open calendar' }))
+  expect(await screen.findByRole('combobox', { name: 'Choose the Year' })).toHaveValue('1990')
+  await user.click(screen.getByRole('button', { name: /May 6th, 1990/ }))
+
+  expect(screen.getByLabelText(/date of birth/i)).toHaveValue('1990-05-06')
+  await waitFor(() =>
+    expect(screen.queryByRole('combobox', { name: 'Choose the Year' })).not.toBeInTheDocument()
+  )
+})
+
 it('swaps contact fields for a guardian contact once the date of birth makes them a junior', async () => {
   installMockApi()
   renderDialog()

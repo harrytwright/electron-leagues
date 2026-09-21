@@ -30,7 +30,7 @@ The list opens by surname. Click **Number** or **Member** to sort by that column
 
 **New member…** on the Members page, or on a season's Players tab, opens the member form. A member under 18 keeps no email or phone of their own; the form asks for a parent or guardian contact instead. When they turn 18 they appear under _Needs details_ so their own contact can be collected.
 
-The row menu offers **Edit…**, **Merge with…** for two records that turn out to be the same person, where you choose which record stays, **Print card** and **Delete…**. A member who is on any roster is hidden rather than removed, so old seasons still read correctly.
+The row menu offers **Edit…**, **Merge with…** for two records that turn out to be the same person, where you choose which record stays, **Print card**, parked until there is a card template, and **Delete…**. A member who is on any roster is hidden rather than removed, so old seasons still read correctly.
 
 ## Rosters and teams
 
@@ -46,7 +46,7 @@ The MBD's league export can fill a season's roster the same way: see [Players fr
 
 ## Cards and the POS
 
-**Print card** on a member, or **Print cards** in the toolbar for everyone on the list, makes a PDF of cards with the member's name, number and a barcode and opens it for printing. Hidden records are skipped. The barcode carries the raw number, so the POS reads the member from a scan. Printing marks the member's record with the date the card was issued. The sheet is kept in a folder only you can read under the system's temporary folder and is removed when the app closes.
+**Print card** on a member, or **Print cards** in the toolbar for everyone on the list, will make a PDF of cards with the member's name, number and a barcode and open it for printing. Both actions are parked until a card template can be chosen, and say so. Hidden records are skipped. The barcode carries the raw number, so the POS reads the member from a scan. Printing marks the member's record with the date the card was issued. The sheet is kept in a folder only you can read under the system's temporary folder and is removed when the app closes.
 
 ## Exporting to a spreadsheet
 

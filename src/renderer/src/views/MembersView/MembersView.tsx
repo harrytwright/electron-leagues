@@ -58,6 +58,9 @@ import type { Props } from './interface'
 
 const ALL_LEAGUES = '*'
 
+/** Cards stay parked until the desk can choose a template for them; the actions say so. */
+const CARDS_PARKED = 'needs a card template'
+
 const QUICK_FILTER_ITEMS = Object.fromEntries(
   QUICK_FILTERS.map((filter) => [filter, `Show: ${QUICK_FILTER_LABELS[filter]}`])
 )
@@ -372,11 +375,8 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
                 <DropdownMenu.Item onClick={() => void pickExport()}>
                   Sync from MBD…
                 </DropdownMenu.Item>
-                <DropdownMenu.Item
-                  disabled={cards.pending || listed.length === 0}
-                  onClick={() => void printCards(listed)}
-                >
-                  {cards.pending ? 'Printing cards…' : `Print ${plural(listed.length, 'card')}`}
+                <DropdownMenu.Item disabled onClick={() => void printCards(listed)}>
+                  {`Print ${plural(listed.length, 'card')} (${CARDS_PARKED})`}
                 </DropdownMenu.Item>
                 <DropdownMenu.Item
                   disabled={listed.length === 0}
@@ -562,10 +562,10 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
                               Merge with…
                             </DropdownMenu.Item>
                             <DropdownMenu.Item
-                              disabled={row.member.deleted || cards.pending}
+                              disabled
                               onClick={() => void printCards([row.member.id])}
                             >
-                              Print card
+                              {`Print card (${CARDS_PARKED})`}
                             </DropdownMenu.Item>
                             <DropdownMenu.Separator />
                             <DropdownMenu.Item

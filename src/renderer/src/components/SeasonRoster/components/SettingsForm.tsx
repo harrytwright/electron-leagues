@@ -3,6 +3,7 @@ import { Button, Input, Select, Text } from '@cloudflare/kumo'
 import type { FeeBreakdown, SeasonFile } from '@shared/members'
 import { useKeyedState } from '@renderer/hooks/use-keyed-state'
 import { FORMAT_ITEMS } from '@renderer/lib/season-format'
+import { DateField } from '../../DateField'
 
 export interface SettingsFormProps {
   file: SeasonFile
@@ -30,6 +31,10 @@ interface Draft {
   subFee: string
   leagueSecretaryId: string
 }
+
+/** A start date is this season's or the next; the calendar's year list need not reach further. */
+const SEASON_YEARS_BACK = 2
+const SEASON_YEARS_AHEAD = 2
 
 function draftFrom(file: SeasonFile): Draft {
   return {
@@ -99,6 +104,7 @@ export function SettingsForm({
   onSave
 }: SettingsFormProps): React.JSX.Element {
   const [draft, setDraft] = useKeyedState(revision, draftFrom(file))
+  const thisYear = new Date().getFullYear()
   const [error, setError] = useState<string | null>(null)
   const update = <Key extends keyof Draft>(key: Key, value: Draft[Key]): void => {
     setDraft({ ...draft, [key]: value })
@@ -147,12 +153,14 @@ export function SettingsForm({
             }}
           />
           <div className="grid grid-cols-3 gap-3">
-            <Input
+            <DateField
               label="Start date"
               name="start-date"
-              type="date"
               value={draft.startDate}
-              onChange={(event) => update('startDate', event.target.value)}
+              onChange={(value) => update('startDate', value)}
+              fromYear={thisYear - SEASON_YEARS_BACK}
+              toYear={thisYear + SEASON_YEARS_AHEAD}
+              disabled={readOnly}
             />
             <Input
               label="Start time"

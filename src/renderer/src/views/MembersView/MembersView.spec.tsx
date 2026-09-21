@@ -308,7 +308,7 @@ it('starts an MBD sync from the toolbar picker or a dropped export', async () =>
   await waitFor(() => expect(api.previewImport).toHaveBeenLastCalledWith('bowlers.csv'))
 })
 
-it('prints a card from the row menu and a sheet for everyone shown, and opens the export', async () => {
+it('parks card printing until there is a template, and opens the export', async () => {
   const api = installMockApi({
     getRoot: vi.fn().mockResolvedValue('/root'),
     membersSnapshot: vi.fn().mockResolvedValue(
@@ -327,16 +327,18 @@ it('prints a card from the row menu and a sheet for everyone shown, and opens th
   renderMembers()
 
   await openRowMenu(user, 'Ann Lee')
-  await user.click(screen.getByRole('menuitem', { name: 'Print card' }))
-  await waitFor(() => expect(api.printCards).toHaveBeenCalledExactlyOnceWith([1], 'rev-5'))
-  expect(await screen.findByText(/Made a sheet of 1 card/)).toBeInTheDocument()
+  expect(
+    screen.getByRole('menuitem', { name: 'Print card (needs a card template)' })
+  ).toHaveAttribute('aria-disabled', 'true')
+  await user.keyboard('{Escape}')
 
-  // Hidden members are never on the sheet, so only the two listed go.
+  // Hidden members would never be on the sheet, so the count still reads the two listed.
   await user.click(screen.getByRole('button', { name: 'More actions' }))
-  await user.click(await screen.findByRole('menuitem', { name: 'Print 2 cards' }))
-  await waitFor(() => expect(api.printCards).toHaveBeenLastCalledWith([2, 1], 'rev-5'))
+  expect(
+    await screen.findByRole('menuitem', { name: 'Print 2 cards (needs a card template)' })
+  ).toHaveAttribute('aria-disabled', 'true')
+  expect(api.printCards).not.toHaveBeenCalled()
 
-  await user.click(screen.getByRole('button', { name: 'More actions' }))
   await user.click(await screen.findByRole('menuitem', { name: 'Export list to CSV…' }))
   expect(await screen.findByRole('dialog', { name: 'Export members to CSV' })).toBeInTheDocument()
 })

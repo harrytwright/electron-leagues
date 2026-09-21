@@ -13,10 +13,16 @@ import { sentenceCase } from '@renderer/lib/sentence-case'
 import { useDialogTask } from '@renderer/hooks/use-dialog-task'
 import { useQueryRefresh } from '@renderer/hooks/use-query-refresh'
 import { useWriteOperation } from '@renderer/hooks/use-write-operation'
+import { DateField } from '../DateField'
 import { TaskDialog } from '../TaskDialog'
 import type { Props } from './interface'
 
 const NO_GENDER = 'unset'
+
+/** Nobody bowling today was born more than a century ago; the calendar's year list stops there. */
+const OLDEST_BIRTH_YEARS = 100
+/** A calendar with no date yet opens on a plausible adult rather than on a newborn. */
+const TYPICAL_AGE = 30
 
 const GENDER_ITEMS = {
   [NO_GENDER]: 'Not recorded',
@@ -124,6 +130,7 @@ export function MemberDialog({
   }
 
   const junior = draft.dob !== '' && isUnder18({ dob: draft.dob }, new Date())
+  const thisYear = new Date().getFullYear()
   const update = <Key extends keyof Draft>(key: Key, value: Draft[Key]): void => {
     setDraft((current) => ({ ...current, [key]: value }))
     if (task.error) task.edited()
@@ -188,12 +195,14 @@ export function MemberDialog({
               value={draft.lastName}
               onChange={(event) => update('lastName', event.target.value)}
             />
-            <Input
+            <DateField
               label="Date of birth"
               name="dob"
-              type="date"
               value={draft.dob}
-              onChange={(event) => update('dob', event.target.value)}
+              onChange={(value) => update('dob', value)}
+              fromYear={thisYear - OLDEST_BIRTH_YEARS}
+              toYear={thisYear}
+              openAt={new Date(thisYear - TYPICAL_AGE, 0)}
             />
             <Select
               label="Gender"
