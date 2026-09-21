@@ -30,7 +30,7 @@ The list opens by surname. Click **Number** or **Member** to sort by that column
 
 **New member…** on the Members page, or on a season's Players tab, opens the member form. A member under 18 keeps no email or phone of their own; the form asks for a parent or guardian contact instead. When they turn 18 they appear under _Needs details_ so their own contact can be collected.
 
-The row menu offers **Edit…**, **Merge into…** for two records that turn out to be the same person, **Print card** and **Delete…**. A member who is on any roster is hidden rather than removed, so old seasons still read correctly.
+The row menu offers **Edit…**, **Merge with…** for two records that turn out to be the same person, where you choose which record stays, **Print card** and **Delete…**. A member who is on any roster is hidden rather than removed, so old seasons still read correctly.
 
 ## Rosters and teams
 

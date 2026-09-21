@@ -559,7 +559,7 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
                               disabled={row.member.deleted}
                               onClick={() => setAction({ kind: 'merge', member: row.member })}
                             >
-                              Merge into…
+                              Merge with…
                             </DropdownMenu.Item>
                             <DropdownMenu.Item
                               disabled={row.member.deleted || cards.pending}

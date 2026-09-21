@@ -203,7 +203,7 @@ it('adds a new member from the toolbar', async () => {
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
 })
 
-it('merges one member into another from the row menu', async () => {
+it('merges two members from the row menu, keeping whichever record the desk picks', async () => {
   const api = installMockApi({
     getRoot: vi.fn().mockResolvedValue('/root'),
     membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot())
@@ -212,14 +212,18 @@ it('merges one member into another from the row menu', async () => {
   renderMembers()
 
   await openRowMenu(user, 'Bob Kay')
-  await user.click(screen.getByRole('menuitem', { name: 'Merge into…' }))
-  expect(await screen.findByRole('dialog')).toHaveTextContent('Merge Bob Kay into…')
-  screen.getByLabelText(/keep/i).focus()
+  await user.click(screen.getByRole('menuitem', { name: 'Merge with…' }))
+  expect(await screen.findByRole('dialog')).toHaveTextContent('Merge Bob Kay with…')
+  expect(screen.queryByRole('radio')).not.toBeInTheDocument()
+  screen.getByLabelText(/merge with/i).focus()
   await user.keyboard('{ArrowDown}')
   await user.click(await screen.findByRole('option', { name: '000001 Ann Lee' }))
+  // The chosen record stays by default; the desk can turn the merge round.
+  expect(screen.getByRole('radio', { name: 'Keep 000001 Ann Lee' })).toBeChecked()
+  await user.click(screen.getByRole('radio', { name: 'Keep 000002 Bob Kay' }))
   await user.click(screen.getByRole('button', { name: 'Merge members' }))
 
-  await waitFor(() => expect(api.mergeMembers).toHaveBeenCalledExactlyOnceWith(2, 1, 'rev-2'))
+  await waitFor(() => expect(api.mergeMembers).toHaveBeenCalledExactlyOnceWith(1, 2, 'rev-2'))
 })
 
 it('deletes a member, explaining whether they are hidden or removed', async () => {
