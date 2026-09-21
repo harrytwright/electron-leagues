@@ -337,7 +337,7 @@ describe('applyMbdSync', () => {
     const { file, summary } = applyMbdSync(source, plan, decisions)
 
     expect(plan.rows[5].match).toMatchObject({ kind: 'similar' })
-    expect(summary).toEqual({
+    expect(summary).toMatchObject({
       rows: 6,
       created: 1,
       matched: 2,
@@ -347,6 +347,17 @@ describe('applyMbdSync', () => {
       skipped: 1,
       failed: []
     })
+    // The log reads back every line in order, in the desk's words.
+    expect(
+      summary.log.map((entry) => [entry.line, entry.name, entry.action, entry.detail])
+    ).toEqual([
+      [2, 'Annie Lee', 'renamed', 'Already Annie Lee (1); renamed from Ann Lee'],
+      [3, 'Cy Dee', 'restored', 'Already Cy Dee (2); brought back'],
+      [4, 'Dea Sub', 'merged', 'Id added to Dee Sub (3)'],
+      [5, 'New Person', 'created', 'New member 4'],
+      [6, 'Neil Person', 'merged', 'Id added to New Person (4)'],
+      [7, 'Ned Person', 'skipped', 'No decision was made']
+    ])
     expect(file.nextId).toBe(5)
     expect(file.members).toEqual([
       member({
@@ -387,6 +398,19 @@ describe('applyMbdSync', () => {
     expect(second.summary.aliased).toBe(0)
   })
 
+  test('leaves a skipped row out whatever it would otherwise have done', () => {
+    const input = rows(['10', 'Annie', 'Lee'], ['70', 'Only', ''], ['80', 'New', 'Person'])
+    const plan = planMbdSync(source.members, input)
+    const { file, summary } = applyMbdSync(source, plan, [
+      { kind: 'skip', line: 2 },
+      { kind: 'skip', line: 3 }
+    ])
+    expect(summary).toMatchObject({ rows: 3, created: 1, matched: 0, skipped: 2 })
+    expect(file.members[0]).toEqual(source.members[0])
+    expect(file.members.map((entry) => entry.mbdIds)).toEqual([['10'], ['20'], [], ['80']])
+    expect(summary.log.map((entry) => entry.action)).toEqual(['skipped', 'skipped', 'created'])
+  })
+
   test('fails a merge into a row that was not created and keeps going', () => {
     const input = rows(['60', 'Dan', 'Roe'], ['61', 'Dann', 'Roe'])
     const plan = planMbdSync([], input)
@@ -397,6 +421,7 @@ describe('applyMbdSync', () => {
     expect(summary.failed).toEqual([
       { line: 3, message: 'The member to merge into was not created' }
     ])
+    expect(summary.log[1]).toMatchObject({ line: 3, action: 'failed' })
   })
 })
 

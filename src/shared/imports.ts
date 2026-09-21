@@ -492,10 +492,24 @@ export const syncDecisionSchema = z.discriminatedUnion('kind', [
   /** A known member whose exported spelling differs: which one is the name, the other an alias. */
   z.object({ kind: z.literal('spelling'), line: lineSchema, keep: z.enum(['member', 'export']) }),
   z.object({ kind: z.literal('merge'), line: lineSchema, into: syncRefSchema }),
-  z.object({ kind: z.literal('create'), line: lineSchema })
+  z.object({ kind: z.literal('create'), line: lineSchema }),
+  /** Leave this row out of the sync altogether. */
+  z.object({ kind: z.literal('skip'), line: lineSchema })
 ])
 
 export type SyncDecision = z.infer<typeof syncDecisionSchema>
+
+export type SyncAction =
+  'created' | 'matched' | 'renamed' | 'merged' | 'restored' | 'skipped' | 'failed' | 'unreadable'
+
+/** What became of one line of the export, in the words the desk reads back afterwards. */
+export interface SyncLogEntry {
+  line: number
+  mbdId: string
+  name: string
+  action: SyncAction
+  detail: string
+}
 
 export interface SyncSummary {
   rows: number
@@ -506,9 +520,22 @@ export interface SyncSummary {
   aliased: number
   /** Soft-deleted members the export still lists, brought back. */
   restored: number
-  /** Rows that needed a decision and got none. */
+  /** Rows left out: by choice, or because a decision was never made. */
   skipped: number
   failed: ImportRowProblem[]
+  /** One entry per line of the export, in file order. */
+  log: SyncLogEntry[]
+}
+
+/** A row the reader could not use still gets a line in the log, with the reason. */
+function unreadableEntries(invalid: readonly ImportRowProblem[]): SyncLogEntry[] {
+  return invalid.map((problem) => ({
+    line: problem.line,
+    mbdId: '',
+    name: '',
+    action: 'unreadable',
+    detail: problem.message
+  }))
 }
 
 function cloneFile(file: MembersFile): MembersFile {
@@ -567,7 +594,8 @@ export function applyMbdSync(
     aliased: 0,
     restored: 0,
     skipped: 0,
-    failed: [...plan.invalid]
+    failed: [...plan.invalid],
+    log: unreadableEntries(plan.invalid)
   }
   const decisionByLine = new Map(decisions.map((decision) => [decision.line, decision]))
   const decisionFor = (line: number): SyncDecision | undefined => decisionByLine.get(line)
@@ -575,12 +603,34 @@ export function applyMbdSync(
     const id = ref.kind === 'member' ? ref.memberId : createdByLine.get(ref.line)
     return id === undefined ? null : resolveMember(file.members, id)
   }
-  const create = (row: ImportRow): void => {
-    createdByLine.set(row.line, createFromRow(file, row).id)
-    summary.created += 1
+  const record = (row: ImportRow, action: SyncAction, detail: string): void => {
+    summary.log.push({
+      line: row.line,
+      mbdId: row.mbdId,
+      name: `${row.firstName} ${row.lastName}`.trim(),
+      action,
+      detail
+    })
   }
+  const fail = (row: ImportRow, message: string): void => {
+    summary.failed.push({ line: row.line, message })
+    record(row, 'failed', message)
+  }
+  const create = (row: ImportRow): void => {
+    const member = createFromRow(file, row)
+    createdByLine.set(row.line, member.id)
+    summary.created += 1
+    record(row, 'created', `New member ${member.id}`)
+  }
+  const label = (member: Member): string => `${memberDisplayName(member)} (${member.id})`
 
   for (const { row, match } of plan.rows) {
+    const decision = decisionFor(row.line)
+    if (decision?.kind === 'skip') {
+      summary.skipped += 1
+      record(row, 'skipped', 'Left out')
+      continue
+    }
     if (match.kind === 'new') {
       create(row)
       continue
@@ -588,41 +638,54 @@ export function applyMbdSync(
     if (match.kind === 'known') {
       const member = resolveMember(file.members, match.memberId)
       if (!member) {
-        summary.failed.push({ line: row.line, message: `Member ${match.memberId} is missing` })
+        fail(row, `Member ${match.memberId} is missing`)
         continue
       }
-      const decision = decisionFor(row.line)
+      const notes: string[] = []
       if (match.newSpelling && decision?.kind === 'spelling' && decision.keep === 'export') {
         const previous = { firstName: member.firstName, lastName: member.lastName }
         member.firstName = row.firstName
         member.lastName = row.lastName
         if (addAlias(member, previous)) summary.aliased += 1
-      } else if (addAlias(member, row)) summary.aliased += 1
+        notes.push(`renamed from ${memberDisplayName(previous)}`)
+      } else if (addAlias(member, row)) {
+        summary.aliased += 1
+        notes.push('spelling kept as an alias')
+      }
       fillGender(member, row)
       if (member.deleted) {
         delete member.deleted
         summary.restored += 1
+        notes.push('brought back')
       }
       summary.matched += 1
+      const action: SyncAction = notes.includes('brought back')
+        ? 'restored'
+        : notes.some((note) => note.startsWith('renamed'))
+          ? 'renamed'
+          : 'matched'
+      record(row, action, [`Already ${label(member)}`, ...notes].join('; '))
       continue
     }
-    const decision = decisionFor(row.line)
     if (decision?.kind === 'create') {
       create(row)
     } else if (decision?.kind === 'merge') {
       const member = target(decision.into)
       if (!member) {
-        summary.failed.push({ line: row.line, message: 'The member to merge into was not created' })
+        fail(row, 'The member to merge into was not created')
         continue
       }
       if (!member.mbdIds.includes(row.mbdId)) member.mbdIds.push(row.mbdId)
       if (addAlias(member, row)) summary.aliased += 1
       fillGender(member, row)
       summary.merged += 1
+      record(row, 'merged', `Id added to ${label(member)}`)
     } else {
       summary.skipped += 1
+      record(row, 'skipped', 'No decision was made')
     }
   }
+  summary.log.sort((a, b) => a.line - b.line)
   return { file, summary }
 }
 

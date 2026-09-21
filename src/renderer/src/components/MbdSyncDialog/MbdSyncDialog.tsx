@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import { Button, Dialog, Radio, Text, useKumoToastManager } from '@cloudflare/kumo'
+import { Button, Dialog, Radio, Table, Text, useKumoToastManager } from '@cloudflare/kumo'
 import {
   mappingProblem,
   type ImportMapping,
+  type SyncAction,
   type SyncCandidate,
   type SyncDecision,
+  type SyncLogEntry,
   type SyncMatch,
   type SyncPlan,
   type SyncPlanRow,
@@ -32,20 +34,25 @@ const CREATE = 'create'
 const KEEP_MEMBER = 'member'
 const USE_EXPORT = 'export'
 
+/** One radio value per line that needs a decision. */
+type Choices = ReadonlyMap<number, string>
+/** Lines the desk has left out of the sync. */
+type Skips = ReadonlySet<number>
+
+interface Review {
+  plan: SyncPlan
+  revision: string
+  sourceRevision: string
+  mapping: ImportMapping
+  choices: Choices
+  skips: Skips
+}
+
 type Step =
   | { kind: 'mapping'; error: string | null }
   | { kind: 'planning' }
-  | {
-      kind: 'review'
-      plan: SyncPlan
-      revision: string
-      sourceRevision: string
-      mapping: ImportMapping
-      choices: Choices
-    }
-
-/** One radio value per line that needs a decision. */
-type Choices = ReadonlyMap<number, string>
+  | ({ kind: 'review' } & Review)
+  | { kind: 'done'; summary: SyncSummary; refreshError: string | null }
 
 interface SyncVariables {
   mapping: ImportMapping
@@ -103,10 +110,23 @@ function defaultChoices(plan: SyncPlan, previous: Choices): Choices {
   return choices
 }
 
-function decisionsFrom(plan: SyncPlan, choices: Choices): SyncDecision[] {
+/** A bowler with no surname is usually a placeholder in the MBD, so they start left out. */
+function defaultSkips(plan: SyncPlan, previous: Skips | null): Skips {
+  if (previous)
+    return new Set(
+      [...previous].filter((line) => plan.rows.some((entry) => entry.row.line === line))
+    )
+  return new Set(plan.rows.flatMap(({ row }) => (row.lastName ? [] : [row.line])))
+}
+
+function decisionsFrom(review: Review): SyncDecision[] {
   const decisions: SyncDecision[] = []
-  for (const { row, match } of plan.rows) {
-    const choice = choices.get(row.line)
+  for (const { row, match } of review.plan.rows) {
+    if (review.skips.has(row.line)) {
+      decisions.push({ kind: 'skip', line: row.line })
+      continue
+    }
+    const choice = review.choices.get(row.line)
     if (choice === undefined) continue
     if (match.kind === 'similar') {
       if (choice === CREATE) decisions.push({ kind: 'create', line: row.line })
@@ -125,15 +145,34 @@ function decisionsFrom(plan: SyncPlan, choices: Choices): SyncDecision[] {
   return decisions
 }
 
-function summarise(summary: SyncSummary): string {
+const ACTION_LABELS: Record<SyncAction, string> = {
+  created: 'Created',
+  matched: 'Matched',
+  renamed: 'Renamed',
+  merged: 'Merged',
+  restored: 'Restored',
+  skipped: 'Skipped',
+  failed: 'Failed',
+  unreadable: 'Unreadable'
+}
+
+function summaryLine(summary: SyncSummary): string {
   const parts = [
-    `${summary.created} new`,
-    `${summary.matched} already known`,
-    ...(summary.merged > 0 ? [`${summary.merged} merged`] : []),
+    `${summary.created} created`,
+    `${summary.matched} matched`,
+    `${summary.merged} merged`,
+    `${summary.skipped} skipped`,
     ...(summary.restored > 0 ? [`${summary.restored} restored`] : []),
-    ...(summary.skipped > 0 ? [`${summary.skipped} skipped`] : [])
+    ...(summary.failed.length > 0 ? [`${summary.failed.length} failed`] : [])
   ]
-  return `Synced ${plural(summary.rows, 'row')}: ${parts.join(', ')}`
+  return `${plural(summary.rows, 'row')}: ${parts.join(', ')}`
+}
+
+function logAsText(log: readonly SyncLogEntry[]): string {
+  const lines = log.map((entry) =>
+    [entry.line, entry.mbdId, entry.name, ACTION_LABELS[entry.action], entry.detail].join('\t')
+  )
+  return ['Line\tMBD ID\tName\tOutcome\tDetail', ...lines].join('\n')
 }
 
 function candidateLabel(candidate: SyncCandidate): string {
@@ -155,11 +194,13 @@ export function MbdSyncDialog({
       window.api.syncMbd(path ?? '', mapping, decisions, revision, sourceRevision)
   })
   const [lastChoices, setLastChoices] = useState<Choices>(new Map())
+  const [lastSkips, setLastSkips] = useState<Skips | null>(null)
 
   if (openedFor !== path) {
     setOpenedFor(path)
     setStep({ kind: 'mapping', error: null })
     setLastChoices(new Map())
+    setLastSkips(null)
   }
 
   const memberName = (id: number): string => {
@@ -186,11 +227,18 @@ export function MbdSyncDialog({
         revision: result.revision,
         sourceRevision: result.sourceRevision,
         mapping,
-        choices: defaultChoices(result.plan, lastChoices)
+        choices: defaultChoices(result.plan, lastChoices),
+        skips: defaultSkips(result.plan, lastSkips)
       })
     } catch (caught) {
       setStep({ kind: 'mapping', error: ipcErrorMessage(caught) })
     }
+  }
+
+  const backToMapping = (review: Review, error: string | null): void => {
+    setLastChoices(review.choices)
+    setLastSkips(review.skips)
+    setStep({ kind: 'mapping', error })
   }
 
   const run = async (): Promise<void> => {
@@ -200,25 +248,16 @@ export function MbdSyncDialog({
         mapping: step.mapping,
         revision: step.revision,
         sourceRevision: step.sourceRevision,
-        decisions: decisionsFrom(step.plan, step.choices)
+        decisions: decisionsFrom(step)
       })
-      const summary = outcome.result
-      const failed = summary.failed
-        .map((problem) => `Line ${problem.line}: ${problem.message}`)
-        .join('. ')
-      add({
-        title:
-          outcome.status === 'refresh-failed'
-            ? `${summarise(summary)}, but the list could not be refreshed: ${outcome.refreshError}`
-            : summarise(summary),
-        description: failed || undefined,
-        variant: outcome.status === 'refresh-failed' ? 'error' : failed ? undefined : 'success'
+      setStep({
+        kind: 'done',
+        summary: outcome.result,
+        refreshError: outcome.status === 'refresh-failed' ? outcome.refreshError : null
       })
-      onOpenChange(false)
     } catch (caught) {
       // A refused write means a file moved on; the plan has to be made again from the mapping.
-      setLastChoices(step.choices)
-      setStep({ kind: 'mapping', error: ipcErrorMessage(caught) })
+      backToMapping(step, ipcErrorMessage(caught))
     }
   }
 
@@ -229,31 +268,67 @@ export function MbdSyncDialog({
     setStep({ ...step, choices })
   }
 
+  const setSkipped = (lines: readonly number[], skipped: boolean): void => {
+    if (step.kind !== 'review') return
+    const skips = new Set(step.skips)
+    for (const line of lines) {
+      if (skipped) skips.add(line)
+      else skips.delete(line)
+    }
+    setLastSkips(skips)
+    setStep({ ...step, skips })
+  }
+
+  const copyLog = async (log: readonly SyncLogEntry[]): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(logAsText(log))
+      add({ title: 'Copied the sync log', variant: 'success' })
+    } catch {
+      add({ title: 'The log could not be copied', variant: 'error' })
+    }
+  }
+
   const busy = step.kind === 'planning' || sync.pending
   const undecided =
     step.kind === 'review'
       ? step.plan.rows.filter(
-          ({ row, match }) => needsDecision(match) && !step.choices.has(row.line)
+          ({ row, match }) =>
+            !step.skips.has(row.line) && needsDecision(match) && !step.choices.has(row.line)
         ).length
       : 0
+  const toSync = step.kind === 'review' ? step.plan.rows.length - step.skips.size : 0
+
+  const description = (): string => {
+    switch (step.kind) {
+      case 'review':
+        return 'Untick anyone to leave out. Rows the export and the members list disagree on need a decision.'
+      case 'done':
+        return 'What happened to each line of the export. Nothing was written back to the MBD.'
+      default:
+        return 'Choose which columns hold the MBD ID, the name and the gender. Nothing is written back to the MBD.'
+    }
+  }
 
   return (
     <TaskDialog open={path !== null} onOpenChange={(open) => !busy && onOpenChange(open)} size="lg">
       <TaskDialog.Header
-        title="Sync from the Master Bowler Database"
-        description={
-          step.kind === 'review'
-            ? 'Rows the export and the members list disagree on need a decision; everything else is applied as shown.'
-            : 'Choose which columns hold the MBD ID, the name and the gender. Nothing is written back to the MBD.'
-        }
+        title={step.kind === 'done' ? 'Sync finished' : 'Sync from the Master Bowler Database'}
+        description={description()}
       />
       <TaskDialog.Body
         onSubmit={(event) => {
           event.preventDefault()
-          void (step.kind === 'review' ? run() : plan())
+          if (step.kind === 'done') onOpenChange(false)
+          else void (step.kind === 'review' ? run() : plan())
         }}
       >
-        {preview.state.status === 'loading' ? (
+        {step.kind === 'done' ? (
+          <SyncResult
+            summary={step.summary}
+            refreshError={step.refreshError}
+            onCopy={() => void copyLog(step.summary.log)}
+          />
+        ) : preview.state.status === 'loading' ? (
           <Text variant="secondary">Reading the export…</Text>
         ) : preview.state.status === 'failed' ? (
           <Text variant="error" role="alert">
@@ -279,48 +354,50 @@ export function MbdSyncDialog({
             ) : null}
           </>
         ) : step.kind === 'review' ? (
-          <SyncReview
-            plan={step.plan}
-            choices={step.choices}
-            memberName={memberName}
-            onChoose={choose}
-          />
+          <SyncReview review={step} memberName={memberName} onChoose={choose} onSkip={setSkipped} />
         ) : null}
         <TaskDialog.Actions>
-          <Dialog.Close
-            render={(props) => (
-              <Button {...props} type="button" variant="secondary" disabled={busy}>
-                Cancel
-              </Button>
-            )}
-          />
-          {step.kind === 'review' ? (
-            <Button
-              type="button"
-              variant="secondary"
-              disabled={busy}
-              onClick={() => {
-                setLastChoices(step.choices)
-                setStep({ kind: 'mapping', error: null })
-              }}
-            >
-              Back
+          {step.kind === 'done' ? (
+            <Button type="submit" variant="primary">
+              Close
             </Button>
-          ) : null}
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={busy || preview.state.status !== 'ready' || undecided > 0}
-            title={undecided > 0 ? `${plural(undecided, 'row')} still need a decision` : undefined}
-          >
-            {step.kind === 'review'
-              ? sync.pending
-                ? 'Syncing…'
-                : 'Sync'
-              : step.kind === 'planning'
-                ? 'Matching…'
-                : 'Continue'}
-          </Button>
+          ) : (
+            <>
+              <Dialog.Close
+                render={(props) => (
+                  <Button {...props} type="button" variant="secondary" disabled={busy}>
+                    Cancel
+                  </Button>
+                )}
+              />
+              {step.kind === 'review' ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => backToMapping(step, null)}
+                >
+                  Back
+                </Button>
+              ) : null}
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={busy || preview.state.status !== 'ready' || undecided > 0}
+                title={
+                  undecided > 0 ? `${plural(undecided, 'row')} still need a decision` : undefined
+                }
+              >
+                {step.kind === 'review'
+                  ? sync.pending
+                    ? 'Syncing…'
+                    : `Sync ${plural(toSync, 'row')}`
+                  : step.kind === 'planning'
+                    ? 'Matching…'
+                    : 'Continue'}
+              </Button>
+            </>
+          )}
         </TaskDialog.Actions>
       </TaskDialog.Body>
     </TaskDialog>
@@ -328,13 +405,25 @@ export function MbdSyncDialog({
 }
 
 interface SyncReviewProps {
-  plan: SyncPlan
-  choices: Choices
+  review: Review
   memberName: (id: number) => string
   onChoose: (line: number, value: string) => void
+  onSkip: (lines: readonly number[], skipped: boolean) => void
 }
 
-function SyncReview({ plan, choices, memberName, onChoose }: SyncReviewProps): React.JSX.Element {
+function outcomeText(match: SyncMatch, memberName: (id: number) => string): string {
+  switch (match.kind) {
+    case 'new':
+      return 'New member'
+    case 'known':
+      return `Already ${memberName(match.memberId)}`
+    case 'similar':
+      return 'Looks like someone on the list'
+  }
+}
+
+function SyncReview({ review, memberName, onChoose, onSkip }: SyncReviewProps): React.JSX.Element {
+  const { plan, choices, skips } = review
   const known = plan.rows.filter(({ match }) => match.kind === 'known')
   const fresh = plan.rows.filter(({ match }) => match.kind === 'new')
   const questions = plan.rows.filter(({ match }) => needsDecision(match))
@@ -342,63 +431,168 @@ function SyncReview({ plan, choices, memberName, onChoose }: SyncReviewProps): R
     `${known.length} already known`,
     `${fresh.length} new`,
     `${questions.length} to decide`,
-    ...(plan.invalid.length > 0 ? [`${plan.invalid.length} unreadable`] : [])
+    ...(plan.invalid.length > 0 ? [`${plan.invalid.length} unreadable`] : []),
+    ...(skips.size > 0 ? [`${skips.size} left out`] : [])
   ]
+  const allLines = plan.rows.map(({ row }) => row.line)
+  const allOn = skips.size === 0
+  const noneOn = plan.rows.length > 0 && skips.size === plan.rows.length
 
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-3">
       <Text>
         {plural(plan.rows.length + plan.invalid.length, 'row')}: {counts.join(', ')}
       </Text>
-      {questions.length > 0 ? (
-        <div className="grid max-h-80 gap-4 overflow-auto pr-1" role="list" aria-label="Decisions">
-          {questions.map(({ row, match }) => (
-            <div key={row.line} role="listitem">
-              {match.kind === 'similar' ? (
-                <Radio.Group
-                  legend={`${rowName(row)} (MBD ${row.mbdId}, line ${row.line})`}
-                  value={choices.get(row.line) ?? ''}
-                  onValueChange={(value) => onChoose(row.line, value)}
-                >
-                  {match.candidates.map((candidate) => (
-                    <Radio.Item
-                      key={refValue(candidate.ref)}
-                      value={refValue(candidate.ref)}
-                      label={
-                        candidate.ref.kind === 'member'
-                          ? candidateLabel({
-                              ...candidate,
-                              name: memberName(candidate.ref.memberId)
-                            })
-                          : `${candidateLabel(candidate)} from line ${candidate.ref.line}`
-                      }
-                    />
-                  ))}
-                  <Radio.Item value={CREATE} label="Create a new member" />
-                </Radio.Group>
-              ) : match.kind === 'known' ? (
-                <Radio.Group
-                  legend={`MBD ${row.mbdId} is ${memberName(match.memberId)}, spelt ${rowName(row)} in the export`}
-                  value={choices.get(row.line) ?? KEEP_MEMBER}
-                  onValueChange={(value) => onChoose(row.line, value)}
-                >
-                  <Radio.Item value={KEEP_MEMBER} label="Keep the name on file" />
-                  <Radio.Item value={USE_EXPORT} label={`Rename to ${rowName(row)}`} />
-                </Radio.Group>
-              ) : null}
-            </div>
-          ))}
-        </div>
+      <div className="max-h-[50vh] overflow-auto rounded-md border border-kumo-line">
+        <Table aria-label="Rows to sync" className="text-sm">
+          <Table.Header sticky>
+            <Table.Row>
+              <Table.CheckHead
+                label="Sync every row"
+                checked={allOn}
+                indeterminate={!allOn && !noneOn}
+                onCheckedChange={(checked) => onSkip(allLines, !checked)}
+              />
+              <Table.Head className="w-14">Line</Table.Head>
+              <Table.Head>Name</Table.Head>
+              <Table.Head className="w-24">MBD ID</Table.Head>
+              <Table.Head>Outcome</Table.Head>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {plan.rows.map(({ row, match }) => {
+              const skipped = skips.has(row.line)
+              const name = rowName(row)
+              return (
+                <Table.Row key={row.line} className={skipped ? 'text-kumo-subtle' : undefined}>
+                  <Table.CheckCell
+                    label={`Sync ${name || `line ${row.line}`}`}
+                    checked={!skipped}
+                    onCheckedChange={(checked) => onSkip([row.line], !checked)}
+                  />
+                  <Table.Cell className="font-mono">{row.line}</Table.Cell>
+                  <Table.Cell>
+                    {name}
+                    {row.lastName ? null : (
+                      <span className="ml-1 text-xs text-kumo-subtle">(no surname)</span>
+                    )}
+                  </Table.Cell>
+                  <Table.Cell className="font-mono">{row.mbdId}</Table.Cell>
+                  <Table.Cell>
+                    {skipped ? (
+                      'Left out'
+                    ) : match.kind === 'similar' ? (
+                      <Radio.Group
+                        value={choices.get(row.line) ?? ''}
+                        onValueChange={(value) => onChoose(row.line, value)}
+                      >
+                        <Radio.Legend className="sr-only">{`Decision for ${name}`}</Radio.Legend>
+                        {match.candidates.map((candidate) => (
+                          <Radio.Item
+                            key={refValue(candidate.ref)}
+                            value={refValue(candidate.ref)}
+                            label={
+                              candidate.ref.kind === 'member'
+                                ? candidateLabel({
+                                    ...candidate,
+                                    name: memberName(candidate.ref.memberId)
+                                  })
+                                : `${candidateLabel(candidate)} from line ${candidate.ref.line}`
+                            }
+                          />
+                        ))}
+                        <Radio.Item value={CREATE} label="Create a new member" />
+                      </Radio.Group>
+                    ) : match.kind === 'known' && match.newSpelling ? (
+                      <Radio.Group
+                        value={choices.get(row.line) ?? KEEP_MEMBER}
+                        onValueChange={(value) => onChoose(row.line, value)}
+                      >
+                        <Radio.Legend className="sr-only">{`Spelling for ${name}`}</Radio.Legend>
+                        <Radio.Item
+                          value={KEEP_MEMBER}
+                          label={`Keep ${memberName(match.memberId)}`}
+                        />
+                        <Radio.Item value={USE_EXPORT} label={`Rename to ${name}`} />
+                      </Radio.Group>
+                    ) : (
+                      outcomeText(match, memberName)
+                    )}
+                  </Table.Cell>
+                </Table.Row>
+              )
+            })}
+            {plan.invalid.map((problem) => (
+              <Table.Row key={`invalid-${problem.line}`} className="text-kumo-subtle">
+                <Table.CheckCell
+                  label={`Line ${problem.line} cannot be synced`}
+                  checked={false}
+                  disabled
+                />
+                <Table.Cell className="font-mono">{problem.line}</Table.Cell>
+                <Table.Cell colSpan={3}>Unreadable: {problem.message}</Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+        </Table>
+      </div>
+    </div>
+  )
+}
+
+interface SyncResultProps {
+  summary: SyncSummary
+  refreshError: string | null
+  onCopy: () => void
+}
+
+function SyncResult({ summary, refreshError, onCopy }: SyncResultProps): React.JSX.Element {
+  return (
+    <div className="grid gap-3">
+      <div className="flex items-center justify-between gap-3">
+        <Text>{summaryLine(summary)}</Text>
+        <Button type="button" size="sm" variant="secondary" onClick={onCopy}>
+          Copy log
+        </Button>
+      </div>
+      {refreshError ? (
+        <Text variant="error" role="alert">
+          The list could not be refreshed: {refreshError}
+        </Text>
       ) : null}
-      {plan.invalid.length > 0 ? (
-        <ul className="grid gap-0.5 text-sm text-kumo-subtle" aria-label="Unreadable rows">
-          {plan.invalid.map((problem) => (
-            <li key={problem.line}>
-              Line {problem.line}: {problem.message}
-            </li>
-          ))}
-        </ul>
-      ) : null}
+      <div className="max-h-[50vh] overflow-auto rounded-md border border-kumo-line">
+        <Table aria-label="Sync log" className="text-sm">
+          <Table.Header sticky>
+            <Table.Row>
+              <Table.Head className="w-14">Line</Table.Head>
+              <Table.Head>Name</Table.Head>
+              <Table.Head className="w-24">MBD ID</Table.Head>
+              <Table.Head className="w-28">Outcome</Table.Head>
+              <Table.Head>Detail</Table.Head>
+            </Table.Row>
+          </Table.Header>
+          <Table.Body>
+            {summary.log.map((entry) => (
+              <Table.Row
+                key={entry.line}
+                className={
+                  entry.action === 'failed' || entry.action === 'unreadable'
+                    ? 'text-kumo-danger'
+                    : entry.action === 'skipped'
+                      ? 'text-kumo-subtle'
+                      : undefined
+                }
+              >
+                <Table.Cell className="font-mono">{entry.line}</Table.Cell>
+                <Table.Cell>{entry.name}</Table.Cell>
+                <Table.Cell className="font-mono">{entry.mbdId}</Table.Cell>
+                <Table.Cell>{ACTION_LABELS[entry.action]}</Table.Cell>
+                <Table.Cell>{entry.detail}</Table.Cell>
+              </Table.Row>
+            ))}
+          </Table.Body>
+        </Table>
+      </div>
     </div>
   )
 }

@@ -84,7 +84,25 @@ it('walks from the mapping to the decisions and syncs with them', async () => {
       aliased: 1,
       restored: 0,
       skipped: 0,
-      failed: [{ line: 5, message: 'No MBD ID' }]
+      failed: [{ line: 5, message: 'No MBD ID' }],
+      log: [
+        {
+          line: 2,
+          mbdId: '10',
+          name: 'Annie Lee',
+          action: 'renamed',
+          detail: 'Already Ann Lee (1); renamed from Ann Lee'
+        },
+        {
+          line: 3,
+          mbdId: '30',
+          name: 'Cy Dee',
+          action: 'merged',
+          detail: 'Id added to Cy Dee (2)'
+        },
+        { line: 4, mbdId: '40', name: 'New Person', action: 'created', detail: 'New member 3' },
+        { line: 5, mbdId: '', name: '', action: 'unreadable', detail: 'No MBD ID' }
+      ]
     })
   })
   const user = userEvent.setup()
@@ -105,13 +123,16 @@ it('walks from the mapping to the decisions and syncs with them', async () => {
   expect(
     await screen.findByText('4 rows: 1 already known, 1 new, 2 to decide, 1 unreadable')
   ).toBeInTheDocument()
-  expect(screen.getByText('Line 5: No MBD ID')).toBeInTheDocument()
+  const review = screen.getByRole('table', { name: 'Rows to sync' })
+  expect(within(review).getAllByRole('row')).toHaveLength(5)
+  expect(within(review).getByText('Unreadable: No MBD ID')).toBeInTheDocument()
+  expect(within(review).getByRole('checkbox', { name: 'Sync New Person' })).toBeChecked()
 
   // The exact match is proposed as a merge; the spelling question defaults to the name on file.
   expect(screen.getByRole('radio', { name: 'Merge into 000002 Cy Dee (same name)' })).toBeChecked()
-  expect(screen.getByRole('radio', { name: 'Keep the name on file' })).toBeChecked()
+  expect(screen.getByRole('radio', { name: 'Keep 000001 Ann Lee' })).toBeChecked()
   await user.click(screen.getByRole('radio', { name: 'Rename to Annie Lee' }))
-  await user.click(screen.getByRole('button', { name: 'Sync' }))
+  await user.click(screen.getByRole('button', { name: 'Sync 3 rows' }))
 
   await waitFor(() =>
     expect(api.syncMbd).toHaveBeenCalledExactlyOnceWith(
@@ -125,11 +146,77 @@ it('walks from the mapping to the decisions and syncs with them', async () => {
       'export-r1'
     )
   )
-  const toast = (
-    await screen.findByText('Synced 4 rows: 1 new, 1 already known, 1 merged')
-  ).closest('[role="dialog"]')
-  expect(toast).toHaveTextContent('Line 5: No MBD ID')
+  // The result stays open with the log until the desk has read it.
+  expect(
+    await screen.findByText('4 rows: 1 created, 1 matched, 1 merged, 0 skipped, 1 failed')
+  ).toBeInTheDocument()
+  const log = screen.getByRole('table', { name: 'Sync log' })
+  expect(
+    within(log)
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => row.textContent)
+  ).toEqual([
+    '2Annie Lee10RenamedAlready Ann Lee (1); renamed from Ann Lee',
+    '3Cy Dee30MergedId added to Cy Dee (2)',
+    '4New Person40CreatedNew member 3',
+    '5UnreadableNo MBD ID'
+  ])
+  expect(onOpenChange).not.toHaveBeenCalled()
+  await user.click(screen.getByRole('button', { name: 'Close' }))
   expect(onOpenChange).toHaveBeenCalledWith(false)
+})
+
+it('leaves a bowler with no surname out unless ticked, and sends skips for anyone unticked', async () => {
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    previewImport: vi.fn().mockResolvedValue(PREVIEW),
+    planMbdSync: vi.fn().mockResolvedValue({
+      plan: {
+        rows: [
+          {
+            row: { line: 2, mbdId: '70', firstName: 'Team 1', lastName: '' },
+            match: { kind: 'new' }
+          },
+          {
+            row: { line: 3, mbdId: '80', firstName: 'New', lastName: 'Person' },
+            match: { kind: 'new' }
+          },
+          {
+            row: { line: 4, mbdId: '90', firstName: 'Other', lastName: 'Person' },
+            match: { kind: 'new' }
+          }
+        ],
+        invalid: []
+      },
+      revision: 'members-r4',
+      sourceRevision: 'export-r1'
+    })
+  })
+  const user = userEvent.setup()
+  renderDialog()
+
+  await screen.findByText(/First 1 of 4 rows/)
+  await user.click(screen.getByRole('button', { name: 'Continue' }))
+  await screen.findByText('3 rows: 0 already known, 3 new, 0 to decide, 1 left out')
+  expect(screen.getByRole('checkbox', { name: 'Sync Team 1' })).not.toBeChecked()
+  expect(screen.getByText('(no surname)')).toBeInTheDocument()
+  await user.click(screen.getByRole('checkbox', { name: 'Sync Other Person' }))
+  expect(screen.getByRole('button', { name: 'Sync 1 row' })).toBeEnabled()
+  await user.click(screen.getByRole('button', { name: 'Sync 1 row' }))
+
+  await waitFor(() =>
+    expect(api.syncMbd).toHaveBeenCalledExactlyOnceWith(
+      PATH,
+      PREVIEW.mapping,
+      [
+        { kind: 'skip', line: 2 },
+        { kind: 'skip', line: 4 }
+      ],
+      'members-r4',
+      'export-r1'
+    )
+  )
 })
 
 it('leaves a row with two exact twins undecided until the desk chooses', async () => {
@@ -163,11 +250,11 @@ it('leaves a row with two exact twins undecided until the desk chooses', async (
   await user.click(screen.getByRole('button', { name: 'Continue' }))
   await screen.findByText('1 row: 0 already known, 0 new, 1 to decide')
   for (const radio of screen.getAllByRole('radio')) expect(radio).not.toBeChecked()
-  expect(screen.getByRole('button', { name: 'Sync' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Sync 1 row' })).toBeDisabled()
 
   await user.click(screen.getByRole('radio', { name: 'Create a new member' }))
-  expect(screen.getByRole('button', { name: 'Sync' })).toBeEnabled()
-  await user.click(screen.getByRole('button', { name: 'Sync' }))
+  expect(screen.getByRole('button', { name: 'Sync 1 row' })).toBeEnabled()
+  await user.click(screen.getByRole('button', { name: 'Sync 1 row' }))
   await waitFor(() =>
     expect(api.syncMbd).toHaveBeenCalledExactlyOnceWith(
       PATH,

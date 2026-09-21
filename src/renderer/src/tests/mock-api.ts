@@ -167,7 +167,8 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
       aliased: 0,
       restored: 0,
       skipped: 0,
-      failed: []
+      failed: [],
+      log: []
     }),
     planPlayersImport: vi.fn<RendererApi['planPlayersImport']>().mockResolvedValue({
       plan: { rows: [], invalid: [], newTeams: [] },
