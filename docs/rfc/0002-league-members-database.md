@@ -403,7 +403,12 @@ which is why the CSV export takes the ids in table order rather than a filter. A
    toggle. Tests: schemas, hiding, workflow exclusion, snapshot joins, `mergedInto` resolution.
 2. **Editing.** Member create/edit with minting and under-18 rules, roster and team editing,
    merge and delete, duplicate-number resolution, Needs-details and duplicate filters. Tests:
-   mint under lock and re-read, padding, merge rewrites live seasons only, delete rules.
+   mint under lock and re-read, padding, merge rewrites live seasons only, delete rules. As
+   built, a merge asks which of the two records stays rather than always folding the row it was
+   opened on into the other; the Members table sorts by number or name and its column widths
+   drag, both remembered per machine; aliases are matched by the filter but not shown; and a
+   singles season (format 1) has no Teams tab, team column or team choice anywhere, its sheet
+   printing one block of names.
 3. **Sign-in sheet.** HTML layout, `printToPDF`, virtual row, regenerate-on-save and stale-on-
    open, `Superseded` badge on the docx. Tests: generated text contains teams in `teamNo`
    order and the Subs block; archive never generates. As built, the sheet is stamped with the
@@ -418,12 +423,16 @@ which is why the CSV export takes the ids in table order rather than a filter. A
    (M, W, B and G) and, for leagues, a `League Name` column covering every league ticked at
    export, so the reader takes workbooks as well as delimited text and the roster import picks
    one league out of the dump. The MBD's `Birthdate` holds the day a bowler was entered and is
-   never read. The committed fixtures are synthetic copies of that shape.
+   never read. The committed fixtures are synthetic copies of that shape. Before a sync writes,
+   every row is listed with its outcome and a tick to leave it out, rows with no surname (the
+   MBD's placeholders) starting unticked, and afterwards the counts and a row by row log stay
+   on screen, copyable, until the dialog is closed. The log is still not written to a file.
 5. **Cards and CSV export.** Code 128 encoder, card sheet, `cardIssued`, filtered export. As
    built, the card sheet is a PDF opened from a private temporary folder for the desk to print
    and cleared on quit; the barcode carries the raw id while the card prints the padded number;
    the export takes the listed ids in table order with a marketing-only tick, skips hidden
-   records and gives an adult only their own contact.
+   records and gives an adult only their own contact. The print actions are shipped disabled,
+   saying they need a card template, until the desk can choose one.
 
 Phase 1 stands alone: a location can enable the feature, create seasons with teams, and see the
 empty structure; nothing in phases 2–5 changes the files' shape.
