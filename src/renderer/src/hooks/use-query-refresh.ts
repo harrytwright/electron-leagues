@@ -1,7 +1,8 @@
-import { createContext, use } from 'react'
-import type { RefreshCoordinator } from '@renderer/lib/query-refresh'
-
-export const QueryRefreshContext = createContext<RefreshCoordinator | null>(null)
+import { use } from 'react'
+import {
+  QueryRefreshContext,
+  type RefreshCoordinator
+} from '@renderer/contexts/QueryRefreshContext'
 
 export function useQueryRefresh(): RefreshCoordinator {
   const value = use(QueryRefreshContext)

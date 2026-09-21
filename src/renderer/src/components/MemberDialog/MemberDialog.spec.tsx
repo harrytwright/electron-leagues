@@ -81,7 +81,7 @@ it('edits an existing member from their current details and keeps their number',
   const user = userEvent.setup()
 
   expect(screen.getByLabelText(/first name/i)).toHaveValue('Bob')
-  expect(screen.getByLabelText(/other spellings/i)).toHaveValue('Robert Kay')
+  expect(screen.getByLabelText(/other names or spellings/i)).toHaveValue('Robert Kay')
   await user.clear(screen.getByLabelText(/phone/i))
   await user.click(screen.getByRole('button', { name: 'Save member' }))
 

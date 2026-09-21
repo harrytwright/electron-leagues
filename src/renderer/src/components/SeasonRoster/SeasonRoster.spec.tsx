@@ -180,7 +180,7 @@ it('saves settings with numbers parsed and blanks dropped', async () => {
 
   await user.type(within(form).getByLabelText(/start date/i), '2025-09-01')
   await user.type(within(form).getByLabelText(/weeks/i), '30')
-  await user.type(within(form).getByLabelText(/fee per week/i), '12.5')
+  await user.type(within(form).getByLabelText(/player fee/i), '12.5')
   await user.click(within(form).getByRole('button', { name: 'Add fee line' }))
   await user.type(within(form).getByLabelText('Fee line 1 label'), 'Lineage')
   await user.type(within(form).getByLabelText('Fee line 1 amount'), '9')

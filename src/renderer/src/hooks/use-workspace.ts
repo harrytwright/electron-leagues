@@ -1,8 +1,7 @@
-import { createContext, use } from 'react'
+import { use } from 'react'
 import { useStore } from 'zustand'
-import type { WorkspaceState, WorkspaceStore } from '@renderer/lib/workspace-store'
-
-export const WorkspaceStoreContext = createContext<WorkspaceStore | null>(null)
+import { WorkspaceStoreContext } from '@renderer/contexts/WorkspaceStoreContext'
+import type { WorkspaceState } from '@renderer/lib/workspace-store'
 
 export function useWorkspace<T>(selector: (state: WorkspaceState) => T): T {
   const store = use(WorkspaceStoreContext)

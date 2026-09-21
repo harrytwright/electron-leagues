@@ -2,7 +2,7 @@ import './assets/main.css'
 
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import App from './App'
+import App from './app/App'
 import { createQueryClient } from './lib/query-client'
 import { createWorkspaceStore, type WorkspaceStorage } from './lib/workspace-store'
 import { watchSystemTheme } from './theme'

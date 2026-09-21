@@ -167,112 +167,119 @@ export function MemberDialog({
       />
 
       <TaskDialog.Body onSubmit={(event) => void submit(event)}>
-        <div className="grid grid-cols-2 gap-3">
-          <Input
-            ref={firstNameRef}
-            label="First name"
-            name="first-name"
-            autoComplete="off"
-            autoFocus
-            value={draft.firstName}
-            aria-invalid={task.error ? true : undefined}
-            aria-describedby={task.error ? errorId : undefined}
-            onChange={(event) => update('firstName', event.target.value)}
-          />
-          <Input
-            label="Last name"
-            name="last-name"
-            autoComplete="off"
-            value={draft.lastName}
-            onChange={(event) => update('lastName', event.target.value)}
-          />
-          <Input
-            label="Date of birth"
-            name="dob"
-            type="date"
-            value={draft.dob}
-            onChange={(event) => update('dob', event.target.value)}
-          />
-          <Select
-            label="Gender"
-            value={draft.gender}
-            items={GENDER_ITEMS}
-            onValueChange={(value) => {
-              if (value) update('gender', value)
-            }}
-          />
-        </div>
-
-        {junior ? (
-          <div className="grid gap-1.5">
-            <Input
-              label="Parent or guardian contact"
-              name="guardian-contact"
-              autoComplete="off"
-              value={draft.guardianContact}
-              onChange={(event) => update('guardianContact', event.target.value)}
-            />
-            <Text variant="secondary" size="sm">
-              Under-18s have no email or phone of their own on file; contact goes through a parent
-              or guardian.
-            </Text>
-          </div>
-        ) : (
+        <fieldset className="grid gap-3">
+          <legend className="mb-2 text-sm font-semibold">Personal details</legend>
           <div className="grid grid-cols-2 gap-3">
             <Input
-              label="Email"
-              name="email"
-              type="email"
+              ref={firstNameRef}
+              label="First name"
+              name="first-name"
               autoComplete="off"
-              value={draft.email}
-              onChange={(event) => update('email', event.target.value)}
+              autoFocus
+              value={draft.firstName}
+              aria-invalid={task.error ? true : undefined}
+              aria-describedby={task.error ? errorId : undefined}
+              onChange={(event) => update('firstName', event.target.value)}
             />
             <Input
-              label="Phone"
-              name="phone"
-              type="tel"
+              label="Last name"
+              name="last-name"
               autoComplete="off"
-              value={draft.phone}
-              onChange={(event) => update('phone', event.target.value)}
+              value={draft.lastName}
+              onChange={(event) => update('lastName', event.target.value)}
+            />
+            <Input
+              label="Date of birth"
+              name="dob"
+              type="date"
+              value={draft.dob}
+              onChange={(event) => update('dob', event.target.value)}
+            />
+            <Select
+              label="Gender"
+              value={draft.gender}
+              items={GENDER_ITEMS}
+              onValueChange={(value) => {
+                if (value) update('gender', value)
+              }}
             />
           </div>
-        )}
+        </fieldset>
 
-        <Checkbox
-          label={
-            junior
-              ? 'Send youth updates to the parent or guardian'
-              : 'Send marketing and club updates'
-          }
-          checked={draft.marketing}
-          onCheckedChange={(checked) => update('marketing', checked)}
-        />
-
-        <Textarea
-          label="Notes"
-          name="notes"
-          value={draft.notes}
-          onChange={(event) => update('notes', event.target.value)}
-        />
-
-        <div className="grid grid-cols-2 gap-3">
-          <Input
-            label="MBD ids"
-            name="mbd-ids"
-            autoComplete="off"
-            placeholder="Comma separated"
-            value={draft.mbdIds}
-            onChange={(event) => update('mbdIds', event.target.value)}
+        <fieldset className="grid gap-3 border-t border-kumo-line pt-4">
+          <legend className="px-1 text-sm font-semibold">Contact details</legend>
+          {junior ? (
+            <div className="grid gap-1.5">
+              <Input
+                label="Parent or guardian contact"
+                name="guardian-contact"
+                autoComplete="off"
+                value={draft.guardianContact}
+                onChange={(event) => update('guardianContact', event.target.value)}
+              />
+              <Text variant="secondary" size="sm">
+                For under-18s, keep the parent or guardian’s details here rather than the young
+                person’s own contact details.
+              </Text>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Email"
+                name="email"
+                type="email"
+                autoComplete="off"
+                value={draft.email}
+                onChange={(event) => update('email', event.target.value)}
+              />
+              <Input
+                label="Phone"
+                name="phone"
+                type="tel"
+                autoComplete="off"
+                value={draft.phone}
+                onChange={(event) => update('phone', event.target.value)}
+              />
+            </div>
+          )}
+          <Checkbox
+            label={
+              junior
+                ? 'Send youth updates to the parent or guardian'
+                : 'Send marketing and club updates'
+            }
+            checked={draft.marketing}
+            onCheckedChange={(checked) => update('marketing', checked)}
           />
-          <Input
-            label="Other spellings"
-            name="aliases"
-            autoComplete="off"
-            placeholder="Comma separated"
-            value={draft.aliases}
-            onChange={(event) => update('aliases', event.target.value)}
+        </fieldset>
+
+        <fieldset className="grid gap-3 border-t border-kumo-line pt-4">
+          <legend className="px-1 text-sm font-semibold">Record keeping</legend>
+          <Textarea
+            label="Notes"
+            name="notes"
+            value={draft.notes}
+            onChange={(event) => update('notes', event.target.value)}
           />
-        </div>
+          <div className="grid grid-cols-2 gap-3">
+            <Input
+              label="MBD IDs"
+              name="mbd-ids"
+              autoComplete="off"
+              description="Separate multiple IDs with commas"
+              value={draft.mbdIds}
+              onChange={(event) => update('mbdIds', event.target.value)}
+            />
+            <Input
+              label="Other names or spellings"
+              name="aliases"
+              autoComplete="off"
+              description="Used when searching; separate with commas"
+              value={draft.aliases}
+              onChange={(event) => update('aliases', event.target.value)}
+            />
+          </div>
+        </fieldset>
 
         {task.error ? (
           <Text id={errorId} variant="error" role="alert">
