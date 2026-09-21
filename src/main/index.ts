@@ -52,6 +52,7 @@ import {
   readMasterForWrite,
   mergeMembers,
   renumberDuplicates,
+  resetMembers,
   saveMember,
   saveSeason
 } from './lib/members'
@@ -439,6 +440,13 @@ function registerIpc(): void {
     const outcome = await deleteMember(requireRoot(), id, revision)
     capture('member_deleted', { outcome })
     return outcome
+  })
+
+  register('resetMembers', async (_e, revision) => {
+    if (app.isPackaged) {
+      throw new UserFacingError('Deleting every member is only offered in development builds')
+    }
+    await resetMembers(requireRoot(), revision)
   })
 
   register('renumberDuplicates', async (_e, id, keepIndex, revision) => {

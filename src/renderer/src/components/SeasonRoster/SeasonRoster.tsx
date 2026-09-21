@@ -105,8 +105,13 @@ function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element
   const total = season.file.players.length
   const columns = singles ? 3 : 5
 
-  const addPlayer = (player: Player): Promise<string | null> =>
-    saver.save(withPlayer(season.file, player.memberId, player), 'Added to the roster')
+  const addPlayers = (players: Player[]): Promise<string | null> => {
+    const file = players.reduce(
+      (current, player) => withPlayer(current, player.memberId, player),
+      season.file
+    )
+    return saver.save(file, `Added ${plural(players.length, 'player')} to the roster`)
+  }
 
   // A move changes only the team; the seat and any LeagueSecretary id travel with the player.
   const move = (player: Player, teamId: string | null): void => {
@@ -122,7 +127,7 @@ function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element
 
   const onMemberSaved = (member: Member): void => {
     setDialog(null)
-    void addPlayer({ memberId: member.id, teamId: null })
+    void addPlayers([{ memberId: member.id, teamId: null }])
   }
 
   return (
@@ -315,7 +320,7 @@ function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element
         onOpenChange={(open) => {
           if (!open) setDialog(null)
         }}
-        onAdd={addPlayer}
+        onAdd={addPlayers}
       />
       <MemberDialog
         snapshot={snapshot}

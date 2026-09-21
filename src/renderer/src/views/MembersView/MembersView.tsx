@@ -53,6 +53,7 @@ import { MbdSyncDialog } from '@renderer/components/MbdSyncDialog'
 import { IconButton } from '@renderer/components/IconButton'
 import { MemberDialog } from '@renderer/components/MemberDialog'
 import { MergeMemberDialog } from '@renderer/components/MergeMemberDialog'
+import { ResetMembersDialog } from '@renderer/components/ResetMembersDialog'
 import { FILE_TABLE_CLASS, STATIC_ROW_CLASS } from '@renderer/components/FileBrowser/styles'
 import type { Props } from './interface'
 
@@ -109,6 +110,8 @@ interface ColumnDrag {
   column: ResizableMemberColumn
   startX: number
   startWidth: number
+  /** The width drawn so far; committed to state once the drag ends. */
+  width: number | null
 }
 
 function leaguesSummary(row: MemberRow): React.JSX.Element | string {
@@ -195,6 +198,7 @@ function EnableMembers({ root }: { root: string }): React.JSX.Element {
 
 type MemberAction =
   | { kind: 'new' }
+  | { kind: 'reset' }
   | { kind: 'edit'; member: Member }
   | { kind: 'merge'; member: Member }
   | { kind: 'delete'; member: Member }
@@ -208,6 +212,7 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
   const [exporting, setExporting] = useState(false)
   const [table, setTable] = useState<MembersTablePreference>(loadMembersTable)
   const drag = useRef<ColumnDrag | null>(null)
+  const cols = useRef(new Map<ResizableMemberColumn, HTMLTableColElement>())
   const drop = useImportDrop(setSyncPath)
   const filterRef = useRef<HTMLInputElement>(null)
   const coordinator = useQueryRefresh()
@@ -258,13 +263,10 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
   const sortBy = (column: MembersSortColumn): void => {
     arrange({ ...table, sort: nextMembersSort(table.sort, column) })
   }
-  // A drag redraws on every pointer move but is only remembered once it ends.
-  const resize = (column: ResizableMemberColumn, width: number): MembersTablePreference => {
-    const rounded = Math.max(MIN_MEMBER_COLUMN_WIDTH, Math.round(width))
-    const next = { ...table, widths: { ...table.widths, [column]: rounded } }
-    setTable(next)
-    return next
+  const resize = (column: ResizableMemberColumn, width: number): void => {
+    arrange({ ...table, widths: { ...table.widths, [column]: width } })
   }
+  const clampWidth = (width: number): number => Math.max(MIN_MEMBER_COLUMN_WIDTH, Math.round(width))
   const widthOf = (column: ResizableMemberColumn): number | undefined =>
     table.widths[column] ?? DEFAULT_COLUMN_WIDTHS[column]
   const startDrag = (
@@ -273,10 +275,12 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
   ): void => {
     const head = event.currentTarget.closest('th')
     const startWidth = head?.getBoundingClientRect().width || widthOf(column) || 0
-    drag.current = { column, startX: event.clientX, startWidth }
+    drag.current = { column, startX: event.clientX, startWidth, width: null }
     event.currentTarget.setPointerCapture?.(event.pointerId)
     event.preventDefault()
   }
+  // A drag is drawn straight onto the <col>, so a few hundred rows never re-render
+  // per pointer move; React learns the width once, when the drag ends.
   const moveDrag = (event: React.PointerEvent<HTMLButtonElement>): void => {
     const current = drag.current
     if (!current) return
@@ -285,11 +289,16 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
       drag.current = null
       return
     }
-    resize(current.column, current.startWidth + event.clientX - current.startX)
+    current.width = clampWidth(current.startWidth + event.clientX - current.startX)
+    const col = cols.current.get(current.column)
+    if (col) col.style.width = `${current.width}px`
   }
   const endDrag = (event: React.PointerEvent<HTMLButtonElement>): void => {
-    if (drag.current) saveMembersTable(table)
+    const current = drag.current
     drag.current = null
+    if (current?.width !== null && current?.width !== undefined) {
+      resize(current.column, current.width)
+    }
     event.currentTarget.releasePointerCapture?.(event.pointerId)
   }
   const nudge = (column: ResizableMemberColumn, event: React.KeyboardEvent): void => {
@@ -301,7 +310,7 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
           : 0
     if (step === 0) return
     event.preventDefault()
-    saveMembersTable(resize(column, (widthOf(column) ?? MIN_MEMBER_COLUMN_WIDTH * 2) + step))
+    resize(column, clampWidth((widthOf(column) ?? MIN_MEMBER_COLUMN_WIDTH * 2) + step))
   }
   const resizeHandle = (column: ResizableMemberColumn): React.JSX.Element => (
     <ColumnResizeHandle
@@ -346,12 +355,19 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
   const rows = useMemo(() => buildMemberRows(snapshot, new Date()), [snapshot])
   const leagues = leagueChoices(snapshot)
   // The count reads "of" the quick filter's population, so Deleted counts deleted members.
-  const population = filterMemberRows(rows, snapshot, { query: '', quick, leagueFolder: null })
-  const visible = filterMemberRows(rows, snapshot, {
-    query,
-    quick,
-    leagueFolder: leagueFolder === ALL_LEAGUES ? null : leagueFolder
-  }).sort((a, b) => compareMemberRows(a, b, table.sort))
+  const population = useMemo(
+    () => filterMemberRows(rows, snapshot, { query: '', quick, leagueFolder: null }),
+    [rows, snapshot, quick]
+  )
+  const visible = useMemo(
+    () =>
+      filterMemberRows(rows, snapshot, {
+        query,
+        quick,
+        leagueFolder: leagueFolder === ALL_LEAGUES ? null : leagueFolder
+      }).sort((a, b) => compareMemberRows(a, b, table.sort)),
+    [rows, snapshot, query, quick, leagueFolder, table.sort]
+  )
   const nothingYet = quick === 'all' && population.length === 0
   // Cards and exports are for people on the list today; a hidden record is neither.
   const listed = visible.flatMap((row) => (row.member.deleted ? [] : [row.member.id]))
@@ -394,6 +410,17 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
                 >
                   Export list to CSV…
                 </DropdownMenu.Item>
+                {import.meta.env.DEV ? (
+                  <>
+                    <DropdownMenu.Separator />
+                    <DropdownMenu.Item
+                      variant="danger"
+                      onClick={() => setAction({ kind: 'reset' })}
+                    >
+                      Delete all members…
+                    </DropdownMenu.Item>
+                  </>
+                ) : null}
               </DropdownMenu.Content>
             </DropdownMenu>
             <Toolbar.Button
@@ -466,7 +493,14 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
         <Table aria-label="Members" layout="fixed" className={FILE_TABLE_CLASS}>
           <colgroup>
             {RESIZABLE_MEMBER_COLUMNS.map((column) => (
-              <col key={column} style={{ width: widthOf(column) }} />
+              <col
+                key={column}
+                ref={(col) => {
+                  if (col) cols.current.set(column, col)
+                  else cols.current.delete(column)
+                }}
+                style={{ width: widthOf(column) }}
+              />
             ))}
             <col style={{ width: 48 }} />
           </colgroup>
@@ -644,6 +678,14 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
         onOpenChange={closeAction}
         onDeleted={() => setAction(null)}
       />
+      {import.meta.env.DEV ? (
+        <ResetMembersDialog
+          snapshot={snapshot}
+          open={action?.kind === 'reset'}
+          onOpenChange={closeAction}
+          onReset={() => setAction(null)}
+        />
+      ) : null}
     </div>
   )
 }

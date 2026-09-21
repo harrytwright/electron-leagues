@@ -33,7 +33,7 @@ The new season wizard suggests the next name in the same style as the league's l
 
 Every copy is a snapshot, not a live link. Editing a template later never changes a season that already copied it.
 
-A season created while the members database is on carries its own settings, teams and roster in a file the app manages; that file is never shown among the season's documents and never copied between seasons.
+A season created while the members database is on carries its own settings, teams and roster in a file the app manages; that file is never shown among the season's documents and never copied between seasons. **Add player…** on the Players tab lists every member not yet on the roster with a tick box and a search, so several can join a team, or the subs, in one go.
 
 ## Sign-in sheet
 

@@ -16,6 +16,7 @@ import {
   membersEnabled,
   mergeMembers,
   renumberDuplicates,
+  resetMembers,
   saveMember,
   saveSeason,
   STALE_MESSAGE,
@@ -343,6 +344,42 @@ describe('mergeMembers', () => {
     expect(live?.file.players).toEqual([{ memberId: 1, teamId: 'team_a' }])
     expect(archived?.file.players).toEqual([{ memberId: 2, teamId: null }])
     expect(snapshot.problems).toEqual([])
+  })
+})
+
+describe('resetMembers', () => {
+  test('empties every roster, live and archived, then the master list', async () => {
+    await enableMembers(root)
+    await makeTree(root, {
+      '_archives/Pairs/2023-24/Rules.docx': 'x',
+      'monday/Pairs/2025-26': null
+    })
+    let snapshot = await snapshotOf()
+    await saveMember(root, input({ firstName: 'Ann' }), snapshot.revision)
+    const live = seasonFile({
+      format: 2,
+      startDate: '2025-09-01',
+      teams: [{ id: 'team_a', teamNo: 1, name: 'Ants' }],
+      players: [{ memberId: 1, teamId: 'team_a' }]
+    })
+    await writeSeasonFile(join(root, 'monday/Pairs/2025-26'), live)
+    await writeSeasonFile(
+      join(root, '_archives/Pairs/2023-24'),
+      seasonFile({ players: [{ memberId: 1, teamId: null }] })
+    )
+
+    snapshot = await snapshotOf()
+    await expect(resetMembers(root, 'stale')).rejects.toThrow(STALE_MESSAGE)
+    await resetMembers(root, snapshot.revision)
+
+    snapshot = await snapshotOf()
+    expect(snapshot.members).toEqual([])
+    expect(snapshot.nextId).toBe(1)
+    expect(snapshot.seasons.map((season) => [season.file.players, season.file.teams])).toEqual([
+      [[], []],
+      [[], []]
+    ])
+    expect(snapshot.seasons.find((season) => !season.archived)?.file.startDate).toBe('2025-09-01')
   })
 })
 

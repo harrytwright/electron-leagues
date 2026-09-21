@@ -52,14 +52,40 @@ async function chooseOption(
   await user.click(await screen.findByRole('option', { name: option }))
 }
 
-it('adds a member to the roster through the dialog', async () => {
-  const api = renderTab('players')
+it('queues members through search and adds the checked players to the roster', async () => {
+  const api = renderTab('players', {
+    file: file({ players: [{ memberId: 1, teamId: 'team_a', position: 1 }] })
+  })
   const user = userEvent.setup()
 
   await user.click(screen.getByRole('button', { name: 'Add player…' }))
-  await chooseOption(user, /member/i, '000003 Cy Dee')
+  const list = within(screen.getByRole('group', { name: 'Players to add' }))
+  const search = screen.getByRole('combobox', { name: 'Find a member' })
+  expect(list.queryAllByRole('checkbox')).toHaveLength(0)
+  expect(screen.getByRole('button', { name: 'Add 1 player' })).toBeDisabled()
+  await user.click(search)
+  expect(screen.queryByRole('option', { name: '000001 Ann Lee' })).not.toBeInTheDocument()
+  await user.type(search, 'cy')
+  await screen.findByRole('option', { name: '000003 Cy Dee' })
+  await user.keyboard('{Enter}')
+  expect(api.saveSeason).not.toHaveBeenCalled()
+  expect(search).toHaveValue('')
+  expect(list.getByRole('checkbox', { name: '000003 Cy Dee' })).toBeChecked()
+
+  await user.click(search)
+  expect(screen.queryByRole('option', { name: '000003 Cy Dee' })).not.toBeInTheDocument()
+  await user.type(search, 'bob')
+  expect(list.getByText('000003 Cy Dee')).toBeVisible()
+  await user.click(await screen.findByRole('option', { name: '000002 Bob Kay' }))
+  expect(screen.getByRole('button', { name: 'Add 2 players' })).toBeEnabled()
+
+  await user.click(list.getByRole('checkbox', { name: '000002 Bob Kay' }))
+  expect(list.queryByRole('checkbox', { name: '000002 Bob Kay' })).not.toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Add 1 player' })).toBeEnabled()
+  await user.type(search, '2')
+  await user.click(await screen.findByRole('option', { name: '000002 Bob Kay' }))
   await chooseOption(user, /team/i, '2. Bees')
-  await user.click(screen.getByRole('button', { name: 'Add player' }))
+  await user.click(screen.getByRole('button', { name: 'Add 2 players' }))
 
   await waitFor(() => expect(api.saveSeason).toHaveBeenCalledOnce())
   expect(api.saveSeason).toHaveBeenCalledWith(
@@ -67,8 +93,8 @@ it('adds a member to the roster through the dialog', async () => {
     file({
       players: [
         { memberId: 1, teamId: 'team_a', position: 1 },
-        { memberId: 2, teamId: null },
-        { memberId: 3, teamId: 'team_b' }
+        { memberId: 3, teamId: 'team_b' },
+        { memberId: 2, teamId: 'team_b' }
       ]
     }),
     'season-r9'
@@ -141,8 +167,9 @@ it('lists a singles season by name with no team column, team moves or team choic
 
   await user.click(screen.getByRole('button', { name: 'Add player…' }))
   expect(screen.queryByLabelText(/team/i)).not.toBeInTheDocument()
-  await chooseOption(user, /member/i, '000003 Cy Dee')
-  await user.click(screen.getByRole('button', { name: 'Add player' }))
+  await user.type(screen.getByRole('combobox', { name: 'Find a member' }), 'cy')
+  await user.click(await screen.findByRole('option', { name: '000003 Cy Dee' }))
+  await user.click(screen.getByRole('button', { name: 'Add 1 player' }))
   await waitFor(() => expect(api.saveSeason).toHaveBeenCalledOnce())
   expect(vi.mocked(api.saveSeason).mock.calls[0][1].players).toEqual([
     { memberId: 2, teamId: null },

@@ -276,6 +276,24 @@ export async function mergeMembers(
   })
 }
 
+/**
+ * Empty every season's roster and teams, then the master list, so a development
+ * build can run a sync again from nothing. Season settings and archives' documents
+ * are left alone; only the app-owned roster data goes.
+ */
+export async function resetMembers(root: string, expected: FileRevision): Promise<void> {
+  return withRootLock(root, async () => {
+    await readMasterForWrite(root, expected)
+    for (const location of seasonLocations(root, await scanLeaguesRoot(root))) {
+      const season = await readSeasonFile(location.path)
+      if (season.status !== 'ok') continue
+      if (season.value.players.length === 0 && season.value.teams.length === 0) continue
+      await writeSeasonFile(location.path, { ...season.value, teams: [], players: [] })
+    }
+    await writeMaster(root, emptyMembersFile())
+  })
+}
+
 export type DeleteOutcome = 'hard' | 'soft'
 
 /** Removes a member nobody references; otherwise hides them so old rosters still resolve. */

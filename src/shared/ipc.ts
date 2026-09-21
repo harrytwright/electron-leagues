@@ -85,6 +85,8 @@ export interface InvokeOutputs {
   saveMember: Member
   mergeMembers: void
   deleteMember: 'hard' | 'soft'
+  /** Development only: empties every roster and the master list so a sync can be rerun. */
+  resetMembers: void
   renumberDuplicates: number[]
   saveSeason: SeasonSaveResult
   /** Gives a season made before the database was on a roster file of its own. */
@@ -249,6 +251,11 @@ export const invokeDefinitions = {
     channel: 'members:delete',
     args: z.tuple([memberIdSchema, revisionSchema]),
     failureMessage: 'Invalid delete request'
+  },
+  resetMembers: {
+    channel: 'members:reset',
+    args: z.tuple([revisionSchema]),
+    failureMessage: 'Invalid reset request'
   },
   renumberDuplicates: {
     channel: 'members:renumber',

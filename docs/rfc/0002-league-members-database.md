@@ -363,6 +363,7 @@ type; the preload methods follow from the table. Every write names the file revi
 | `saveMember`           | `members:save`          | `MemberInput`, revision                                                     | `Member`                        |
 | `mergeMembers`         | `members:merge`         | `fromId`, `intoId`, revision                                                | `void`                          |
 | `deleteMember`         | `members:delete`        | `id`, revision                                                              | `'hard' \| 'soft'`              |
+| `resetMembers`         | `members:reset`         | revision (development builds only)                                          | `void`                          |
 | `renumberDuplicates`   | `members:renumber`      | `id`, `keepIndex`, revision                                                 | the new numbers                 |
 | `createSeasonRoster`   | `season:create-roster`  | `SeasonRef`, `{ format, carryOver }`                                        | `void`, refuses an existing one |
 | `saveSeason`           | `season:save`           | `SeasonRef`, `SeasonFile`, revision                                         | whether the sheet was remade    |
@@ -408,7 +409,9 @@ which is why the CSV export takes the ids in table order rather than a filter. A
    opened on into the other; the Members table sorts by number or name and its column widths
    drag, both remembered per machine; aliases are matched by the filter but not shown; and a
    singles season (format 1) has no Teams tab, team column or team choice anywhere, its sheet
-   printing one block of names.
+   printing one block of names. _Add player…_ is a filtered checklist rather than a select, so
+   several members join a team in one save. Development builds also offer _Delete all
+   members…_, which empties every roster and then the master list so a sync can be rerun.
 3. **Sign-in sheet.** HTML layout, `printToPDF`, virtual row, regenerate-on-save and stale-on-
    open, `Superseded` badge on the docx. Tests: generated text contains teams in `teamNo`
    order and the Subs block; archive never generates. As built, the sheet is stamped with the

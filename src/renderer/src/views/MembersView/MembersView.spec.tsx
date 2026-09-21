@@ -315,6 +315,28 @@ it('starts an MBD sync from the toolbar picker or a dropped export', async () =>
   await waitFor(() => expect(api.previewImport).toHaveBeenLastCalledWith('bowlers.csv'))
 })
 
+it('offers a development-only reset that empties every roster and the list', async () => {
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot())
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await screen.findByRole('row', { name: /Ann Lee/ })
+  await user.click(screen.getByRole('button', { name: 'More actions' }))
+  await user.click(await screen.findByRole('menuitem', { name: 'Delete all members…' }))
+  const dialog = await screen.findByRole('dialog', { name: 'Delete every member?' })
+  expect(dialog).toHaveTextContent('removes all 2 member records')
+  await user.click(within(dialog).getByRole('button', { name: 'Delete everything' }))
+
+  await waitFor(() => expect(api.resetMembers).toHaveBeenCalledExactlyOnceWith('rev-2'))
+  // The toast is a dialog too, so the check names the one that should have gone.
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog', { name: 'Delete every member?' })).not.toBeInTheDocument()
+  )
+})
+
 it('parks card printing until there is a template, and opens the export', async () => {
   const api = installMockApi({
     getRoot: vi.fn().mockResolvedValue('/root'),
