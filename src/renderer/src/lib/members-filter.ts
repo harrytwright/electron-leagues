@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import {
   deriveMemberships,
   formatMemberNumber,
@@ -133,10 +134,39 @@ export function filterMemberRows(
   return kept.filter((row) => matchesQuery(row, filter.query))
 }
 
-export function compareMemberRows(a: MemberRow, b: MemberRow): number {
+export const membersSortSchema = z.object({
+  column: z.enum(['number', 'name']),
+  direction: z.enum(['ascending', 'descending'])
+})
+
+export type MembersSort = z.infer<typeof membersSortSchema>
+
+export type MembersSortColumn = MembersSort['column']
+
+/** A members list reads like a register, so it opens by surname. */
+export const DEFAULT_MEMBERS_SORT: MembersSort = { column: 'name', direction: 'ascending' }
+
+/** Clicking the sorted column turns it round; clicking another sorts by it from the top. */
+export function nextMembersSort(current: MembersSort, column: MembersSortColumn): MembersSort {
+  if (current.column !== column) return { column, direction: 'ascending' }
+  return { column, direction: current.direction === 'ascending' ? 'descending' : 'ascending' }
+}
+
+function compareByName(a: MemberRow, b: MemberRow): number {
   return (
     a.member.lastName.localeCompare(b.member.lastName, undefined, { sensitivity: 'base' }) ||
-    a.member.firstName.localeCompare(b.member.firstName, undefined, { sensitivity: 'base' }) ||
-    a.member.id - b.member.id
+    a.member.firstName.localeCompare(b.member.firstName, undefined, { sensitivity: 'base' })
   )
+}
+
+export function compareMemberRows(
+  a: MemberRow,
+  b: MemberRow,
+  sort: MembersSort = DEFAULT_MEMBERS_SORT
+): number {
+  const order =
+    sort.column === 'number'
+      ? a.member.id - b.member.id || compareByName(a, b)
+      : compareByName(a, b) || a.member.id - b.member.id
+  return sort.direction === 'ascending' ? order : -order
 }

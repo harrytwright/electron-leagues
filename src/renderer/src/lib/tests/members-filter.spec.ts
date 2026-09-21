@@ -5,7 +5,9 @@ import {
   compareMemberRows,
   filterMemberRows,
   leagueChoices,
-  type MembersFilter
+  nextMembersSort,
+  type MembersFilter,
+  type MembersSort
 } from '../members-filter'
 
 const today = new Date(2026, 8, 18)
@@ -95,6 +97,40 @@ describe('filterMemberRows', () => {
   test('a league filter keeps members on that league in a live season', () => {
     expect(names({ leagueFolder: 'Mixed triples' })).toEqual(['000001 Ann Lee'])
     expect(names({ leagueFolder: 'Pairs' })).toEqual([])
+  })
+})
+
+describe('compareMemberRows', () => {
+  test('orders by surname, by number, and the other way round on request', () => {
+    const rows = buildMemberRows(snapshot, today).filter((row) => !row.member.deleted)
+    const ordered = (sort: MembersSort): string[] =>
+      [...rows].sort((a, b) => compareMemberRows(a, b, sort)).map((row) => row.number)
+    expect(ordered({ column: 'name', direction: 'ascending' })).toEqual([
+      '000002',
+      '000001',
+      '000003',
+      '000003'
+    ])
+    expect(ordered({ column: 'name', direction: 'descending' })).toEqual([
+      '000003',
+      '000003',
+      '000001',
+      '000002'
+    ])
+    expect(ordered({ column: 'number', direction: 'ascending' })).toEqual([
+      '000001',
+      '000002',
+      '000003',
+      '000003'
+    ])
+    expect(nextMembersSort({ column: 'name', direction: 'ascending' }, 'name')).toEqual({
+      column: 'name',
+      direction: 'descending'
+    })
+    expect(nextMembersSort({ column: 'name', direction: 'descending' }, 'number')).toEqual({
+      column: 'number',
+      direction: 'ascending'
+    })
   })
 })
 

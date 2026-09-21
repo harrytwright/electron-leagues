@@ -84,6 +84,61 @@ it('lists members with numbers, contact, leagues and flags, and filters them', a
   expect(screen.getByRole('row', { name: /Ann Lee/ })).toBeInTheDocument()
 })
 
+it('sorts by number or name from the headers and remembers the arrangement', async () => {
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(
+      makeSnapshot({
+        nextId: 4,
+        members: [
+          makeMember({ id: 1, firstName: 'Zed', lastName: 'Young' }),
+          makeMember({ id: 2, firstName: 'Ann', lastName: 'Lee', aliases: ['Annie Lee'] }),
+          makeMember({ id: 3, firstName: 'Bob', lastName: 'Kay' })
+        ]
+      })
+    )
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  const table = await screen.findByRole('table', { name: 'Members' })
+  const listed = (): string[] =>
+    within(table)
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => within(row).getAllByRole('cell')[1].textContent)
+  expect(listed()).toEqual(['Bob Kay', 'Ann Lee', 'Zed Young'])
+  expect(screen.queryByText(/Also known as/)).not.toBeInTheDocument()
+  expect(screen.getByRole('columnheader', { name: /Member/ })).toHaveAttribute(
+    'aria-sort',
+    'ascending'
+  )
+
+  await user.click(screen.getByRole('button', { name: 'Number' }))
+  expect(listed()).toEqual(['Zed Young', 'Ann Lee', 'Bob Kay'])
+  await user.click(screen.getByRole('button', { name: 'Number' }))
+  expect(listed()).toEqual(['Bob Kay', 'Ann Lee', 'Zed Young'])
+  expect(screen.getByRole('columnheader', { name: /Number/ })).toHaveAttribute(
+    'aria-sort',
+    'descending'
+  )
+
+  const handle = screen.getByTitle('Resize the Born column')
+  fireEvent.pointerDown(handle, { clientX: 100, pointerId: 1 })
+  fireEvent.pointerMove(handle, { clientX: 160, pointerId: 1 })
+  fireEvent.pointerUp(handle, { clientX: 160, pointerId: 1 })
+  const cols = table.querySelectorAll('col')
+  expect(cols[2]).toHaveStyle({ width: '172px' })
+  handle.focus()
+  await user.keyboard('{ArrowLeft}')
+  expect(cols[2]).toHaveStyle({ width: '156px' })
+
+  expect(JSON.parse(localStorage.getItem('leagues:members-table:v1') ?? '{}')).toEqual({
+    sort: { column: 'number', direction: 'descending' },
+    widths: { born: 156 }
+  })
+})
+
 it('explains an empty list', async () => {
   installMockApi({
     getRoot: vi.fn().mockResolvedValue('/root'),

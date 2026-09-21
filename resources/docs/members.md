@@ -22,6 +22,10 @@ Both files are app owned. They never appear in the file browser and should not b
 
 Every member gets the next number when they are created, shown padded to six digits, and it never changes. The number is what a card carries and what the desk types to find someone. When two machines have both minted the same number before OneDrive caught up, the Members page shows _Duplicate numbers_ and lets one record keep it; the others take fresh numbers.
 
+## The members list
+
+The list opens by surname. Click **Number** or **Member** to sort by that column, and again to turn it round. Drag the handle at the right edge of a column heading to change its width, or focus the handle and use the left and right arrow keys. The arrangement is remembered on this machine. A small warning mark after a name means the record still needs details: a date of birth, a contact, or a guardian's contact for a junior.
+
 ## Adding and editing members
 
 **New member…** on the Members page, or on a season's Players tab, opens the member form. A member under 18 keeps no email or phone of their own; the form asks for a parent or guardian contact instead. When they turn 18 they appear under _Needs details_ so their own contact can be collected.

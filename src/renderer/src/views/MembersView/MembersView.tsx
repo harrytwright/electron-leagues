@@ -10,7 +10,7 @@ import {
   Toolbar,
   useKumoToastManager
 } from '@cloudflare/kumo'
-import { MagnifyingGlassIcon } from '@phosphor-icons/react'
+import { ArrowDownIcon, ArrowUpIcon, MagnifyingGlassIcon } from '@phosphor-icons/react'
 import { DotsThreeIcon } from '@phosphor-icons/react/dist/csr/DotsThree'
 import { UserPlusIcon } from '@phosphor-icons/react/dist/csr/UserPlus'
 import { WarningCircleIcon } from '@phosphor-icons/react/dist/csr/WarningCircle'
@@ -27,11 +27,23 @@ import {
   filterMemberRows,
   isQuickFilter,
   leagueChoices,
+  nextMembersSort,
   QUICK_FILTER_LABELS,
   QUICK_FILTERS,
   type MemberRow,
+  type MembersSort,
+  type MembersSortColumn,
   type QuickFilter
 } from '@renderer/lib/members-filter'
+import {
+  loadMembersTable,
+  MIN_MEMBER_COLUMN_WIDTH,
+  RESIZABLE_MEMBER_COLUMNS,
+  saveMembersTable,
+  type MemberColumnWidths,
+  type MembersTablePreference,
+  type ResizableMemberColumn
+} from '@renderer/lib/members-table-store'
 import { pathTail } from '@renderer/lib/path-basename'
 import { plural } from '@renderer/lib/plural'
 import { DeleteMemberDialog } from '@renderer/components/DeleteMemberDialog'
@@ -56,6 +68,42 @@ function formatBorn(dob: string | undefined): string {
   if (!dob) return '—'
   const [year, month, day] = dob.split('-').map(Number)
   return born.format(new Date(year, month - 1, day))
+}
+
+const COLUMN_TITLES: Record<ResizableMemberColumn, string> = {
+  number: 'Number',
+  member: 'Member',
+  born: 'Born',
+  contact: 'Contact',
+  leagues: 'Leagues'
+}
+
+/** Columns the desk has not dragged keep a sensible starting width or share what is left. */
+const DEFAULT_COLUMN_WIDTHS: MemberColumnWidths = { number: 96, born: 112 }
+
+const KEYBOARD_RESIZE_STEP = 16
+
+interface ColumnDrag {
+  column: ResizableMemberColumn
+  startX: number
+  startWidth: number
+}
+
+function leaguesSummary(row: MemberRow): React.JSX.Element | string {
+  if (row.memberships.length === 0) return '—'
+  return (
+    <>
+      {row.memberships.map((membership, index) => (
+        <span key={`${membership.seasonPath}-${index}`}>
+          {index > 0 ? ', ' : ''}
+          <span className="whitespace-nowrap">
+            {membership.leagueName}
+            {membership.team ? '' : ' (sub)'}
+          </span>
+        </span>
+      ))}
+    </>
+  )
 }
 
 function contactSummary(row: MemberRow): string {
@@ -136,6 +184,8 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
   const [action, setAction] = useState<MemberAction | null>(null)
   const [syncPath, setSyncPath] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
+  const [table, setTable] = useState<MembersTablePreference>(loadMembersTable)
+  const drag = useRef<ColumnDrag | null>(null)
   const drop = useImportDrop(setSyncPath)
   const filterRef = useRef<HTMLInputElement>(null)
   const coordinator = useQueryRefresh()
@@ -201,6 +251,78 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
     }
   }
 
+  const arrange = (next: MembersTablePreference): void => {
+    setTable(next)
+    saveMembersTable(next)
+  }
+  const sortBy = (column: MembersSortColumn): void => {
+    arrange({ ...table, sort: nextMembersSort(table.sort, column) })
+  }
+  const resize = (column: ResizableMemberColumn, width: number): void => {
+    const rounded = Math.max(MIN_MEMBER_COLUMN_WIDTH, Math.round(width))
+    arrange({ ...table, widths: { ...table.widths, [column]: rounded } })
+  }
+  const widthOf = (column: ResizableMemberColumn): number | undefined =>
+    table.widths[column] ?? DEFAULT_COLUMN_WIDTHS[column]
+  const startDrag = (
+    column: ResizableMemberColumn,
+    event: React.PointerEvent<HTMLButtonElement>
+  ): void => {
+    const head = event.currentTarget.closest('th')
+    const startWidth = head?.getBoundingClientRect().width || widthOf(column) || 0
+    drag.current = { column, startX: event.clientX, startWidth }
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    event.preventDefault()
+  }
+  const moveDrag = (event: React.PointerEvent<HTMLButtonElement>): void => {
+    const current = drag.current
+    if (current) resize(current.column, current.startWidth + event.clientX - current.startX)
+  }
+  const endDrag = (event: React.PointerEvent<HTMLButtonElement>): void => {
+    drag.current = null
+    event.currentTarget.releasePointerCapture?.(event.pointerId)
+  }
+  const nudge = (column: ResizableMemberColumn, event: React.KeyboardEvent): void => {
+    const step =
+      event.key === 'ArrowRight'
+        ? KEYBOARD_RESIZE_STEP
+        : event.key === 'ArrowLeft'
+          ? -KEYBOARD_RESIZE_STEP
+          : 0
+    if (step === 0) return
+    event.preventDefault()
+    resize(column, (widthOf(column) ?? MIN_MEMBER_COLUMN_WIDTH * 2) + step)
+  }
+  const resizeHandle = (column: ResizableMemberColumn): React.JSX.Element => (
+    // Kumo names every handle "Resize column"; the title says which one this is.
+    <Table.ResizeHandle
+      title={`Resize the ${COLUMN_TITLES[column]} column`}
+      onPointerDown={(event) => startDrag(column, event)}
+      onPointerMove={moveDrag}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      onKeyDown={(event) => nudge(column, event)}
+    />
+  )
+  const sortHead = (column: MembersSortColumn, title: string): React.JSX.Element => (
+    <button
+      type="button"
+      className="flex w-full items-center gap-1.5 rounded-sm text-left text-kumo-subtle hover:text-kumo-default focus-visible:outline-2 focus-visible:outline-kumo-focus"
+      onClick={() => sortBy(column)}
+    >
+      {title}
+      {table.sort.column === column ? (
+        table.sort.direction === 'ascending' ? (
+          <ArrowUpIcon aria-hidden size={12} />
+        ) : (
+          <ArrowDownIcon aria-hidden size={12} />
+        )
+      ) : null}
+    </button>
+  )
+  const sortMark = (column: MembersSortColumn): MembersSort['direction'] | 'none' =>
+    table.sort.column === column ? table.sort.direction : 'none'
+
   useAppCommandHandler('refresh', () => void coordinator.refresh())
   useAppCommandHandler('focus-filter', () => {
     const filter = filterRef.current
@@ -217,7 +339,7 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
     query,
     quick,
     leagueFolder: leagueFolder === ALL_LEAGUES ? null : leagueFolder
-  }).sort(compareMemberRows)
+  }).sort((a, b) => compareMemberRows(a, b, table.sort))
   const nothingYet = quick === 'all' && population.length === 0
   // Cards and exports are for people on the list today; a hidden record is neither.
   const listed = visible.flatMap((row) => (row.member.deleted ? [] : [row.member.id]))
@@ -332,14 +454,35 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
       ) : null}
       <div className="min-h-0 flex-1 overflow-auto">
         <Table aria-label="Members" layout="fixed" className={FILE_TABLE_CLASS}>
+          <colgroup>
+            {RESIZABLE_MEMBER_COLUMNS.map((column) => (
+              <col key={column} style={{ width: widthOf(column) }} />
+            ))}
+            <col style={{ width: 48 }} />
+          </colgroup>
           <Table.Header sticky>
             <Table.Row className="text-kumo-subtle">
-              <Table.Head className="w-24">Number</Table.Head>
-              <Table.Head>Member</Table.Head>
-              <Table.Head className="w-28">Born</Table.Head>
-              <Table.Head>Contact</Table.Head>
-              <Table.Head>Leagues</Table.Head>
-              <Table.Head className="w-12">
+              <Table.Head aria-sort={sortMark('number')} className="group relative">
+                {sortHead('number', 'Number')}
+                {resizeHandle('number')}
+              </Table.Head>
+              <Table.Head aria-sort={sortMark('name')} className="group relative">
+                {sortHead('name', 'Member')}
+                {resizeHandle('member')}
+              </Table.Head>
+              <Table.Head className="group relative">
+                Born
+                {resizeHandle('born')}
+              </Table.Head>
+              <Table.Head className="group relative">
+                Contact
+                {resizeHandle('contact')}
+              </Table.Head>
+              <Table.Head className="group relative">
+                Leagues
+                {resizeHandle('leagues')}
+              </Table.Head>
+              <Table.Head>
                 <span className="sr-only">Actions</span>
               </Table.Head>
             </Table.Row>
@@ -359,17 +502,16 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
                 <Table.Row key={`${row.member.id}-${index}`} className={STATIC_ROW_CLASS}>
                   <Table.Cell className="font-mono text-kumo-subtle">{row.number}</Table.Cell>
                   <Table.Cell>
-                    <div className="grid min-w-0 gap-0.5">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span className="truncate font-medium">{row.name}</span>
-                        {row.member.deleted ? <Badge variant="secondary">Deleted</Badge> : null}
-                        {row.needsDetails && !row.member.deleted ? (
-                          <Badge variant="warning">Needs details</Badge>
-                        ) : null}
-                      </div>
-                      {row.member.aliases.length > 0 ? (
-                        <span className="truncate text-xs text-kumo-subtle">
-                          Also known as {row.member.aliases.join(', ')}
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="truncate font-medium">{row.name}</span>
+                      {row.member.deleted ? <Badge variant="secondary">Deleted</Badge> : null}
+                      {row.needsDetails && !row.member.deleted ? (
+                        <span
+                          className="flex shrink-0 items-center text-kumo-warning"
+                          title="Needs details"
+                        >
+                          <WarningCircleIcon aria-hidden size={14} />
+                          <span className="sr-only">Needs details</span>
                         </span>
                       ) : null}
                     </div>
@@ -380,18 +522,8 @@ function MembersTable({ snapshot }: { snapshot: MembersSnapshot }): React.JSX.El
                   <Table.Cell className="truncate text-kumo-subtle" title={contactSummary(row)}>
                     {contactSummary(row)}
                   </Table.Cell>
-                  <Table.Cell>
-                    <div className="flex flex-wrap gap-1">
-                      {row.memberships.map((membership, index) => (
-                        <Badge
-                          key={`${membership.seasonPath}-${index}`}
-                          variant={membership.team ? 'info' : 'secondary'}
-                        >
-                          {membership.leagueName}
-                          {membership.team ? '' : ' (sub)'}
-                        </Badge>
-                      ))}
-                    </div>
+                  <Table.Cell className="truncate text-kumo-subtle">
+                    {leaguesSummary(row)}
                   </Table.Cell>
                   <Table.Cell>
                     <DropdownMenu>
