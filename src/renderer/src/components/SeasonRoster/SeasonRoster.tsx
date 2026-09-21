@@ -6,6 +6,7 @@ import { PlusIcon } from '@phosphor-icons/react/dist/csr/Plus'
 import { UserPlusIcon } from '@phosphor-icons/react/dist/csr/UserPlus'
 import {
   formatMemberNumber,
+  isSingles,
   memberDisplayName,
   newTeamId,
   resolveMember,
@@ -44,7 +45,18 @@ interface PlayerGroup {
   players: Player[]
 }
 
-function groupPlayers(season: RosterSeason): PlayerGroup[] {
+/** Singles bowlers are listed by name; there are no teams to group them under. */
+function singlesGroup(season: RosterSeason, members: readonly Member[]): PlayerGroup[] {
+  const nameOf = (player: Player): string => {
+    const member = resolveMember(members, player.memberId)
+    return member ? `${member.lastName} ${member.firstName}` : `\uffff${player.memberId}`
+  }
+  const players = [...season.file.players].sort((a, b) => nameOf(a).localeCompare(nameOf(b)))
+  return [{ key: 'players', title: 'Players', team: null, players }]
+}
+
+function groupPlayers(season: RosterSeason, members: readonly Member[]): PlayerGroup[] {
+  if (isSingles(season.file)) return singlesGroup(season, members)
   const groups: PlayerGroup[] = sortTeams(season.file.teams).map((team) => ({
     key: team.id,
     title: `${team.teamNo}. ${team.name}`,
@@ -90,9 +102,11 @@ function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element
       add({ title: ipcErrorMessage(caught), variant: 'error' })
     }
   }
-  const groups = groupPlayers(season)
-  const teams = sortTeams(season.file.teams)
+  const singles = isSingles(season.file)
+  const groups = groupPlayers(season, snapshot.members)
+  const teams = singles ? [] : sortTeams(season.file.teams)
   const total = season.file.players.length
+  const columns = singles ? 3 : 5
 
   const addPlayer = (player: Player): Promise<string | null> =>
     saver.save(withPlayer(season.file, player.memberId, player), 'Added to the roster')
@@ -129,7 +143,9 @@ function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element
           <Text variant="secondary" size="sm">
             {readOnly
               ? `This archived roster used the ${formatLabel(season.file.format)} format.`
-              : `Build the ${formatLabel(season.file.format)} roster by adding members to teams or as subs.`}
+              : singles
+                ? 'Build the Singles roster by adding members; everyone bowls for themselves.'
+                : `Build the ${formatLabel(season.file.format)} roster by adding members to teams or as subs.`}
           </Text>
         </div>
         {readOnly ? null : (
@@ -171,10 +187,10 @@ function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element
         <Table aria-label="Players" layout="fixed" className={FILE_TABLE_CLASS}>
           <Table.Header sticky>
             <Table.Row className="text-kumo-subtle">
-              <Table.Head>Team</Table.Head>
+              {singles ? null : <Table.Head>Team</Table.Head>}
               <Table.Head className="w-24">Number</Table.Head>
               <Table.Head>Player</Table.Head>
-              <Table.Head className="w-24">Position</Table.Head>
+              {singles ? null : <Table.Head className="w-24">Position</Table.Head>}
               <Table.Head className="w-12">
                 <span className="sr-only">Actions</span>
               </Table.Head>
@@ -183,10 +199,12 @@ function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element
           <Table.Body>
             {total === 0 ? (
               <Table.Row>
-                <Table.Cell colSpan={5} className="py-10 text-center text-kumo-subtle">
+                <Table.Cell colSpan={columns} className="py-10 text-center text-kumo-subtle">
                   {readOnly
                     ? 'This season had no players on record.'
-                    : 'No players yet. Add teams and players to build this season’s roster.'}
+                    : singles
+                      ? 'No players yet. Add members to build this season’s roster.'
+                      : 'No players yet. Add teams and players to build this season’s roster.'}
                 </Table.Cell>
               </Table.Row>
             ) : (
@@ -208,9 +226,11 @@ function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element
                           key={`${group.key}-${player.memberId}`}
                           className={STATIC_ROW_CLASS}
                         >
-                          <Table.Cell className="font-medium">
-                            {index === 0 ? group.title : ''}
-                          </Table.Cell>
+                          {singles ? null : (
+                            <Table.Cell className="font-medium">
+                              {index === 0 ? group.title : ''}
+                            </Table.Cell>
+                          )}
                           <Table.Cell className="font-mono text-kumo-subtle">
                             {formatMemberNumber(player.memberId, snapshot.nextId)}
                           </Table.Cell>
@@ -224,9 +244,11 @@ function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element
                               </span>
                             )}
                           </Table.Cell>
-                          <Table.Cell className="text-kumo-subtle">
-                            {player.position ?? '—'}
-                          </Table.Cell>
+                          {singles ? null : (
+                            <Table.Cell className="text-kumo-subtle">
+                              {player.position ?? '—'}
+                            </Table.Cell>
+                          )}
                           <Table.Cell>
                             {readOnly ? null : (
                               <DropdownMenu>
@@ -252,12 +274,12 @@ function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element
                                         Move to {team.teamNo}. {team.name}
                                       </DropdownMenu.Item>
                                     ))}
-                                  {player.teamId !== null ? (
+                                  {player.teamId !== null && !singles ? (
                                     <DropdownMenu.Item onClick={() => move(player, null)}>
                                       Make a sub
                                     </DropdownMenu.Item>
                                   ) : null}
-                                  <DropdownMenu.Separator />
+                                  {singles ? null : <DropdownMenu.Separator />}
                                   <DropdownMenu.Item
                                     variant="danger"
                                     onClick={() => remove(player, member)}
@@ -480,7 +502,11 @@ export function SeasonRoster({ season, snapshot, tab }: Props): React.JSX.Elemen
     case 'players':
       return <PlayersTab season={season} snapshot={snapshot} />
     case 'teams':
-      return <TeamsTab season={season} />
+      return isSingles(season.file) ? (
+        <PlayersTab season={season} snapshot={snapshot} />
+      ) : (
+        <TeamsTab season={season} />
+      )
     case 'settings':
       return <SettingsTab season={season} />
   }

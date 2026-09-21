@@ -7,6 +7,7 @@ import {
   type RosterPlan
 } from '@shared/imports'
 import {
+  isSingles,
   memberDisplayName,
   normaliseName,
   resolveMember,
@@ -37,6 +38,9 @@ const ROSTER_FIELDS = [
   'team',
   'gender'
 ] as const
+
+/** A singles season has no teams, so the team column is never asked for. */
+const SINGLES_FIELDS = ROSTER_FIELDS.filter((field) => field !== 'team')
 
 /** The league in the dump named most like this one, or the first when none is. */
 function suggestLeague(choices: readonly string[], leagueName: string): string | null {
@@ -209,7 +213,7 @@ export function RosterImportDialog({
         description={
           step.kind === 'review'
             ? `Bowlers${step.league ? ` in ${step.league}` : ''} are matched by MBD ID. The file itself is not kept.`
-            : 'Choose which columns hold the MBD ID, the name and, if the export has them, the league and the team.'
+            : `Choose which columns hold the MBD ID, the name and, if the export has ${isSingles(season.file) ? 'it, the league' : 'them, the league and the team'}.`
         }
       />
       <TaskDialog.Body
@@ -235,7 +239,7 @@ export function RosterImportDialog({
               preview={preview.state.preview}
               mapping={preview.state.mapping}
               onChange={preview.setMapping}
-              fields={ROSTER_FIELDS}
+              fields={isSingles(season.file) ? SINGLES_FIELDS : ROSTER_FIELDS}
             />
             {leagueChoices.length > 0 ? (
               <Select

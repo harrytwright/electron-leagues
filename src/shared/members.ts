@@ -100,6 +100,13 @@ export const MIN_FORMAT = 1
 export const MAX_FORMAT = 5
 export const DEFAULT_FORMAT = 3
 
+/** One player per team is a singles league: everyone bowls for themselves and there are no teams. */
+export const SINGLES_FORMAT = 1
+
+export function isSingles(file: Pick<SeasonFile, 'format'>): boolean {
+  return file.format === SINGLES_FORMAT
+}
+
 export const feeBreakdownSchema = z.object({
   label: z.string(),
   amount: z.number().nonnegative()

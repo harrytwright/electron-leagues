@@ -1,19 +1,12 @@
 import { useRef, useState } from 'react'
 import { Button, Checkbox, Dialog, Select, Text } from '@cloudflare/kumo'
-import { DEFAULT_FORMAT, MAX_FORMAT, MIN_FORMAT } from '@shared/members'
+import { DEFAULT_FORMAT, MAX_FORMAT, MIN_FORMAT, SINGLES_FORMAT } from '@shared/members'
 import type { SeasonSyncRequest } from '@shared/season-create'
 import { useDialogTask } from '@renderer/hooks/use-dialog-task'
 import { useWriteOperation } from '@renderer/hooks/use-write-operation'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
-import { formatLabel } from '@renderer/lib/season-format'
+import { FORMAT_ITEMS } from '@renderer/lib/season-format'
 import { TaskDialog } from '../TaskDialog'
-
-const FORMAT_ITEMS = Object.fromEntries(
-  Array.from({ length: MAX_FORMAT - MIN_FORMAT + 1 }, (_, index) => {
-    const format = MIN_FORMAT + index
-    return [String(format), `${formatLabel(format)} (${format} per team)`]
-  })
-)
 
 export interface CreateRosterDialogProps {
   season: SeasonSyncRequest
@@ -82,7 +75,7 @@ export function CreateRosterDialog({
     <TaskDialog open={open} onOpenChange={task.handleOpenChange}>
       <TaskDialog.Header
         title={`Set up the ${season.seasonName} roster`}
-        description="Adds teams, players and settings to this season. Documents are left as they are."
+        description={`Adds ${format === SINGLES_FORMAT ? 'players' : 'teams, players'} and settings to this season. Documents are left as they are.`}
       />
       <TaskDialog.Body onSubmit={(event) => void submit(event)}>
         <div ref={fieldRef} tabIndex={-1} className="grid gap-4">
@@ -99,13 +92,15 @@ export function CreateRosterDialog({
           />
           {previousHasRoster ? (
             <Checkbox
-              label="Carry over teams and players from the previous season"
+              label={`Carry over ${format === SINGLES_FORMAT ? 'the players' : 'teams and players'} from the previous season`}
               checked={carryOver}
               onCheckedChange={setCarryOver}
             />
           ) : (
             <Text variant="secondary" size="sm">
-              The roster starts empty; add teams and players from the season’s tabs.
+              {format === SINGLES_FORMAT
+                ? 'The roster starts empty; add players from the season’s Players tab.'
+                : 'The roster starts empty; add teams and players from the season’s tabs.'}
             </Text>
           )}
         </div>

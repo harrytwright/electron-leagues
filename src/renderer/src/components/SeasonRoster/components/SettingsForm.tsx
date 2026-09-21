@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Button, Input, Select, Text } from '@cloudflare/kumo'
-import { MAX_FORMAT, MIN_FORMAT, type FeeBreakdown, type SeasonFile } from '@shared/members'
+import type { FeeBreakdown, SeasonFile } from '@shared/members'
 import { useKeyedState } from '@renderer/hooks/use-keyed-state'
-import { formatLabel } from '@renderer/lib/season-format'
+import { FORMAT_ITEMS } from '@renderer/lib/season-format'
 
 export interface SettingsFormProps {
   file: SeasonFile
@@ -30,13 +30,6 @@ interface Draft {
   subFee: string
   leagueSecretaryId: string
 }
-
-const FORMAT_ITEMS = Object.fromEntries(
-  Array.from({ length: MAX_FORMAT - MIN_FORMAT + 1 }, (_, index) => {
-    const format = MIN_FORMAT + index
-    return [String(format), `${formatLabel(format)} (${format} per team)`]
-  })
-)
 
 function draftFrom(file: SeasonFile): Draft {
   return {

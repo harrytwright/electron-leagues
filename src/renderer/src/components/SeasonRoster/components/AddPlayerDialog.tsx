@@ -3,6 +3,7 @@ import { Button, Dialog, Select, Text } from '@cloudflare/kumo'
 import {
   formatMemberNumber,
   memberDisplayName,
+  isSingles,
   sortTeams,
   type Member,
   type MembersSnapshot,
@@ -87,7 +88,10 @@ export function AddPlayerDialog({
       return
     }
     const ticket = task.begin()
-    const failure = await onAdd({ memberId: chosen.id, teamId: teamId === SUBS ? null : teamId })
+    const failure = await onAdd({
+      memberId: chosen.id,
+      teamId: teamId === SUBS || isSingles(season.file) ? null : teamId
+    })
     task.settle(ticket, failure ? { type: 'failed', error: failure } : { type: 'completed' })
     if (!failure && task.isCurrent(ticket)) onOpenChange(false)
   }
@@ -113,14 +117,16 @@ export function AddPlayerDialog({
             }}
           />
         </div>
-        <Select
-          label="Team"
-          value={teamId}
-          items={teamItems(season)}
-          onValueChange={(value) => {
-            if (value) setTeamId(value)
-          }}
-        />
+        {isSingles(season.file) ? null : (
+          <Select
+            label="Team"
+            value={teamId}
+            items={teamItems(season)}
+            onValueChange={(value) => {
+              if (value) setTeamId(value)
+            }}
+          />
+        )}
         {task.error ? (
           <Text id={errorId} variant="error" role="alert">
             {task.error}

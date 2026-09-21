@@ -1,7 +1,12 @@
 import { useState } from 'react'
 import { Badge, Button, DropdownMenu, Tabs, Text, useKumoToastManager } from '@cloudflare/kumo'
 import { DotsThreeIcon } from '@phosphor-icons/react'
-import { SIGN_IN_SHEET_FILE, SIGN_IN_TEMPLATE_FILE } from '@shared/members'
+import {
+  isSingles,
+  SIGN_IN_SHEET_FILE,
+  SIGN_IN_TEMPLATE_FILE,
+  type RosterSeason
+} from '@shared/members'
 import type { DirEntry, SeasonNode } from '@shared/tree'
 import { joinPathLike } from '@renderer/lib/path-basename'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
@@ -40,6 +45,11 @@ const SEASON_TABS: { value: SeasonTab; label: string }[] = [
 
 function isSeasonTab(value: string): value is SeasonTab {
   return SEASON_TABS.some((tab) => tab.value === value)
+}
+
+/** A singles season has no teams, so it has no Teams tab either. */
+function tabsFor(season: RosterSeason): { value: SeasonTab; label: string }[] {
+  return isSingles(season.file) ? SEASON_TABS.filter((tab) => tab.value !== 'teams') : SEASON_TABS
 }
 
 function seasonBadgeVariant(status: SeasonNode['status']): 'success' | 'info' {
@@ -99,7 +109,11 @@ export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): Re
     snapshot && inSeason
       ? (snapshot.seasons.find((season) => season.path === trail.currentDir) ?? null)
       : null
-  const activeSeasonTab = rosterSeason ? seasonTab : 'files'
+  const activeSeasonTab = !rosterSeason
+    ? 'files'
+    : seasonTab === 'teams' && isSingles(rosterSeason.file)
+      ? 'players'
+      : seasonTab
   // A season made before the database was on can be given a roster from its own menu.
   const canSetUpRoster = atLiveSeasonRoot && snapshot !== null && rosterSeason === null
   const seasonBefore = liveSeason
@@ -366,7 +380,7 @@ export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): Re
           {rosterSeason ? (
             <Tabs
               aria-label={`${rosterSeason.season} season`}
-              tabs={SEASON_TABS}
+              tabs={tabsFor(rosterSeason)}
               value={activeSeasonTab}
               onValueChange={(value) => {
                 if (isSeasonTab(value)) setSeasonTab(value)

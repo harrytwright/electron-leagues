@@ -498,4 +498,19 @@ describe('roster import', () => {
     expect(season.players).toHaveLength(1)
     expect(members.members[3].deleted).toBe(true)
   })
+
+  test('never makes teams for a singles season, whatever the export names', () => {
+    const singles: SeasonFile = { ...season, format: 1, teams: [] }
+    const input = rows(['20', 'Bob', 'Kay', '', 'Bees'], ['99', 'New', 'Person', '', 'Bees'])
+    const plan = planRosterImport(members.members, singles, input)
+    expect(plan.newTeams).toEqual([])
+    const result = applyRosterImport(members, singles, plan, [3], () => 'team_never')
+    expect(result.summary.teamsCreated).toBe(0)
+    expect(result.season.teams).toEqual([])
+    expect(result.season.players).toEqual([
+      { memberId: 1, teamId: 'team_a' },
+      { memberId: 2, teamId: null },
+      { memberId: 5, teamId: null }
+    ])
+  })
 })

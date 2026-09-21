@@ -103,6 +103,54 @@ it('moves a player between teams and removes them from the row menu', async () =
   )
 })
 
+it('lists a singles season by name with no team column, team moves or team choice', async () => {
+  const api = renderTab('players', {
+    file: file({
+      format: 1,
+      teams: [],
+      players: [
+        { memberId: 2, teamId: null },
+        { memberId: 1, teamId: null }
+      ]
+    })
+  })
+  const user = userEvent.setup()
+
+  expect(screen.getByText(/everyone bowls for themselves/)).toBeInTheDocument()
+  const table = screen.getByRole('table', { name: 'Players' })
+  expect(
+    within(table)
+      .getAllByRole('columnheader')
+      .map((head) => head.textContent)
+  ).toEqual(['Number', 'Player', 'Actions'])
+  expect(
+    within(table)
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => row.textContent)
+  ).toEqual(['000002Bob Kay', '000001Ann Lee'])
+
+  await user.click(screen.getByRole('button', { name: 'Actions for Ann Lee' }))
+  const menu = await screen.findByRole('menu')
+  expect(
+    within(menu)
+      .getAllByRole('menuitem')
+      .map((item) => item.textContent)
+  ).toEqual(['Remove from roster'])
+  await user.keyboard('{Escape}')
+
+  await user.click(screen.getByRole('button', { name: 'Add player…' }))
+  expect(screen.queryByLabelText(/team/i)).not.toBeInTheDocument()
+  await chooseOption(user, /member/i, '000003 Cy Dee')
+  await user.click(screen.getByRole('button', { name: 'Add player' }))
+  await waitFor(() => expect(api.saveSeason).toHaveBeenCalledOnce())
+  expect(vi.mocked(api.saveSeason).mock.calls[0][1].players).toEqual([
+    { memberId: 2, teamId: null },
+    { memberId: 1, teamId: null },
+    { memberId: 3, teamId: null }
+  ])
+})
+
 it('creates a member from the roster and adds them as a sub', async () => {
   const api = renderTab('players')
   api.saveMember = vi

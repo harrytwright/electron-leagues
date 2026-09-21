@@ -2,6 +2,7 @@ import { lstat, readFile, rename, rm, stat, utimes, writeFile } from 'node:fs/pr
 import { join } from 'node:path'
 import { parseLeagueMetaInput } from '../../shared/meta'
 import {
+  isSingles,
   memberDisplayName,
   membersFileSchema,
   resolveMember,
@@ -31,6 +32,7 @@ export type PdfRenderer = (html: string) => Promise<Buffer>
 
 const BLANK_ROWS_PER_TEAM = 2
 const BLANK_ROWS_FOR_SUBS = 4
+const BLANK_ROWS_FOR_SINGLES = 6
 
 /** One entry per value `seasonFileSchema` allows for `format`. */
 const FORMAT_NAMES = ['Singles', 'Doubles', 'Trios', 'Fours', 'Fives'] as const
@@ -65,10 +67,22 @@ ${rows.map((name) => `<tr><td>${name}</td><td></td><td></td></tr>`).join('\n')}
 </table>`
 }
 
+/** Singles bowlers are listed by surname in one block, with room for anyone who turns up. */
+function singlesBlocks(file: SeasonFile, members: readonly Member[]): string[] {
+  const sortKey = (player: Player): string => {
+    const member = resolveMember(members, player.memberId)
+    return member ? `${member.lastName} ${member.firstName}` : `\uffff${player.memberId}`
+  }
+  const names = [...file.players]
+    .sort((a, b) => sortKey(a).localeCompare(sortKey(b)))
+    .map((player) => playerName(player, members))
+  return [block('Players', names, BLANK_ROWS_FOR_SINGLES)]
+}
+
 /** The payment sheet for a league night: one block per team in lane-draw order, then subs. */
 export function renderSignInSheetHtml(input: SignInSheetInput): string {
   const { file, members } = input
-  const teams = sortTeams(file.teams)
+  const teams = isSingles(file) ? [] : sortTeams(file.teams)
   const teamBlocks = teams.map((team) =>
     block(
       `${team.teamNo}. ${team.name}`,
@@ -111,7 +125,7 @@ th { font-weight: 600; background: #f5f5f5; }
 <div class="meta">Week <span class="blank"></span> &nbsp; Date <span class="blank"></span></div>
 </header>
 <div class="columns">
-${[...teamBlocks, block('Subs', subs, BLANK_ROWS_FOR_SUBS)].join('\n')}
+${(isSingles(file) ? singlesBlocks(file, members) : [...teamBlocks, block('Subs', subs, BLANK_ROWS_FOR_SUBS)]).join('\n')}
 </div>
 </body>
 </html>

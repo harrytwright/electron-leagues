@@ -98,6 +98,34 @@ describe('renderSignInSheetHtml', () => {
     expect(html).toContain('Week <span class="blank"></span>')
     expect(html).toContain('<th>Player</th><th class="tick">Cash</th><th class="tick">Card</th>')
   })
+
+  test('lists a singles season as one block by surname, ignoring any teams left in the file', () => {
+    const html = renderSignInSheetHtml({
+      leagueName: 'Scratch Singles',
+      season: '2025-26',
+      file: { ...roster, format: 1 },
+      members
+    })
+    const captions = [...html.matchAll(/<caption>(.*?)<\/caption>/g)].map((match) => match[1])
+    expect(captions).toEqual(['Players'])
+    const names = [...html.matchAll(/<tr><td>(.*?)<\/td><td><\/td><td><\/td><\/tr>/g)].map(
+      (match) => match[1]
+    )
+    expect(names).toEqual([
+      'Cy Dee',
+      'Bob Kay',
+      'Ann Lee',
+      'Di Sub',
+      'Member 9',
+      '',
+      '',
+      '',
+      '',
+      '',
+      ''
+    ])
+    expect(html).toContain('2025-26 · Singles')
+  })
 })
 
 const fakePdf: PdfRenderer = async () => Buffer.from('%PDF-fake')

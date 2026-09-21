@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import {
+  isSingles,
   memberDisplayName,
   mintNumber,
   normaliseName,
@@ -723,11 +724,14 @@ export function planRosterImport(
     onRoster.add(member.id)
     return { row, match: { kind: 'add', memberId: member.id } }
   })
-  // A team is only made for a player who joins, so rows already on the roster name none.
+  // A team is only made for a player who joins, so rows already on the roster name none,
+  // and a singles season has no teams to make.
   const newTeams: string[] = []
   for (const { row, match } of rows) {
     const team = row.team
-    if (!team || match.kind === 'on-roster' || findTeam(season.teams, team)) continue
+    if (!team || isSingles(season) || match.kind === 'on-roster' || findTeam(season.teams, team)) {
+      continue
+    }
     if (!newTeams.some((name) => normaliseName(name, '') === normaliseName(team, ''))) {
       newTeams.push(team)
     }
@@ -784,7 +788,7 @@ export function applyRosterImport(
     failed: [...plan.invalid]
   }
   const teamFor = (name: string | undefined): string | null => {
-    if (!name) return null
+    if (!name || isSingles(season)) return null
     const existing = findTeam(season.teams, name)
     if (existing) return existing.id
     const teamNo = season.teams.reduce((max, team) => Math.max(max, team.teamNo), 0) + 1
