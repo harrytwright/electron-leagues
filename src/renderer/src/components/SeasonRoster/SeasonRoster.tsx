@@ -123,12 +123,9 @@ function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element
     >
       <div className="flex shrink-0 items-start justify-between gap-4 border-b border-kumo-line px-4 py-3">
         <div className="grid gap-0.5">
-          <div className="flex items-center gap-2">
-            <Text as="h2" variant="heading">
-              Players
-            </Text>
-            <Badge variant="secondary">{plural(total, 'player')}</Badge>
-          </div>
+          <Text as="h2" variant="heading">
+            Players
+          </Text>
           <Text variant="secondary" size="sm">
             {readOnly
               ? `This archived roster used the ${formatLabel(season.file.format)} format.`
@@ -279,6 +276,11 @@ function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element
           </Table.Body>
         </Table>
       </div>
+      <div className="min-h-9 shrink-0 border-t border-kumo-line px-4 py-2">
+        <Text variant="secondary">
+          {plural(total, 'player')}
+        </Text>
+      </div>
 
       <RosterImportDialog
         season={season}
@@ -347,12 +349,9 @@ function TeamsTab({ season }: Omit<Props, 'tab' | 'snapshot'>): React.JSX.Elemen
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-start justify-between gap-4 border-b border-kumo-line px-4 py-3">
         <div className="grid gap-0.5">
-          <div className="flex items-center gap-2">
-            <Text as="h2" variant="heading">
-              Teams
-            </Text>
-            <Badge variant="secondary">{plural(teams.length, 'team')}</Badge>
-          </div>
+          <Text as="h2" variant="heading">
+            Teams
+          </Text>
           <Text variant="secondary" size="sm">
             Team numbers control the lane draw for this season.
           </Text>
@@ -432,6 +431,9 @@ function TeamsTab({ season }: Omit<Props, 'tab' | 'snapshot'>): React.JSX.Elemen
             )}
           </Table.Body>
         </Table>
+      </div>
+      <div className="min-h-9 shrink-0 border-t border-kumo-line px-4 py-2">
+        <Text variant="secondary">{plural(teams.length, 'team')}</Text>
       </div>
 
       <TeamDialog
