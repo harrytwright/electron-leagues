@@ -194,7 +194,8 @@ describe('generateSignInSheet', () => {
     // The sheet carries the roster's stamp and leaves no partial file behind.
     const rosterInfo = await stat(join(seasonPath, 'meta.json'))
     expect(Math.round((await stat(path)).mtimeMs)).toBe(Math.floor(rosterInfo.mtimeMs))
-    expect(await readdir(seasonPath)).toEqual(['Sign-In Sheet.pdf', 'meta.json'])
+    // Windows lists names case-insensitively, so the order is not part of the check.
+    expect((await readdir(seasonPath)).sort()).toEqual(['Sign-In Sheet.pdf', 'meta.json'])
   })
 
   test('refuses a season without a roster and a symlinked output', async () => {
