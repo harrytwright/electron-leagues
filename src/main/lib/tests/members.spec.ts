@@ -229,16 +229,25 @@ describe('saveMember', () => {
     expect((await snapshotOf()).nextId).toBe(3)
   })
 
-  test('serialises overlapping saves so the second sees the first and is refused as stale', async () => {
+  test('serialises overlapping saves so whichever runs second is refused as stale', async () => {
     await enableMembers(root)
     const snapshot = await snapshotOf()
-    const [first, second] = await Promise.allSettled([
+    // The lock resolves the root's real path before queueing, so the order the two
+    // land in is not promised; that exactly one of them wins is.
+    const outcomes = await Promise.allSettled([
       saveMember(root, input({ firstName: 'First' }), snapshot.revision),
       saveMember(root, input({ firstName: 'Second' }), snapshot.revision)
     ])
-    expect(first.status).toBe('fulfilled')
-    expect(second.status).toBe('rejected')
-    expect((await snapshotOf()).members.map((member) => member.firstName)).toEqual(['First'])
+    const saved = outcomes.flatMap((outcome) =>
+      outcome.status === 'fulfilled' ? [outcome.value.firstName] : []
+    )
+    const refused = outcomes.flatMap((outcome) =>
+      outcome.status === 'rejected' ? [String(outcome.reason)] : []
+    )
+    expect(saved).toHaveLength(1)
+    expect(refused).toHaveLength(1)
+    expect(refused[0]).toContain(STALE_MESSAGE)
+    expect((await snapshotOf()).members.map((member) => member.firstName)).toEqual(saved)
   })
 
   test('never mints a number already in use when nextId has fallen behind', async () => {
