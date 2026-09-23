@@ -8,7 +8,7 @@ import {
   type RosterSeason
 } from '@shared/members'
 import type { DirEntry, SeasonNode } from '@shared/tree'
-import { joinPathLike } from '@renderer/lib/path-basename'
+import { joinPathLike, pathBasename } from '@renderer/lib/path-basename'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { plural } from '@renderer/lib/plural'
 import { revealLabel } from '@renderer/lib/os-labels'
@@ -62,8 +62,33 @@ function seasonBadgeVariant(status: SeasonNode['status']): 'success' | 'info' {
   }
 }
 
-export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): React.JSX.Element {
-  const trail = useCrumbs(league.path, onCurrentDirChange)
+export function LeagueView({
+  league,
+  onCurrentDirChange,
+  onRenamed,
+  initialNavigation
+}: Props): React.JSX.Element {
+  const initialCrumbs = initialNavigation
+    ? league.seasons
+        .filter((season) => season.path === initialNavigation.currentDir)
+        .map((season) => ({ name: season.name, path: season.path }))
+    : []
+  if (
+    initialNavigation &&
+    initialCrumbs.length === 0 &&
+    initialNavigation.currentDir
+      .replaceAll('\\', '/')
+      .startsWith(`${league.archivePath.replaceAll('\\', '/')}/`)
+  ) {
+    initialCrumbs.push(
+      { name: 'Archive', path: league.archivePath },
+      {
+        name: pathBasename(initialNavigation.currentDir),
+        path: initialNavigation.currentDir
+      }
+    )
+  }
+  const trail = useCrumbs(league.path, onCurrentDirChange, initialCrumbs)
   const [newSeason, setNewSeason] = useState(false)
   const [settingUpRoster, setSettingUpRoster] = useState(false)
   const [renaming, setRenaming] = useState(false)
@@ -72,7 +97,12 @@ export function LeagueView({ league, onCurrentDirChange, onRenamed }: Props): Re
   const [syncingTemplates, setSyncingTemplates] = useState(false)
   const [treeSort, setTreeSort] = useState<Sort>({ column: 'name', direction: 'ascending' })
   // Each season opens on its files; the tab is not carried from one season to another.
-  const [seasonTab, setSeasonTab] = useKeyedState<string, SeasonTab>(trail.currentDir, 'files')
+  const [seasonTab, setSeasonTab] = useKeyedState<string, SeasonTab>(
+    trail.currentDir,
+    initialNavigation?.currentDir === trail.currentDir
+      ? (initialNavigation.tab ?? 'files')
+      : 'files'
+  )
   const tree = useTreeFolders(trail.currentDir)
   const members = useMembers()
   const { add } = useKumoToastManager()

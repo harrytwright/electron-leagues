@@ -252,6 +252,11 @@ function LocationContent({ root }: LocationContentProps): React.JSX.Element {
                 <LeagueView
                   key={selectedLeague.path}
                   league={selectedLeague}
+                  initialNavigation={
+                    leagueNavigation?.ownerPath === selectedLeague.path
+                      ? leagueNavigation
+                      : undefined
+                  }
                   onCurrentDirChange={(currentDir) =>
                     reportLeagueDir({ ownerPath: selectedLeague.path, currentDir })
                   }

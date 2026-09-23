@@ -7,4 +7,6 @@ export interface Props {
   onCurrentDirChange: (path: string) => void
   /** The league was renamed and may now live under a different folder name. */
   onRenamed: (day: Weekday, folderName: string) => void
+  /** A destination requested before this league view mounted. */
+  initialNavigation?: { currentDir: string; tab?: 'players' | 'teams' | 'settings' }
 }

@@ -110,6 +110,79 @@ it('shows the league header with its running state', () => {
   expect(screen.getByText('No seasons yet')).toBeInTheDocument()
 })
 
+it('opens an externally requested roster destination on its requested tab', async () => {
+  const member = makeMember({ id: 1 })
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(
+      makeSnapshot({
+        nextId: 2,
+        members: [member],
+        seasons: [
+          makeRosterSeason({
+            path: `${LEAGUE_PATH}/2025-26`,
+            file: makeSeasonFile({ players: [{ memberId: 1, teamId: null }] })
+          })
+        ]
+      })
+    )
+  })
+  renderWithProviders(
+    <LeagueView
+      league={fullLeague()}
+      onCurrentDirChange={vi.fn()}
+      onRenamed={vi.fn()}
+      initialNavigation={{ currentDir: `${LEAGUE_PATH}/2025-26`, tab: 'players' }}
+    />
+  )
+
+  expect(await screen.findByRole('tab', { name: 'Players', selected: true })).toBeInTheDocument()
+  expect(await screen.findByText('Jane Doe')).toBeInTheDocument()
+})
+
+it('opens an externally requested Windows archive roster', async () => {
+  const archivePath = 'C:\\Leagues\\_archives\\Mixed triples'
+  const seasonPath = `${archivePath}\\2023-24`
+  const league = makeLeague({
+    path: 'C:\\Leagues\\monday\\Mixed triples',
+    archivePath,
+    archivedSeasons: ['2023-24']
+  })
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('C:\\Leagues'),
+    listDir: vi.fn().mockResolvedValue([]),
+    membersSnapshot: vi.fn().mockResolvedValue(
+      makeSnapshot({
+        members: [makeMember({ id: 1 })],
+        seasons: [
+          makeRosterSeason({
+            season: '2023-24',
+            path: seasonPath,
+            archived: true,
+            file: makeSeasonFile({ players: [{ memberId: 1, teamId: null }] })
+          })
+        ]
+      })
+    )
+  })
+
+  renderWithProviders(
+    <LeagueView
+      league={league}
+      onCurrentDirChange={vi.fn()}
+      onRenamed={vi.fn()}
+      initialNavigation={{ currentDir: seasonPath, tab: 'players' }}
+    />,
+    { locationKey: 'C:\\Leagues' }
+  )
+
+  expect(await screen.findByRole('tab', { name: 'Players', selected: true })).toBeInTheDocument()
+  expect(
+    screen.getByRole('navigation', { name: 'breadcrumb' }).querySelector('[aria-current="page"]')
+  ).toHaveTextContent('2023-24')
+  expect(await screen.findByText('Jane Doe')).toBeInTheDocument()
+})
+
 it('lists seasons newest-first with badges, then other files, then the archive', () => {
   const api = installMockApi()
   renderLeague()

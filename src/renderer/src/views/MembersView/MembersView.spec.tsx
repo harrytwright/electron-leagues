@@ -1,9 +1,10 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
 import { MembersView } from './index'
 import {
   makeMember,
+  makeLeague,
   makeRosterSeason,
   makeSeasonFile,
   makeSnapshot,
@@ -11,6 +12,10 @@ import {
 } from '@renderer/tests/fixtures'
 import { installMockApi, type RendererApi } from '@renderer/tests/mock-api'
 import { renderWithProviders } from '@renderer/tests/render-helpers'
+import { createMemoryWorkspaceStorage } from '@renderer/tests/memory-workspace-storage'
+import { createWorkspaceStore } from '@renderer/lib/workspace-store'
+import { createQueryClient } from '@renderer/lib/query-client'
+import { membersQueryKey } from '@renderer/queries/members'
 
 function renderMembers(): void {
   renderWithProviders(<MembersView tree={makeTree()} />)
@@ -69,11 +74,13 @@ it('lists members with numbers, contact, leagues and flags, and filters them', a
 
   const ann = await screen.findByRole('row', { name: /Ann Lee/ })
   expect(within(ann).getByText('000001')).toBeInTheDocument()
-  expect(within(ann).getByText('jane@example.org · 07700 900000')).toBeInTheDocument()
-  expect(within(ann).getByText('Mixed Triples')).toBeInTheDocument()
   const kid = screen.getByRole('row', { name: /Kid Lee/ })
   expect(within(kid).getByText('Needs details')).toBeInTheDocument()
-  expect(within(kid).getByText('Mixed Triples (sub)')).toBeInTheDocument()
+  await user.click(within(ann).getByRole('button', { name: /Ann Lee, member/ }))
+  const profile = screen.getByRole('article', { name: 'Ann Lee profile' })
+  expect(profile).toHaveTextContent('jane@example.org')
+  expect(profile).toHaveTextContent('07700 900000')
+  expect(profile).toHaveTextContent('Mixed Triples')
   expect(screen.getByRole('region', { name: 'Problems' })).toHaveTextContent(
     'monday/Pairs/2025-26 lists member 9, who is not in the master list'
   )
@@ -82,6 +89,7 @@ it('lists members with numbers, contact, leagues and flags, and filters them', a
   await user.type(screen.getByRole('searchbox', { name: 'Filter members' }), 'ann')
   expect(screen.queryByRole('row', { name: /Kid Lee/ })).not.toBeInTheDocument()
   expect(screen.getByRole('row', { name: /Ann Lee/ })).toBeInTheDocument()
+  expect(screen.getByRole('article', { name: 'Ann Lee profile' })).toBeInTheDocument()
 })
 
 it('sorts by number or name from the headers and remembers the arrangement', async () => {
@@ -109,7 +117,7 @@ it('sorts by number or name from the headers and remembers the arrangement', asy
       .map((row) => within(row).getAllByRole('cell')[1].textContent)
   expect(listed()).toEqual(['Bob Kay', 'Ann Lee', 'Zed Young'])
   expect(screen.queryByText(/Also known as/)).not.toBeInTheDocument()
-  expect(screen.getByRole('columnheader', { name: /Member/ })).toHaveAttribute(
+  expect(screen.getByRole('columnheader', { name: 'Name' })).toHaveAttribute(
     'aria-sort',
     'ascending'
   )
@@ -123,26 +131,33 @@ it('sorts by number or name from the headers and remembers the arrangement', asy
     'descending'
   )
 
-  const handle = screen.getByRole('button', { name: 'Resize the Born column' })
+  const handle = screen.getByRole('separator', { name: 'Resize member list' })
+  const workspace = screen.getByRole('region', { name: 'Member list' }).parentElement
+  if (!workspace) throw new Error('No members workspace')
+  vi.spyOn(workspace, 'getBoundingClientRect').mockReturnValue({
+    x: 0,
+    y: 0,
+    width: 1000,
+    height: 500,
+    top: 0,
+    right: 1000,
+    bottom: 500,
+    left: 0,
+    toJSON: () => ({})
+  })
   fireEvent.pointerDown(handle, { clientX: 100, pointerId: 1, buttons: 1 })
-  fireEvent.pointerMove(handle, { clientX: 160, pointerId: 1, buttons: 1 })
-  const cols = table.querySelectorAll('col')
-  expect(cols[2]).toHaveStyle({ width: '172px' })
-  // The width is drawn on every move but only remembered once the drag ends.
-  expect(localStorage.getItem('leagues:members-table:v1')).not.toContain('"born"')
-  fireEvent.pointerUp(handle, { clientX: 160, pointerId: 1, buttons: 0 })
-  expect(localStorage.getItem('leagues:members-table:v1')).toContain('"born":172')
-  // A move with no button held is a release we never saw, so it moves nothing.
-  fireEvent.pointerDown(handle, { clientX: 100, pointerId: 1, buttons: 1 })
-  fireEvent.pointerMove(handle, { clientX: 300, pointerId: 1, buttons: 0 })
-  expect(cols[2]).toHaveStyle({ width: '172px' })
+  fireEvent.pointerMove(handle, { clientX: 200, pointerId: 1, buttons: 1 })
+  fireEvent.pointerUp(handle, { clientX: 200, pointerId: 1, buttons: 0 })
+  expect(handle).toHaveAttribute('aria-valuenow', '44')
+  expect(localStorage.getItem('leagues:members-workspace:v1')).toBe('44')
   handle.focus()
-  await user.keyboard('{ArrowLeft}')
-  expect(cols[2]).toHaveStyle({ width: '156px' })
+  await user.keyboard('{ArrowRight}')
+  expect(handle).toHaveAttribute('aria-valuenow', '46')
+  expect(localStorage.getItem('leagues:members-workspace:v1')).toBe('46')
 
   expect(JSON.parse(localStorage.getItem('leagues:members-table:v1') ?? '{}')).toEqual({
     sort: { column: 'number', direction: 'descending' },
-    widths: { born: 156 }
+    widths: {}
   })
 })
 
@@ -155,6 +170,105 @@ it('explains an empty list', async () => {
 
   expect(await screen.findByText(/No members yet/)).toBeInTheDocument()
   expect(screen.getByText('0 members')).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Select a member' })).toBeInTheDocument()
+})
+
+it('opens a profile explicitly and links roster memberships to the Players tab', async () => {
+  const member = makeMember({
+    id: 1,
+    aliases: ['Janie Doe'],
+    mbdIds: ['M-12'],
+    notes: 'Left handed'
+  })
+  const league = makeLeague({ archivedSeasons: ['2023-24'] })
+  const current = makeRosterSeason({
+    file: makeSeasonFile({ players: [{ memberId: 1, teamId: null }] })
+  })
+  const archived = makeRosterSeason({
+    season: '2023-24',
+    path: '/root/_archives/Mixed triples/2023-24',
+    archived: true,
+    file: makeSeasonFile({ players: [{ memberId: 1, teamId: null }] })
+  })
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi
+      .fn()
+      .mockResolvedValue(
+        makeSnapshot({ nextId: 2, members: [member], seasons: [current, archived] })
+      )
+  })
+  const workspaceStore = createWorkspaceStore({ storage: createMemoryWorkspaceStorage() })
+  workspaceStore.getState().setRoot('/root')
+  const user = userEvent.setup()
+  renderWithProviders(
+    <MembersView tree={makeTree({ days: { ...makeTree().days, monday: [league] } })} />,
+    { workspaceStore }
+  )
+
+  expect(await screen.findByRole('heading', { name: 'Select a member' })).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: /Jane Doe, member/ }))
+  const profile = screen.getByRole('article', { name: 'Jane Doe profile' })
+  expect(profile).toHaveTextContent('Janie Doe')
+  expect(profile).toHaveTextContent('M-12')
+  expect(profile).toHaveTextContent('Left handed')
+  await user.click(within(profile).getByRole('button', { name: /Mixed triples.*2025-26/i }))
+
+  expect(workspaceStore.getState().locations['/root'].selection).toEqual({
+    kind: 'league',
+    day: 'monday',
+    folderName: 'Mixed triples'
+  })
+  expect(workspaceStore.getState().leagueNavigation).toEqual({
+    ownerPath: '/root/monday/Mixed triples',
+    currentDir: '/root/monday/Mixed triples/2025-26',
+    tab: 'players'
+  })
+})
+
+it('opens an archived Windows roster link on the Players tab', async () => {
+  const member = makeMember({ id: 1 })
+  const league = makeLeague({
+    path: 'C:\\Leagues\\monday\\Mixed triples',
+    archivePath: 'C:\\Leagues\\_archives\\Mixed triples',
+    archivedSeasons: ['2023-24']
+  })
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('C:\\Leagues'),
+    membersSnapshot: vi.fn().mockResolvedValue(
+      makeSnapshot({
+        nextId: 2,
+        members: [member],
+        seasons: [
+          makeRosterSeason({
+            season: '2023-24',
+            path: 'C:\\Leagues\\_archives\\Mixed triples\\2023-24',
+            archived: true,
+            file: makeSeasonFile({ players: [{ memberId: 1, teamId: null }] })
+          })
+        ]
+      })
+    )
+  })
+  const workspaceStore = createWorkspaceStore({ storage: createMemoryWorkspaceStorage() })
+  workspaceStore.getState().setRoot('C:\\Leagues')
+  const user = userEvent.setup()
+  renderWithProviders(
+    <MembersView
+      tree={makeTree({ root: 'C:\\Leagues', days: { ...makeTree().days, monday: [league] } })}
+    />,
+    { workspaceStore, locationKey: 'C:\\Leagues' }
+  )
+
+  await user.click(await screen.findByRole('button', { name: /Jane Doe, member/ }))
+  await user.click(screen.getByRole('button', { name: 'Previous seasons (1)' }))
+  await user.click(screen.getByRole('button', { name: /Mixed triples.*2023-24/i }))
+
+  expect(workspaceStore.getState().leagueNavigation).toEqual({
+    ownerPath: 'C:\\Leagues\\monday\\Mixed triples',
+    currentDir: 'C:\\Leagues\\_archives\\Mixed triples\\2023-24',
+    tab: 'players'
+  })
 })
 
 it('reports a failed read with a retry', async () => {
@@ -277,6 +391,94 @@ it('lets one holder of a duplicated number keep it', async () => {
   await user.click(screen.getByRole('menuitem', { name: /keep this number/i }))
 
   await waitFor(() => expect(api.renumberDuplicates).toHaveBeenCalledExactlyOnceWith(3, 1, 'rev-3'))
+})
+
+it('guards duplicate profile actions and preserves the same holder across reorder', async () => {
+  const first = makeMember({ id: 3, firstName: 'First', lastName: 'Holder' })
+  const second = makeMember({ id: 3, firstName: 'Second', lastName: 'Holder' })
+  const duplicateProblem = [{ kind: 'duplicate-number' as const, id: 3, count: 2 }]
+  const queryClient = createQueryClient()
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi
+      .fn()
+      .mockResolvedValue(makeSnapshot({ members: [first, second], problems: duplicateProblem }))
+  })
+  const user = userEvent.setup()
+  renderWithProviders(<MembersView tree={makeTree()} />, { queryClient })
+
+  await user.click(await screen.findByRole('button', { name: /Second Holder, member/ }))
+  let profile = screen.getByRole('article', { name: 'Second Holder profile' })
+  expect(within(profile).queryByRole('button', { name: 'Edit…' })).not.toBeInTheDocument()
+  expect(
+    within(profile).getByRole('button', { name: /keep this number, renumber the others/i })
+  ).toBeInTheDocument()
+
+  act(() => {
+    queryClient.setQueryData(
+      membersQueryKey('/root'),
+      makeSnapshot({
+        members: [{ ...second }, { ...first }],
+        problems: duplicateProblem
+      })
+    )
+  })
+  profile = screen.getByRole('article', { name: 'Second Holder profile' })
+  expect(profile).toHaveTextContent('000003')
+})
+
+it('clears a duplicate selection when only the other holder remains', async () => {
+  const first = makeMember({ id: 3, firstName: 'First', lastName: 'Holder' })
+  const second = makeMember({ id: 3, firstName: 'Second', lastName: 'Holder' })
+  const queryClient = createQueryClient()
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(
+      makeSnapshot({
+        members: [first, second],
+        problems: [{ kind: 'duplicate-number', id: 3, count: 2 }]
+      })
+    )
+  })
+  const user = userEvent.setup()
+  renderWithProviders(<MembersView tree={makeTree()} />, { queryClient })
+
+  await user.click(await screen.findByRole('button', { name: /Second Holder, member/ }))
+  expect(screen.getByRole('article', { name: 'Second Holder profile' })).toBeInTheDocument()
+  act(() => {
+    queryClient.setQueryData(membersQueryKey('/root'), makeSnapshot({ members: [{ ...first }] }))
+  })
+
+  expect(await screen.findByRole('heading', { name: 'Select a member' })).toBeInTheDocument()
+  expect(screen.queryByRole('article')).not.toBeInTheDocument()
+})
+
+it('clears a duplicate selection when that holder is renumbered', async () => {
+  const first = makeMember({ id: 3, firstName: 'First', lastName: 'Holder' })
+  const second = makeMember({ id: 3, firstName: 'Second', lastName: 'Holder' })
+  const queryClient = createQueryClient()
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(
+      makeSnapshot({
+        members: [first, second],
+        problems: [{ kind: 'duplicate-number', id: 3, count: 2 }]
+      })
+    )
+  })
+  const user = userEvent.setup()
+  renderWithProviders(<MembersView tree={makeTree()} />, { queryClient })
+
+  await user.click(await screen.findByRole('button', { name: /Second Holder, member/ }))
+  act(() => {
+    queryClient.setQueryData(
+      membersQueryKey('/root'),
+      makeSnapshot({ members: [{ ...first }, { ...second, id: 4 }] })
+    )
+  })
+
+  expect(await screen.findByRole('heading', { name: 'Select a member' })).toBeInTheDocument()
+  expect(screen.queryByRole('article')).not.toBeInTheDocument()
 })
 
 it('starts an MBD sync from the toolbar picker or a dropped export', async () => {
