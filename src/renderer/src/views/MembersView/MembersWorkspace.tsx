@@ -8,6 +8,7 @@ import type { MemberRow, MembersSort, MembersSortColumn } from '@renderer/lib/me
 import { useWorkspace } from '@renderer/hooks/use-workspace'
 import { IconButton } from '@renderer/components/IconButton'
 import { STATIC_ROW_CLASS } from '@renderer/components/FileBrowser/styles'
+import { MemberEditor } from './MemberEditor'
 
 const SPLIT_KEY = 'leagues:members-workspace:v1'
 const DEFAULT_LIST_PERCENT = 34
@@ -285,7 +286,13 @@ interface Props {
   onSort: (column: MembersSortColumn) => void
   onAction: (kind: 'edit' | 'merge' | 'delete', member: Member) => void
   onKeepNumber: (member: Member) => void
+  paneAction: PaneAction
+  onPaneActionChange: (action: PaneAction) => void
+  onBackgroundError: (message: string) => void
 }
+
+export type PaneAction =
+  { kind: 'new'; instance: number } | { kind: 'edit'; member: Member; instance: number } | null
 
 interface MemberIdentity {
   id: number
@@ -312,7 +319,10 @@ export function MembersWorkspace({
   sort,
   onSort,
   onAction,
-  onKeepNumber
+  onKeepNumber,
+  paneAction,
+  onPaneActionChange,
+  onBackgroundError
 }: Props): React.JSX.Element {
   const [selectedIdentity, setSelectedIdentity] = useState<MemberIdentity | null>(null)
   const [listPercent, setListPercent] = useState(loadListPercent)
@@ -364,6 +374,12 @@ export function MembersWorkspace({
       current.startPercent + ((event.clientX - current.startX) / width) * 100
     )
     if (list.current) list.current.style.width = `${current.percent}%`
+  }
+  const startMemberAction = (kind: 'edit' | 'merge' | 'delete', member: Member): void => {
+    if (kind === 'edit') {
+      setSelectedIdentity(memberIdentity(member, duplicatedIds.has(member.id)))
+    }
+    onAction(kind, member)
   }
 
   return (
@@ -432,11 +448,12 @@ export function MembersWorkspace({
                       key={key}
                       className={`${STATIC_ROW_CLASS} aria-selected:bg-kumo-brand/10 aria-selected:even:bg-kumo-brand/10`}
                       aria-selected={isSelected}
-                      onClick={() =>
+                      onClick={() => {
+                        onPaneActionChange(null)
                         setSelectedIdentity(
                           memberIdentity(row.member, duplicatedIds.has(row.member.id))
                         )
-                      }
+                      }}
                     >
                       <Table.Cell className="font-mono text-[0.9em] text-kumo-subtle">
                         {row.number}
@@ -446,11 +463,12 @@ export function MembersWorkspace({
                           type="button"
                           className="w-full truncate text-left font-medium"
                           aria-label={`${row.name}, member ${row.number}`}
-                          onClick={() =>
+                          onClick={() => {
+                            onPaneActionChange(null)
                             setSelectedIdentity(
                               memberIdentity(row.member, duplicatedIds.has(row.member.id))
                             )
-                          }
+                          }}
                         >
                           {row.name}
                         </button>
@@ -465,7 +483,7 @@ export function MembersWorkspace({
                           </Badge>
                         </span>
                       </Table.Cell>
-                      <Table.Cell>
+                      <Table.Cell onClick={(event) => event.stopPropagation()}>
                         <DropdownMenu>
                           <DropdownMenu.Trigger
                             render={
@@ -481,7 +499,10 @@ export function MembersWorkspace({
                             {duplicatedIds.has(row.member.id) ? (
                               <DropdownMenu.Item
                                 disabled={renumbering}
-                                onClick={() => onKeepNumber(row.member)}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  onKeepNumber(row.member)
+                                }}
                               >
                                 Keep this number, renumber the others
                               </DropdownMenu.Item>
@@ -489,13 +510,19 @@ export function MembersWorkspace({
                               <>
                                 <DropdownMenu.Item
                                   disabled={row.member.deleted}
-                                  onClick={() => onAction('edit', row.member)}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    startMemberAction('edit', row.member)
+                                  }}
                                 >
                                   Edit…
                                 </DropdownMenu.Item>
                                 <DropdownMenu.Item
                                   disabled={row.member.deleted}
-                                  onClick={() => onAction('merge', row.member)}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    startMemberAction('merge', row.member)
+                                  }}
                                 >
                                   Merge with…
                                 </DropdownMenu.Item>
@@ -506,7 +533,10 @@ export function MembersWorkspace({
                                 <DropdownMenu.Item
                                   variant="danger"
                                   disabled={row.member.deleted}
-                                  onClick={() => onAction('delete', row.member)}
+                                  onClick={(event) => {
+                                    event.stopPropagation()
+                                    startMemberAction('delete', row.member)
+                                  }}
                                 >
                                   Delete…
                                 </DropdownMenu.Item>
@@ -570,7 +600,21 @@ export function MembersWorkspace({
         aria-label="Member profile"
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
       >
-        {selected ? (
+        {paneAction ? (
+          <MemberEditor
+            key={paneAction.instance}
+            snapshot={snapshot}
+            root={tree.root}
+            member={paneAction.kind === 'edit' ? paneAction.member : null}
+            compact={stacked}
+            onCancel={() => onPaneActionChange(null)}
+            onSaved={(member) => {
+              setSelectedIdentity(memberIdentity(member, false))
+              onPaneActionChange(null)
+            }}
+            onBackgroundError={onBackgroundError}
+          />
+        ) : selected ? (
           <MemberProfile
             row={selected}
             snapshot={snapshot}
@@ -578,7 +622,7 @@ export function MembersWorkspace({
             compact={stacked}
             duplicatedIds={duplicatedIds}
             renumbering={renumbering}
-            onAction={onAction}
+            onAction={startMemberAction}
             onKeepNumber={onKeepNumber}
           />
         ) : (

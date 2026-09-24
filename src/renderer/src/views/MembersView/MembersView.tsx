@@ -37,15 +37,15 @@ import {
 } from '@renderer/lib/members-table-store'
 import { pathTail } from '@renderer/lib/path-basename'
 import { plural } from '@renderer/lib/plural'
+import { membersQueryKey } from '@renderer/queries/members'
 import { DeleteMemberDialog } from '@renderer/components/DeleteMemberDialog'
 import { ErrorState } from '@renderer/components/ErrorState'
 import { ExportCsvDialog } from '@renderer/components/ExportCsvDialog'
 import { MbdSyncDialog } from '@renderer/components/MbdSyncDialog'
-import { MemberDialog } from '@renderer/components/MemberDialog'
 import { MergeMemberDialog } from '@renderer/components/MergeMemberDialog'
 import { ResetMembersDialog } from '@renderer/components/ResetMembersDialog'
 import type { Props } from './interface'
-import { MembersWorkspace } from './MembersWorkspace'
+import { MembersWorkspace, type PaneAction } from './MembersWorkspace'
 
 const ALL_LEAGUES = '*'
 
@@ -114,9 +114,8 @@ function EnableMembers({ root }: { root: string }): React.JSX.Element {
 }
 
 type MemberAction =
-  | { kind: 'new' }
+  | Exclude<PaneAction, null>
   | { kind: 'reset' }
-  | { kind: 'edit'; member: Member }
   | { kind: 'merge'; member: Member }
   | { kind: 'delete'; member: Member }
 
@@ -133,10 +132,14 @@ function MembersTable({
   const [action, setAction] = useState<MemberAction | null>(null)
   const [syncPath, setSyncPath] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
+  const paneInstance = useRef(0)
   const [table, setTable] = useState<MembersTablePreference>(loadMembersTable)
   const [compact, setCompact] = useState(false)
   const tableRoot = useRef<HTMLDivElement>(null)
-  const drop = useImportDrop(setSyncPath)
+  const drop = useImportDrop((path) => {
+    setAction(null)
+    setSyncPath(path)
+  })
   const filterRef = useRef<HTMLInputElement>(null)
   const coordinator = useQueryRefresh()
   const { add } = useKumoToastManager()
@@ -170,7 +173,17 @@ function MembersTable({
   const closeAction = (open: boolean): void => {
     if (!open) setAction(null)
   }
+  const setPaneAction = (next: PaneAction): void => setAction(next)
+  const startPaneAction = (kind: 'new' | 'edit', member?: Member): void => {
+    paneInstance.current += 1
+    setAction(
+      kind === 'edit' && member
+        ? { kind, member, instance: paneInstance.current }
+        : { kind: 'new', instance: paneInstance.current }
+    )
+  }
   const pickExport = async (): Promise<void> => {
+    setAction(null)
     try {
       const path = await window.api.pickImportFile()
       if (path) setSyncPath(path)
@@ -261,7 +274,10 @@ function MembersTable({
                 </DropdownMenu.Item>
                 <DropdownMenu.Item
                   disabled={listed.length === 0}
-                  onClick={() => setExporting(true)}
+                  onClick={() => {
+                    setAction(null)
+                    setExporting(true)
+                  }}
                 >
                   Export list to CSV…
                 </DropdownMenu.Item>
@@ -281,7 +297,7 @@ function MembersTable({
             <Toolbar.Button
               type="button"
               icon={<UserPlusIcon aria-hidden size={14} />}
-              onClick={() => setAction({ kind: 'new' })}
+              onClick={() => startPaneAction('new')}
             >
               New member…
             </Toolbar.Button>
@@ -355,8 +371,17 @@ function MembersTable({
         renumbering={renumber.pending}
         sort={table.sort}
         onSort={sortBy}
-        onAction={(kind, member) => setAction({ kind, member })}
-        onKeepNumber={(member) => void keepNumber(member)}
+        onAction={(kind, member) => {
+          if (kind === 'edit') startPaneAction(kind, member)
+          else setAction({ kind, member })
+        }}
+        onKeepNumber={(member) => {
+          setAction(null)
+          void keepNumber(member)
+        }}
+        paneAction={action?.kind === 'new' || action?.kind === 'edit' ? action : null}
+        onPaneActionChange={setPaneAction}
+        onBackgroundError={(message) => add({ title: message, variant: 'error' })}
       />
       <div className="flex shrink-0 items-center justify-between border-t border-kumo-line px-4 py-1.5">
         <Text variant="secondary" size="sm">
@@ -380,13 +405,6 @@ function MembersTable({
         ) : null}
       </div>
 
-      <MemberDialog
-        snapshot={snapshot}
-        member={action?.kind === 'edit' ? action.member : null}
-        open={action?.kind === 'new' || action?.kind === 'edit'}
-        onOpenChange={closeAction}
-        onSaved={() => setAction(null)}
-      />
       <MergeMemberDialog
         snapshot={snapshot}
         member={action?.kind === 'merge' ? action.member : null}
@@ -426,9 +444,9 @@ export function MembersView({ tree }: Props): React.JSX.Element {
   const coordinator = useQueryRefresh()
 
   let body: React.JSX.Element
-  if (members.isPending) {
+  if (members.isPending && !members.data) {
     body = <div className="flex flex-1 items-center justify-center text-kumo-subtle">Loading…</div>
-  } else if (members.isError) {
+  } else if (members.isError && !members.data) {
     body = (
       <ErrorState>
         <ErrorState.Title as="h2">Couldn’t read the members files</ErrorState.Title>
@@ -455,6 +473,30 @@ export function MembersView({ tree }: Props): React.JSX.Element {
           </Text>
         </div>
       )}
+      {members.isError && members.data ? (
+        <section
+          aria-label="Members list problem"
+          aria-live="polite"
+          className="flex shrink-0 items-center justify-between gap-3 border-b border-kumo-line bg-kumo-tint px-4 py-2"
+        >
+          <div className="min-w-0">
+            <Text as="h2" variant="heading">
+              Couldn’t refresh the members list
+            </Text>
+            <Text variant="secondary" size="sm">
+              {ipcErrorMessage(members.error)}
+            </Text>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            disabled={members.isFetching}
+            onClick={() => void coordinator.refresh({ queryKey: membersQueryKey(tree.root) })}
+          >
+            {members.isFetching ? 'Retrying…' : 'Try again'}
+          </Button>
+        </section>
+      ) : null}
       {body}
     </div>
   )

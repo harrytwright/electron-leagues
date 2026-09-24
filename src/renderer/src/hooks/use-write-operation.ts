@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient, type QueryKey } from '@tanstack/react-query'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { DIR_QUERY_PREFIX } from '@renderer/queries/dir'
 import { ROOT_QUERY_KEY } from '@renderer/queries/root'
@@ -17,6 +17,7 @@ export interface WriteOperationOptions<TVariables, TResult> {
   label: (variables: TVariables) => string
   scope?: OperationScope
   write: (variables: TVariables) => Promise<TResult>
+  refreshQueryKey?: (root: string) => QueryKey
 }
 
 export interface WriteOperation<TVariables, TResult> {
@@ -40,20 +41,29 @@ export function useWriteOperation<TVariables, TResult>(
     mutationFn: async (variables) => {
       const root = queryClient.getQueryData<string | null>(ROOT_QUERY_KEY)
       const result = await optionsRef.current.write(variables)
+      const refreshQueryKey =
+        root === null || root === undefined ? undefined : optionsRef.current.refreshQueryKey?.(root)
 
       if (queryClient.getQueryData(ROOT_QUERY_KEY) !== root) {
         if (root !== null && root !== undefined) {
           await queryClient.invalidateQueries({ queryKey: treeQueryKey(root), refetchType: 'none' })
+        }
+        if (refreshQueryKey) {
+          await queryClient.invalidateQueries({ queryKey: refreshQueryKey, refetchType: 'none' })
         }
         await queryClient.invalidateQueries({ queryKey: DIR_QUERY_PREFIX, refetchType: 'none' })
         return { status: 'deferred', result }
       }
 
       try {
-        await coordinator.refresh({ throwOnError: true })
+        await coordinator.refresh({
+          queryKey: refreshQueryKey,
+          throwOnError: true
+        })
         return { status: 'refreshed', result }
       } catch (caught) {
-        return { status: 'refresh-failed', result, refreshError: ipcErrorMessage(caught) }
+        const refreshError = ipcErrorMessage(caught)
+        return { status: 'refresh-failed', result, refreshError }
       }
     },
     onMutate: (variables) => ({

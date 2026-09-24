@@ -21,6 +21,22 @@ function renderMembers(): void {
   renderWithProviders(<MembersView tree={makeTree()} />)
 }
 
+interface Deferred<T> {
+  promise: Promise<T>
+  resolve: (value: T) => void
+  reject: (reason: Error) => void
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void
+  let reject!: (reason: Error) => void
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve
+    reject = promiseReject
+  })
+  return { promise, resolve, reject }
+}
+
 it('offers to enable the database and refreshes once it is on', async () => {
   const membersSnapshot = vi
     .fn<RendererApi['membersSnapshot']>()
@@ -303,15 +319,26 @@ async function openRowMenu(user: ReturnType<typeof userEvent.setup>, name: strin
   await screen.findByRole('menu')
 }
 
-it('adds a new member from the toolbar', async () => {
+it('adds a new member in the pane and opens the saved profile through an active filter', async () => {
+  const initial = twoMembersSnapshot()
+  const saved = makeMember({ id: 3, firstName: 'Cy', lastName: 'Dee' })
+  const refreshed = makeSnapshot({
+    revision: 'rev-3',
+    nextId: 4,
+    members: [...initial.members, saved]
+  })
   const api = installMockApi({
     getRoot: vi.fn().mockResolvedValue('/root'),
-    membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot())
+    membersSnapshot: vi.fn().mockResolvedValueOnce(initial).mockResolvedValueOnce(refreshed),
+    saveMember: vi.fn().mockResolvedValue(saved)
   })
   const user = userEvent.setup()
   renderMembers()
 
+  await user.type(await screen.findByRole('searchbox', { name: 'Filter members' }), 'Ann')
   await user.click(await screen.findByRole('button', { name: 'New member…' }))
+  expect(screen.getByRole('form', { name: 'New member' })).toBeInTheDocument()
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   await user.type(screen.getByLabelText(/first name/i), 'Cy')
   await user.type(screen.getByLabelText(/last name/i), 'Dee')
   await user.click(screen.getByRole('button', { name: 'Add member' }))
@@ -321,7 +348,203 @@ it('adds a new member from the toolbar', async () => {
     expect.objectContaining({ firstName: 'Cy', lastName: 'Dee' }),
     'rev-2'
   )
-  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  expect(await screen.findByRole('article', { name: 'Cy Dee profile' })).toBeInTheDocument()
+  expect(screen.queryByRole('row', { name: /Cy Dee/ })).not.toBeInTheDocument()
+})
+
+it('cancels new and edit forms back to the appropriate profile', async () => {
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot())
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: /Ann Lee, member/ }))
+  await user.click(screen.getByRole('button', { name: 'New member…' }))
+  await user.type(screen.getByLabelText(/first name/i), 'Unsaved')
+  await openRowMenu(user, 'Bob Kay')
+  expect(screen.getByRole('form', { name: 'New member' })).toBeInTheDocument()
+  expect(screen.getByLabelText(/first name/i)).toHaveValue('Unsaved')
+  await user.keyboard('{Escape}')
+  await user.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(screen.getByRole('article', { name: 'Ann Lee profile' })).toBeInTheDocument()
+
+  await user.click(within(screen.getByRole('article')).getByRole('button', { name: 'Edit…' }))
+  await user.clear(screen.getByLabelText(/first name/i))
+  await user.type(screen.getByLabelText(/first name/i), 'Changed')
+  await user.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(screen.getByRole('article', { name: 'Ann Lee profile' })).toBeInTheDocument()
+})
+
+it('saves an edit against the revision captured when the form opened', async () => {
+  const initial = twoMembersSnapshot()
+  const refreshedMember = makeMember({ id: 1, firstName: 'Ann', lastName: 'Li' })
+  const refreshed = makeSnapshot({
+    revision: 'rev-4',
+    nextId: 3,
+    members: [refreshedMember, initial.members[1]]
+  })
+  const queryClient = createQueryClient()
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValueOnce(initial).mockResolvedValueOnce(refreshed),
+    saveMember: vi.fn().mockResolvedValue(refreshedMember)
+  })
+  const user = userEvent.setup()
+  renderWithProviders(<MembersView tree={makeTree()} />, { queryClient })
+
+  await user.click(await screen.findByRole('button', { name: /Ann Lee, member/ }))
+  await user.click(within(screen.getByRole('article')).getByRole('button', { name: 'Edit…' }))
+  act(() => {
+    queryClient.setQueryData(membersQueryKey('/root'), {
+      ...initial,
+      revision: 'rev-3'
+    })
+  })
+  await user.clear(screen.getByLabelText(/last name/i))
+  await user.type(screen.getByLabelText(/last name/i), 'Li')
+  await user.click(screen.getByRole('button', { name: 'Save member' }))
+
+  await waitFor(() => expect(api.saveMember).toHaveBeenCalledOnce())
+  expect(api.saveMember).toHaveBeenCalledWith(expect.objectContaining({ lastName: 'Li' }), 'rev-2')
+})
+
+it('keeps a failed write draft and discards it when another row is selected', async () => {
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot()),
+    saveMember: vi.fn().mockRejectedValue(new Error('Revision conflict'))
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: 'New member…' }))
+  await user.type(screen.getByLabelText(/first name/i), 'Draft')
+  await user.type(screen.getByLabelText(/last name/i), 'Member')
+  await user.click(screen.getByRole('button', { name: 'Add member' }))
+
+  const error = await screen.findByRole('alert')
+  expect(error).toHaveTextContent('Revision conflict')
+  expect(error).toHaveFocus()
+  expect(screen.getByLabelText(/first name/i)).toHaveValue('Draft')
+  await user.click(screen.getByRole('button', { name: /Bob Kay, member/ }))
+  expect(screen.getByRole('article', { name: 'Bob Kay profile' })).toBeInTheDocument()
+  expect(api.saveMember).toHaveBeenCalledOnce()
+})
+
+it('retries only the refresh after a successful write', async () => {
+  const initial = twoMembersSnapshot()
+  const saved = makeMember({ id: 3, firstName: 'Cy', lastName: 'Dee' })
+  const membersSnapshot = vi
+    .fn<RendererApi['membersSnapshot']>()
+    .mockResolvedValueOnce(initial)
+    .mockRejectedValueOnce(new Error('Scan failed'))
+    .mockResolvedValueOnce(
+      makeSnapshot({ revision: 'rev-3', nextId: 4, members: [...initial.members, saved] })
+    )
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot,
+    saveMember: vi.fn().mockResolvedValue(saved)
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: 'New member…' }))
+  await user.type(screen.getByLabelText(/first name/i), 'Cy')
+  await user.type(screen.getByLabelText(/last name/i), 'Dee')
+  await user.click(screen.getByRole('button', { name: 'Add member' }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Saved Cy Dee, but the list could not be refreshed: Scan failed'
+  )
+  expect(screen.getByRole('region', { name: 'Members list problem' })).toHaveTextContent(
+    'Scan failed'
+  )
+  expect(screen.getByRole('button', { name: 'Add member' })).toBeDisabled()
+  await user.click(screen.getByRole('button', { name: 'Retry refresh' }))
+  expect(await screen.findByRole('article', { name: 'Cy Dee profile' })).toBeInTheDocument()
+  expect(api.saveMember).toHaveBeenCalledOnce()
+})
+
+it('keeps a cached-members warning after closing a completed form', async () => {
+  const initial = twoMembersSnapshot()
+  const saved = makeMember({ id: 3, firstName: 'Cy', lastName: 'Dee' })
+  const membersSnapshot = vi
+    .fn<RendererApi['membersSnapshot']>()
+    .mockResolvedValueOnce(initial)
+    .mockRejectedValueOnce(new Error('Members scan failed'))
+    .mockResolvedValueOnce(
+      makeSnapshot({ revision: 'rev-3', nextId: 4, members: [...initial.members, saved] })
+    )
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot,
+    saveMember: vi.fn().mockResolvedValue(saved)
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: 'New member…' }))
+  await user.type(screen.getByLabelText(/first name/i), 'Cy')
+  await user.type(screen.getByLabelText(/last name/i), 'Dee')
+  await user.click(screen.getByRole('button', { name: 'Add member' }))
+  await user.click(await screen.findByRole('button', { name: 'Close' }))
+
+  const warning = screen.getByRole('region', { name: 'Members list problem' })
+  expect(warning).toHaveTextContent('Members scan failed')
+  await user.click(within(warning).getByRole('button', { name: 'Try again' }))
+  await waitFor(() => expect(warning).not.toBeInTheDocument())
+  expect(api.saveMember).toHaveBeenCalledOnce()
+})
+
+it('does not let an in-flight save replace a newer row selection', async () => {
+  const initial = twoMembersSnapshot()
+  const save = deferred<ReturnType<typeof makeMember>>()
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(initial),
+    saveMember: vi.fn(() => save.promise)
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: 'New member…' }))
+  await user.type(screen.getByLabelText(/first name/i), 'Cy')
+  await user.type(screen.getByLabelText(/last name/i), 'Dee')
+  await user.click(screen.getByRole('button', { name: 'Add member' }))
+  await waitFor(() => expect(api.saveMember).toHaveBeenCalledOnce())
+  await user.click(screen.getByRole('button', { name: /Bob Kay, member/ }))
+  expect(screen.getByRole('article', { name: 'Bob Kay profile' })).toBeInTheDocument()
+
+  await act(async () => save.resolve(makeMember({ id: 3, firstName: 'Cy', lastName: 'Dee' })))
+  await waitFor(() => expect(api.saveMember).toHaveBeenCalledOnce())
+  expect(screen.getByRole('article', { name: 'Bob Kay profile' })).toBeInTheDocument()
+})
+
+it('reports a late save failure without replacing the newer selection', async () => {
+  const save = deferred<ReturnType<typeof makeMember>>()
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot()),
+    saveMember: vi.fn(() => save.promise)
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: 'New member…' }))
+  await user.type(screen.getByLabelText(/first name/i), 'Cy')
+  await user.type(screen.getByLabelText(/last name/i), 'Dee')
+  await user.click(screen.getByRole('button', { name: 'Add member' }))
+  await waitFor(() => expect(api.saveMember).toHaveBeenCalledOnce())
+  await user.click(screen.getByRole('button', { name: /Bob Kay, member/ }))
+  await act(async () => save.reject(new Error('Disk is locked')))
+
+  expect(
+    await screen.findByText(/Couldn’t save Cy Dee in \/root: Disk is locked/)
+  ).toBeInTheDocument()
+  expect(screen.getByRole('article', { name: 'Bob Kay profile' })).toBeInTheDocument()
 })
 
 it('merges two members from the row menu, keeping whichever record the desk picks', async () => {
@@ -387,9 +610,12 @@ it('lets one holder of a duplicated number keep it', async () => {
   const user = userEvent.setup()
   renderMembers()
 
+  await user.click(await screen.findByRole('button', { name: 'New member…' }))
+  await user.type(screen.getByLabelText(/first name/i), 'Unsaved')
   await openRowMenu(user, 'Second Holder')
   await user.click(screen.getByRole('menuitem', { name: /keep this number/i }))
 
+  expect(screen.queryByRole('form', { name: 'New member' })).not.toBeInTheDocument()
   await waitFor(() => expect(api.renumberDuplicates).toHaveBeenCalledExactlyOnceWith(3, 1, 'rev-3'))
 })
 

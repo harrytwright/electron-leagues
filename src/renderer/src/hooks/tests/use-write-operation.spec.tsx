@@ -152,12 +152,15 @@ it('defers refresh after a root change and marks the captured caches stale', asy
   const api = installMockApi()
   const client = readyClient()
   const directoryKey = dirQueryKey('/root/_shared')
+  const resourceKey = ['resource', '/root'] as const
   client.setQueryData(directoryKey, [makeDirEntry()])
+  client.setQueryData(resourceKey, 'old')
   const { result } = renderHookWithProviders(
     () =>
       useWriteOperation({
         label: () => 'Writing',
-        write: () => write.promise
+        write: () => write.promise,
+        refreshQueryKey: (root) => ['resource', root]
       }),
     { queryClient: client }
   )
@@ -177,6 +180,7 @@ it('defers refresh after a root change and marks the captured caches stale', asy
   expect(outcome).toEqual({ status: 'deferred', result: 'written' })
   expect(client.getQueryState(treeQueryKey('/root'))?.isInvalidated).toBe(true)
   expect(client.getQueryState(directoryKey)?.isInvalidated).toBe(true)
+  expect(client.getQueryState(resourceKey)?.isInvalidated).toBe(true)
   expect(client.getQueryState(DIR_QUERY_PREFIX)).toBeUndefined()
   expect(api.scan).not.toHaveBeenCalled()
 })

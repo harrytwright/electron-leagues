@@ -1,104 +1,13 @@
 import { useId, useRef, useState } from 'react'
-import { Button, Checkbox, Dialog, Input, Select, Text, Textarea } from '@cloudflare/kumo'
-import {
-  GENDERS,
-  isUnder18,
-  memberDisplayName,
-  type Gender,
-  type Member,
-  type MemberInput
-} from '@shared/members'
+import { Button, Dialog, Text } from '@cloudflare/kumo'
+import { memberDisplayName, type MemberInput } from '@shared/members'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
-import { sentenceCase } from '@renderer/lib/sentence-case'
 import { useDialogTask } from '@renderer/hooks/use-dialog-task'
 import { useQueryRefresh } from '@renderer/hooks/use-query-refresh'
 import { useWriteOperation } from '@renderer/hooks/use-write-operation'
-import { DateField } from '../DateField'
+import { MemberForm, memberDraftFrom, memberInputFromDraft, type MemberDraft } from '../MemberForm'
 import { TaskDialog } from '../TaskDialog'
 import type { Props } from './interface'
-
-const NO_GENDER = 'unset'
-
-/** Nobody bowling today was born more than a century ago; the calendar's year list stops there. */
-const OLDEST_BIRTH_YEARS = 100
-/** A calendar with no date yet opens on a plausible adult rather than on a newborn. */
-const TYPICAL_AGE = 30
-
-const GENDER_ITEMS = {
-  [NO_GENDER]: 'Not recorded',
-  ...Object.fromEntries(GENDERS.map((gender) => [gender, sentenceCase(gender)]))
-}
-
-function isGender(value: string): value is Gender {
-  return GENDERS.some((gender) => gender === value)
-}
-
-interface Draft {
-  firstName: string
-  lastName: string
-  dob: string
-  gender: string
-  email: string
-  phone: string
-  guardianContact: string
-  marketing: boolean
-  notes: string
-  mbdIds: string
-  aliases: string
-}
-
-function draftFrom(member: Member | null): Draft {
-  return {
-    firstName: member?.firstName ?? '',
-    lastName: member?.lastName ?? '',
-    dob: member?.dob ?? '',
-    gender: member?.gender ?? NO_GENDER,
-    email: member?.email ?? '',
-    phone: member?.phone ?? '',
-    guardianContact: member?.guardianContact ?? '',
-    marketing: member?.marketing ?? true,
-    notes: member?.notes ?? '',
-    mbdIds: member?.mbdIds.join(', ') ?? '',
-    aliases: member?.aliases.join(', ') ?? ''
-  }
-}
-
-function list(value: string): string[] {
-  return value
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
-
-function optional(value: string): string | undefined {
-  const trimmed = value.trim()
-  return trimmed ? trimmed : undefined
-}
-
-/** What main receives; the age rules run again there, so this only shapes the fields. */
-function memberInputFromDraft(draft: Draft, member: Member | null): MemberInput {
-  const input: MemberInput = {
-    firstName: draft.firstName.trim(),
-    lastName: draft.lastName.trim(),
-    mbdIds: list(draft.mbdIds),
-    aliases: list(draft.aliases),
-    marketing: draft.marketing
-  }
-  if (member) input.id = member.id
-  if (member?.cardIssued) input.cardIssued = member.cardIssued
-  const dob = optional(draft.dob)
-  if (dob) input.dob = dob
-  if (isGender(draft.gender)) input.gender = draft.gender
-  const email = optional(draft.email)
-  if (email) input.email = email
-  const phone = optional(draft.phone)
-  if (phone) input.phone = phone
-  const guardianContact = optional(draft.guardianContact)
-  if (guardianContact) input.guardianContact = guardianContact
-  const notes = optional(draft.notes)
-  if (notes) input.notes = notes
-  return input
-}
 
 export function MemberDialog({
   snapshot,
@@ -107,9 +16,13 @@ export function MemberDialog({
   onOpenChange,
   onSaved
 }: Props): React.JSX.Element {
-  const [draft, setDraft] = useState<Draft>(() => draftFrom(member))
+  const [draft, setDraft] = useState<MemberDraft>(() => memberDraftFrom(member))
   const [wasOpen, setWasOpen] = useState(open)
   const [editedMemberId, setEditedMemberId] = useState(member?.id)
+  const [invalidNames, setInvalidNames] = useState<{
+    firstName: boolean
+    lastName: boolean
+  } | null>(null)
   const firstNameRef = useRef<HTMLInputElement>(null)
   const errorId = useId()
   const coordinator = useQueryRefresh()
@@ -126,13 +39,24 @@ export function MemberDialog({
   if (wasOpen !== open || editedMemberId !== member?.id) {
     setWasOpen(open)
     setEditedMemberId(member?.id)
-    if (open) setDraft(draftFrom(member))
+    if (open) {
+      setDraft(memberDraftFrom(member))
+      setInvalidNames(null)
+    }
   }
 
-  const junior = draft.dob !== '' && isUnder18({ dob: draft.dob }, new Date())
-  const thisYear = new Date().getFullYear()
-  const update = <Key extends keyof Draft>(key: Key, value: Draft[Key]): void => {
+  const update = <Key extends keyof MemberDraft>(key: Key, value: MemberDraft[Key]): void => {
     setDraft((current) => ({ ...current, [key]: value }))
+    if (key === 'firstName' || key === 'lastName') {
+      const nextInvalidNames = invalidNames
+        ? { ...invalidNames, [key]: !String(value).trim() }
+        : null
+      setInvalidNames(nextInvalidNames)
+      if (task.error && (!nextInvalidNames || !Object.values(nextInvalidNames).includes(true))) {
+        task.edited()
+      }
+      return
+    }
     if (task.error) task.edited()
   }
 
@@ -140,9 +64,14 @@ export function MemberDialog({
     event.preventDefault()
     if (task.busy) return
     if (!draft.firstName.trim() || !draft.lastName.trim()) {
+      setInvalidNames({
+        firstName: !draft.firstName.trim(),
+        lastName: !draft.lastName.trim()
+      })
       task.reject('A member needs a first and last name')
       return
     }
+    setInvalidNames(null)
     const ticket = task.begin()
     try {
       const outcome = await operation.run(memberInputFromDraft(draft, member))
@@ -174,121 +103,13 @@ export function MemberDialog({
       />
 
       <TaskDialog.Body onSubmit={(event) => void submit(event)}>
-        <fieldset className="grid gap-3">
-          <legend className="mb-2 text-sm font-semibold">Personal details</legend>
-          <div className="grid grid-cols-2 gap-3">
-            <Input
-              ref={firstNameRef}
-              label="First name"
-              name="first-name"
-              autoComplete="off"
-              autoFocus
-              value={draft.firstName}
-              aria-invalid={task.error ? true : undefined}
-              aria-describedby={task.error ? errorId : undefined}
-              onChange={(event) => update('firstName', event.target.value)}
-            />
-            <Input
-              label="Last name"
-              name="last-name"
-              autoComplete="off"
-              value={draft.lastName}
-              onChange={(event) => update('lastName', event.target.value)}
-            />
-            <DateField
-              label="Date of birth"
-              name="dob"
-              value={draft.dob}
-              onChange={(value) => update('dob', value)}
-              fromYear={thisYear - OLDEST_BIRTH_YEARS}
-              toYear={thisYear}
-              openAt={new Date(thisYear - TYPICAL_AGE, 0)}
-            />
-            <Select
-              label="Gender"
-              value={draft.gender}
-              items={GENDER_ITEMS}
-              onValueChange={(value) => {
-                if (value) update('gender', value)
-              }}
-            />
-          </div>
-        </fieldset>
-
-        <fieldset className="grid gap-3 border-t border-kumo-line pt-4">
-          <legend className="px-1 text-sm font-semibold">Contact details</legend>
-          {junior ? (
-            <div className="grid gap-1.5">
-              <Input
-                label="Parent or guardian contact"
-                name="guardian-contact"
-                autoComplete="off"
-                value={draft.guardianContact}
-                onChange={(event) => update('guardianContact', event.target.value)}
-              />
-              <Text variant="secondary" size="sm">
-                For under-18s, keep the parent or guardian’s details here rather than the young
-                person’s own contact details.
-              </Text>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-3">
-              <Input
-                label="Email"
-                name="email"
-                type="email"
-                autoComplete="off"
-                value={draft.email}
-                onChange={(event) => update('email', event.target.value)}
-              />
-              <Input
-                label="Phone"
-                name="phone"
-                type="tel"
-                autoComplete="off"
-                value={draft.phone}
-                onChange={(event) => update('phone', event.target.value)}
-              />
-            </div>
-          )}
-          <Checkbox
-            label={
-              junior
-                ? 'Send youth updates to the parent or guardian'
-                : 'Send marketing and club updates'
-            }
-            checked={draft.marketing}
-            onCheckedChange={(checked) => update('marketing', checked)}
-          />
-        </fieldset>
-
-        <fieldset className="grid gap-3 border-t border-kumo-line pt-4">
-          <legend className="px-1 text-sm font-semibold">Record keeping</legend>
-          <Textarea
-            label="Notes"
-            name="notes"
-            value={draft.notes}
-            onChange={(event) => update('notes', event.target.value)}
-          />
-          <div className="grid grid-cols-2 gap-3">
-            <Input
-              label="MBD IDs"
-              name="mbd-ids"
-              autoComplete="off"
-              description="Separate multiple IDs with commas"
-              value={draft.mbdIds}
-              onChange={(event) => update('mbdIds', event.target.value)}
-            />
-            <Input
-              label="Other names or spellings"
-              name="aliases"
-              autoComplete="off"
-              description="Used when searching; separate with commas"
-              value={draft.aliases}
-              onChange={(event) => update('aliases', event.target.value)}
-            />
-          </div>
-        </fieldset>
+        <MemberForm
+          ref={firstNameRef}
+          draft={draft}
+          errorId={errorId}
+          invalidNames={invalidNames ?? undefined}
+          onChange={update}
+        />
 
         {task.error ? (
           <Text id={errorId} variant="error" role="alert">

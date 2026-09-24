@@ -123,14 +123,15 @@ handle/report partial filesystem failures. A root lock alone does not make sever
 
 Each phase uses Sol for code implementation. The orchestrator reviews scope and verification,
 requests an independent cold review, routes valid findings back for fixes, then commits after
-all required checks pass. Each cold review uses a fresh Claude CLI process with model `fable`,
-without the implementer's conversation. Sol runs through Codex's agent tool. The repository's
+all required checks pass. Phase 1 used Claude Fable; subsequent cold reviews use Claude Opus 5.5,
+without the implementer's conversation. Each review receives a bounded source packet, has no
+tools and retains a JSON usage receipt. Sol runs through Codex's agent tool. The repository's
 `.claude/skills/codex-first/SKILL.md` explicitly skips its CLI delegation route in a Codex session.
 
 | Phase | Deliverable                                                                                                                                                  | Status   |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
 | 1     | Compact selectable list, resizable/stacked layout, readable profile and roster links. Existing editing/merge dialogs remain transitional until their phases. | Complete |
-| 2     | Shared member form and creation/editing in the detail pane, including save/refresh behaviour and navigation discard.                                         | Pending  |
+| 2     | Shared member form and creation/editing in the detail pane, including save/refresh behaviour and navigation discard.                                         | Complete |
 | 3     | Validated group merge contract, shared preview rules and main-process roster/file handling. Keep old callers working until phase 4.                          | Pending  |
 | 4     | Merge selection mode, editable comparison, final integration, responsive/keyboard visual verification and removal of obsolete Members dialog paths.          | Pending  |
 
@@ -204,3 +205,33 @@ navigation to Players. Windows archive navigation has regression coverage. The c
 layout gives the list 88px and profile 164px at minimum size with the sidebar and problem banner.
 A second Fable invocation returned usage-credit exhaustion, so it produced no further verdict.
 The first Fable review and its required fixes are complete.
+
+Phase 1 committed as `a4d38c3` (`feat: add the members profile workspace`).
+
+Phase 2 adds a shared `MemberForm`, a keyed `MemberEditor` and explicit pane actions. SeasonRoster
+retains its dialog wrapper. The editor captures the opening revision, discards drafts on navigation
+and prevents late saves from changing a newer selection. A completed write with failed refresh
+freezes the saved form and offers refresh-only recovery. Cached parent views stay mounted during
+background read failures so an active draft survives.
+
+The phase 2 Opus 5.5 review identified three required fixes: expose cached members read failures,
+notify the user when a save fails after its editor closes and associate name validation with the
+correct fields. All three are resolved. Menu triggers preserve drafts; renumbering discards them.
+The review is retained in `.temp/members-workspace/phase2-opus-review.md`; do not rerun it on resume.
+
+Browser verification before those final fixes covered creation under an excluding search filter,
+refresh-only recovery without a second save, navigation during a held save and visible focused
+errors after scrolling. The editor remained bounded at 800 × 500 in dark mode. The final browser check confirmed that
+closing a saved form leaves its refresh warning visible and retrying reads the saved member
+without a second write. Final checks passed: format, 90 test files with 882 tests, type checking,
+lint and diff checking. Lint reports only the existing anti-slop module-type warning.
+
+The user requires conservative usage monitoring and a saved checkpoint before either model's
+allowance runs out. Read `.temp/members-workspace/check-quota.py` output before and after agent
+work, reviews and validation. Keep room for the commit and handoff before starting another phase.
+Review receipts and the local usage policy are in the ignored `.temp/members-workspace` directory.
+
+Temporary browser fixture: `/tmp/leagues-members-visual/launch.sh`, port 4179. It renders the real
+App with an in-memory API, explicit Tailwind source scanning and `window.__membersHarness` controls
+for failed saves, persistent failed refresh and held saves. No real league data is written. These
+temporary files may disappear between sessions; do not rely on them as the only handoff.

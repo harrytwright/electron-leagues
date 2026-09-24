@@ -118,11 +118,17 @@ it('refuses a member without both names and shows main’s error inline', async 
 
   await user.click(screen.getByRole('button', { name: 'Add member' }))
   expect(screen.getByRole('alert')).toHaveTextContent('A member needs a first and last name')
+  expect(screen.getByLabelText(/first name/i)).toHaveAttribute('aria-invalid', 'true')
+  expect(screen.getByLabelText(/last name/i)).toHaveAttribute('aria-invalid', 'true')
   expect(api.saveMember).not.toHaveBeenCalled()
 
   await user.type(screen.getByLabelText(/first name/i), 'Ann')
+  expect(screen.getByLabelText(/first name/i)).not.toHaveAttribute('aria-invalid')
+  expect(screen.getByLabelText(/last name/i)).toHaveAttribute('aria-invalid', 'true')
   await user.type(screen.getByLabelText(/last name/i), 'Lee')
   await user.click(screen.getByRole('button', { name: 'Add member' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('That file changed on disk')
+  expect(screen.getByLabelText(/first name/i)).not.toHaveAttribute('aria-invalid')
+  expect(screen.getByLabelText(/last name/i)).not.toHaveAttribute('aria-invalid')
   expect(screen.getByRole('dialog')).toBeInTheDocument()
 })

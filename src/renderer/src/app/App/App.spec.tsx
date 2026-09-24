@@ -22,7 +22,7 @@ import {
 import { createLocalStorageWorkspaceStorage } from '@renderer/tests/local-storage-workspace-storage'
 import { parseWorkspaceEnvelope } from '@renderer/tests/workspace-envelope'
 import { trashLabel } from '@renderer/lib/os-labels'
-import { makeDirEntry, makeLeague, makeTree } from '@renderer/tests/fixtures'
+import { makeDirEntry, makeLeague, makeSnapshot, makeTree } from '@renderer/tests/fixtures'
 import {
   emitAppCommand,
   emitTreeChanged,
@@ -485,6 +485,30 @@ it('shows one scan error when a league overview refresh fails', async () => {
     await screen.findByRole('heading', { name: 'Couldn’t read the leagues folder' })
   ).toBeInTheDocument()
   expect(screen.getAllByText('Scan failed')).toHaveLength(1)
+})
+
+it('keeps a member draft mounted when a background scan fails', async () => {
+  const scan = vi
+    .fn<RendererApi['scan']>()
+    .mockResolvedValueOnce(makeTree())
+    .mockRejectedValueOnce(new Error('Scan failed'))
+  installScannedRoot('/root', {
+    scan,
+    membersSnapshot: vi.fn().mockResolvedValue(makeSnapshot())
+  })
+  const user = userEvent.setup()
+  renderApp()
+
+  await user.click(await screen.findByRole('button', { name: 'Members' }))
+  await user.click(await screen.findByRole('button', { name: 'New member…' }))
+  await user.type(screen.getByLabelText(/first name/i), 'Draft')
+  act(() => emitTreeChanged())
+
+  expect(
+    await screen.findByRole('heading', { name: 'Couldn’t read the leagues folder' })
+  ).toBeInTheDocument()
+  expect(screen.getByRole('form', { name: 'New member' })).toBeInTheDocument()
+  expect(screen.getByLabelText(/first name/i)).toHaveValue('Draft')
 })
 
 it('keeps the completed-delete context when its refresh replaces the dialog with ScanError', async () => {

@@ -111,6 +111,42 @@ function ScanError({ message, onRetry, onChooseAnother }: ScanErrorProps): React
   )
 }
 
+function ScanWarning({ message, onRetry, onChooseAnother }: ScanErrorProps): React.JSX.Element {
+  const [busy, setBusy] = useState(false)
+  const run = async (action: () => Promise<void>): Promise<void> => {
+    setBusy(true)
+    try {
+      await action()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section
+      aria-label="Leagues folder problem"
+      className="flex shrink-0 items-center justify-between gap-3 border-b border-kumo-line bg-kumo-tint px-4 py-2"
+    >
+      <div className="min-w-0">
+        <Text as="h2" variant="heading">
+          Couldn’t read the leagues folder
+        </Text>
+        <Text variant="secondary" size="sm">
+          {message}
+        </Text>
+      </div>
+      <div className="flex shrink-0 gap-2">
+        <Button size="sm" loading={busy} disabled={busy} onClick={() => void run(onRetry)}>
+          {busy ? 'Retrying…' : 'Try again'}
+        </Button>
+        <Button size="sm" disabled={busy} onClick={() => void run(onChooseAnother)}>
+          Choose another folder
+        </Button>
+      </div>
+    </section>
+  )
+}
+
 function AppContent(): React.JSX.Element {
   const root = useQuery(rootQuery)
   return (
@@ -202,7 +238,7 @@ function LocationContent({ root }: LocationContentProps): React.JSX.Element {
     )
   } else if (root.data === null) {
     content = <FirstRun />
-  } else if (tree.isError) {
+  } else if (tree.isError && !tree.data) {
     content = (
       <ScanError
         message={ipcErrorMessage(tree.error)}
@@ -239,6 +275,13 @@ function LocationContent({ root }: LocationContentProps): React.JSX.Element {
           isHome={effectiveSelection.kind === 'home'}
           onHome={() => select(HOME)}
         />
+        {tree.isError ? (
+          <ScanWarning
+            message={ipcErrorMessage(tree.error)}
+            onRetry={() => coordinator.refresh({ queryKey: treeQueryKey(rootPath ?? '') })}
+            onChooseAnother={locationOperation.forget}
+          />
+        ) : null}
         <div className="flex min-h-0 w-full flex-1">
           <Sidebar
             key={scanned.root}
@@ -285,7 +328,7 @@ function LocationContent({ root }: LocationContentProps): React.JSX.Element {
       <AppCommandHandlers />
       {content}
       <ApplicationActivity
-        visible={root.isPending || root.isError || root.data === null || !tree.data || tree.isError}
+        visible={root.isPending || root.isError || root.data === null || !tree.data}
       />
     </>
   )
