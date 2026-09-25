@@ -36,7 +36,24 @@ describe('invoke definitions', () => {
     ['zipArchive', ['Pairs League', ['2024-25', '2025-26']]],
     ['openFile', ['/leagues/Rules.docx']],
     ['revealFile', ['/leagues/Rules.docx']],
-    ['importFiles', ['/leagues/monday/Pairs', ['/tmp/a.csv']]]
+    ['importFiles', ['/leagues/monday/Pairs', ['/tmp/a.csv']]],
+    [
+      'mergeMemberGroup',
+      [
+        {
+          sourceIds: [2, 1],
+          mainId: 1,
+          result: {
+            firstName: 'Anne',
+            lastName: 'Bowler',
+            mbdIds: [],
+            aliases: [],
+            marketing: true
+          },
+          expectedRevision: 'r1'
+        }
+      ]
+    ]
   ] satisfies Array<[InvokeName, IpcTestValue[]]>)('parses valid %s arguments', (name, args) => {
     expect(invokeDefinitions[name].args.safeParse(args).success).toBe(true)
   })
@@ -61,7 +78,8 @@ describe('invoke definitions', () => {
     ['openFile', [{}], 'Invalid file path'],
     ['revealFile', [], 'Invalid file path'],
     ['pickFiles', [null], 'Invalid file picker request'],
-    ['importFiles', ['/leagues', 'a.csv'], 'Invalid file import request']
+    ['importFiles', ['/leagues', 'a.csv'], 'Invalid file import request'],
+    ['mergeMemberGroup', [{ sourceIds: [1], mainId: 1 }], 'Invalid group merge request']
   ] satisfies Array<[InvokeName, IpcTestValue[], string]>)(
     'uses the declared failure message for an invalid %s shape',
     (name, args, expected) => {

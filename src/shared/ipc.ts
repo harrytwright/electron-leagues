@@ -12,6 +12,7 @@ import {
   type SyncSummary
 } from './imports'
 import { memberInputSchema, seasonFileSchema, type Member, type MembersSnapshot } from './members'
+import { memberGroupMergeRequestSchema } from './member-merge'
 import {
   leagueFolderSchema,
   seasonCreateRequestSchema,
@@ -84,6 +85,7 @@ export interface InvokeOutputs {
   membersSnapshot: MembersSnapshot | null
   saveMember: Member
   mergeMembers: void
+  mergeMemberGroup: Member
   deleteMember: 'hard' | 'soft'
   /** Development only: empties every roster and the master list so a sync can be rerun. */
   resetMembers: void
@@ -246,6 +248,11 @@ export const invokeDefinitions = {
     channel: 'members:merge',
     args: z.tuple([memberIdSchema, memberIdSchema, revisionSchema]),
     failureMessage: 'Invalid merge request'
+  },
+  mergeMemberGroup: {
+    channel: 'members:merge-group',
+    args: z.tuple([memberGroupMergeRequestSchema]),
+    failureMessage: 'Invalid group merge request'
   },
   deleteMember: {
     channel: 'members:delete',

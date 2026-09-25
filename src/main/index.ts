@@ -66,6 +66,7 @@ import {
   type MappingMemory
 } from './lib/imports'
 import { readAppJson } from './lib/app-json'
+import { mergeMemberGroup } from './lib/member-group-merge'
 import { clearCardSheets, generateCardSheet } from './lib/cards'
 import { renderPdfWithElectron } from './lib/pdf'
 import { listDirEntries, scanLeaguesRoot } from './lib/scanner'
@@ -434,6 +435,12 @@ function registerIpc(): void {
   register('mergeMembers', async (_e, fromId, intoId, revision) => {
     await mergeMembers(requireRoot(), fromId, intoId, revision)
     capture('members_merged')
+  })
+
+  register('mergeMemberGroup', async (_e, request) => {
+    const survivor = await mergeMemberGroup(requireRoot(), request)
+    capture('members_merged', { count: request.sourceIds.length })
+    return survivor
   })
 
   register('deleteMember', async (_e, id, revision) => {

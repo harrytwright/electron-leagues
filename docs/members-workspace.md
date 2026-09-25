@@ -119,6 +119,25 @@ The existing code saves the master before roster writes and lacks complete rollb
 files. Inspect existing write/recovery helpers, prepare changes before writing and accurately
 handle/report partial filesystem failures. A root lock alone does not make several writes atomic.
 
+### Group merge contract
+
+`window.api.mergeMemberGroup` accepts `sourceIds`, `mainId`, `result` and `expectedRevision`,
+returning the surviving `Member`. `src/shared/member-merge.ts` validates the request, builds
+source-labelled field alternatives and roster differences, and enforces identifier/name unions
+and age rules. Pass all snapshot members to `buildMemberMergePreview` so old absorbed numbers
+resolve consistently with the main process. The legacy pair API remains during phase 4.
+
+`src/main/lib/member-group-merge.ts` validates participants and reads live rosters under the root
+lock before preparing writes. It preserves unrelated roster bytes and archived files. A direct
+main roster entry takes priority over old numbers resolving to main, followed by the earliest
+selected source. Renaming main also touches unchanged rosters that contain main so generated
+sign-in sheets become stale.
+
+Before writing, every prepared target is checked for symlinks and compared with its original
+contents. Roster writes precede the master update. A failed write triggers restoration of every
+attempted target, including a partly written file; recovery failures identify the affected paths.
+This provides recovery from reported write failures, not crash-atomic multi-file transactions.
+
 ## Implementation phases
 
 Each phase uses Sol for code implementation. The orchestrator reviews scope and verification,
@@ -132,7 +151,7 @@ tools and retains a JSON usage receipt. Sol runs through Codex's agent tool. The
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
 | 1     | Compact selectable list, resizable/stacked layout, readable profile and roster links. Existing editing/merge dialogs remain transitional until their phases. | Complete |
 | 2     | Shared member form and creation/editing in the detail pane, including save/refresh behaviour and navigation discard.                                         | Complete |
-| 3     | Validated group merge contract, shared preview rules and main-process roster/file handling. Keep old callers working until phase 4.                          | Pending  |
+| 3     | Validated group merge contract, shared preview rules and main-process roster/file handling. Keep old callers working until phase 4.                          | Complete |
 | 4     | Merge selection mode, editable comparison, final integration, responsive/keyboard visual verification and removal of obsolete Members dialog paths.          | Pending  |
 
 Use focused components for layout, list, profile, form and merge comparison. Represent mutually
@@ -207,6 +226,7 @@ A second Fable invocation returned usage-credit exhaustion, so it produced no fu
 The first Fable review and its required fixes are complete.
 
 Phase 1 committed as `a4d38c3` (`feat: add the members profile workspace`).
+Phase 2 committed as `b3db82a` (`feat: edit members in the profile pane`).
 
 Phase 2 adds a shared `MemberForm`, a keyed `MemberEditor` and explicit pane actions. SeasonRoster
 retains its dialog wrapper. The editor captures the opening revision, discards drafts on navigation
@@ -235,3 +255,20 @@ Temporary browser fixture: `/tmp/leagues-members-visual/launch.sh`, port 4179. I
 App with an in-memory API, explicit Tailwind source scanning and `window.__membersHarness` controls
 for failed saves, persistent failed refresh and held saves. No real league data is written. These
 temporary files may disappear between sessions; do not rely on them as the only handoff.
+
+Phase 3 implements the shared group merge contract and main-process recovery described above.
+Root review corrected card metadata defaults, absorbed-number preview resolution, unrelated
+roster rewrites and name-dependent sign-in sheet invalidation. The independent Opus 5.5 review
+identified two further fixes: exclude untouched targets from rollback and compare trimmed field
+alternatives. Both are resolved; the source-note alternatives added after the review packet were
+checked locally. The existing resolver follows absorption chains and the scanner separates
+archives, confirming the reviewer’s questions about those dependencies.
+
+The review and receipt are retained in `.temp/members-workspace/phase3-opus-review.md` and
+`phase3-opus-usage.json`. Do not repeat that paid review when resuming. The merge workspace UI
+remains phase 4, with a design handoff in `.temp/members-workspace/phase4-brief.md`.
+
+Phase 3 final verification passed: `npm run format`, `npm test` (92 files, 902 tests),
+`npm run typecheck`, `npm run lint` and `git diff --check`. Lint retains only the existing
+anti-slop module-type warning. The next implementation phase is the merge workspace UI;
+no phase 4 application changes have been started.

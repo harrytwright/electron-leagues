@@ -128,6 +128,9 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
       Promise.resolve({ id: input.id ?? 1, ...input })
     ),
     mergeMembers: vi.fn<RendererApi['mergeMembers']>().mockResolvedValue(undefined),
+    mergeMemberGroup: vi.fn<RendererApi['mergeMemberGroup']>((request) =>
+      Promise.resolve({ id: request.mainId, ...request.result })
+    ),
     deleteMember: vi.fn<RendererApi['deleteMember']>().mockResolvedValue('hard'),
     resetMembers: vi.fn<RendererApi['resetMembers']>().mockResolvedValue(undefined),
     renumberDuplicates: vi.fn<RendererApi['renumberDuplicates']>().mockResolvedValue([]),
