@@ -191,8 +191,10 @@ async function readLiveSeasons(root: string): Promise<ReadSeason[]> {
 }
 
 /**
- * Merge two or more live records in one locked operation. Archived season files
- * stay byte-for-byte unchanged and continue resolving through `mergedInto` links.
+ * Merge two or more live records in one locked operation. The master list is
+ * written first, so a crash part way leaves rosters that still read correctly
+ * through `mergedInto` and a problem the Members page can show. Archived season
+ * files stay byte-for-byte unchanged and continue resolving through those links.
  */
 export async function mergeMemberGroup(
   root: string,
@@ -225,7 +227,18 @@ export async function mergeMemberGroup(
     }
     const seasons = await readLiveSeasons(root)
     refuseDuplicatedRosterEntries(masterRead.value, seasons, request)
-    const files: PreparedMemberMergeFile[] = []
+    const nextMaster: MembersFile = {
+      ...masterRead.value,
+      members: masterRead.value.members.map((member) => {
+        if (member.id === request.mainId) return survivor
+        return request.sourceIds.includes(member.id)
+          ? { ...member, mergedInto: request.mainId }
+          : member
+      })
+    }
+    const files: PreparedMemberMergeFile[] = [
+      { path: masterPath, original: masterRead.raw, next: serialiseAppJson(nextMaster) }
+    ]
     const main = sources.find((source) => source.id === request.mainId)
     if (!main) throw new UserFacingError('The main member must be one of the selected members')
     const nameChanged = main.firstName !== survivor.firstName || main.lastName !== survivor.lastName
@@ -247,17 +260,78 @@ export async function mergeMemberGroup(
       }
     }
 
-    const nextMaster: MembersFile = {
-      ...masterRead.value,
-      members: masterRead.value.members.map((member) => {
-        if (member.id === request.mainId) return survivor
-        return request.sourceIds.includes(member.id)
-          ? { ...member, mergedInto: request.mainId }
-          : member
-      })
-    }
-    files.push({ path: masterPath, original: masterRead.raw, next: serialiseAppJson(nextMaster) })
     await commitPreparedMemberMerge(files, io)
     return survivor
+  })
+}
+
+/**
+ * Point live roster entries at the record their number now resolves to, keeping
+ * one entry per member. This is the tidy-up for a merge that stopped after the
+ * master list was written, or for a roster edited by hand.
+ */
+export function repairRosterPlayers(
+  players: readonly Player[],
+  members: readonly Member[]
+): Player[] {
+  const keptIndexByMember = new Map<number, number>()
+  for (const [index, player] of players.entries()) {
+    const resolved = resolveMember(members, player.memberId)
+    if (!resolved) continue
+    const kept = keptIndexByMember.get(resolved.id)
+    if (
+      kept === undefined ||
+      (players[kept].memberId !== resolved.id && player.memberId === resolved.id)
+    ) {
+      keptIndexByMember.set(resolved.id, index)
+    }
+  }
+  const keptIndexes = new Set(keptIndexByMember.values())
+  return players.flatMap((player, index) => {
+    const resolved = resolveMember(members, player.memberId)
+    if (!resolved) return [player]
+    if (!keptIndexes.has(index)) return []
+    const repaired: Player = { ...player, memberId: resolved.id }
+    const secretaryId =
+      repaired.leagueSecretaryId ??
+      players.find(
+        (candidate) =>
+          resolveMember(members, candidate.memberId)?.id === resolved.id &&
+          candidate.leagueSecretaryId !== undefined
+      )?.leagueSecretaryId
+    if (secretaryId !== undefined) repaired.leagueSecretaryId = secretaryId
+    return [repaired]
+  })
+}
+
+/** Rewrite every live roster that lists an absorbed number; returns how many were changed. */
+export async function repairRosters(
+  root: string,
+  expectedRevision: string,
+  io: MemberMergeFileIo = fileIo
+): Promise<number> {
+  return withRootLock(root, async () => {
+    const masterPath = membersFilePath(root)
+    const masterRead = await readAppJson(masterPath, membersFileSchema)
+    if (masterRead.status === 'missing') {
+      throw new UserFacingError('The members database is not enabled for this location')
+    }
+    if (masterRead.status === 'invalid') throw new UserFacingError(masterRead.message)
+    if ((await fileRevision(masterPath)) !== expectedRevision) {
+      throw new UserFacingError(STALE_MESSAGE)
+    }
+    const files: PreparedMemberMergeFile[] = []
+    for (const season of await readLiveSeasons(root)) {
+      const players = repairRosterPlayers(season.file.players, masterRead.value.members)
+      if (JSON.stringify(players) !== JSON.stringify(season.file.players)) {
+        files.push({
+          path: season.path,
+          original: season.raw,
+          next: serialiseAppJson({ ...season.file, players })
+        })
+      }
+    }
+    await commitPreparedMemberMerge(files, io)
+    return files.length
   })
 }

@@ -134,7 +134,9 @@ selected source. Renaming main also touches unchanged rosters that contain main 
 sign-in sheets become stale.
 
 Before writing, every prepared target is checked for symlinks and compared with its original
-contents. Roster writes precede the master update. A failed write triggers restoration of every
+contents. The master list is written first, so a merge that stops part way leaves rosters that
+still resolve through `mergedInto` and an `absorbed-number` problem on the Members page, whose
+_Tidy up rosters_ action finishes the job. A failed write triggers restoration of every
 attempted target, including a partly written file; recovery failures identify the affected paths.
 This provides recovery from reported write failures, not crash-atomic multi-file transactions.
 

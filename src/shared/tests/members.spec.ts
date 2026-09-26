@@ -252,6 +252,20 @@ describe('findRosterProblems', () => {
     ])
   })
 
+  test('reports a live roster entry under an absorbed number, but not an archived one', () => {
+    const members = [member({ id: 1 }), member({ id: 6, mergedInto: 1 })]
+    const live = rosterSeason({ file: seasonFile({ players: [{ memberId: 6, teamId: null }] }) })
+    const archived = rosterSeason({
+      season: '2023-24',
+      path: '/root/_archives/Mixed triples/2023-24',
+      archived: true,
+      file: seasonFile({ players: [{ memberId: 6, teamId: null }] })
+    })
+    expect(findRosterProblems(snapshot({ members, seasons: [live, archived] }))).toEqual([
+      { kind: 'absorbed-number', path: live.path, memberId: 6, into: 1 }
+    ])
+  })
+
   test('a disabled snapshot has nothing to report', () => {
     expect(findRosterProblems(disabledMembersSnapshot())).toEqual([])
   })

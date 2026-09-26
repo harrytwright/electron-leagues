@@ -133,6 +133,7 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
     deleteMember: vi.fn<RendererApi['deleteMember']>().mockResolvedValue('hard'),
     resetMembers: vi.fn<RendererApi['resetMembers']>().mockResolvedValue(undefined),
     renumberDuplicates: vi.fn<RendererApi['renumberDuplicates']>().mockResolvedValue([]),
+    repairRosters: vi.fn<RendererApi['repairRosters']>().mockResolvedValue(0),
     createSeasonRoster: vi.fn<RendererApi['createSeasonRoster']>().mockResolvedValue(undefined),
     saveSeason: vi.fn<RendererApi['saveSeason']>().mockResolvedValue({ signInSheet: 'updated' }),
     openSignInSheet: vi.fn<RendererApi['openSignInSheet']>().mockResolvedValue(''),

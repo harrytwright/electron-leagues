@@ -65,6 +65,8 @@ function describeProblem(problem: MembersProblem): string {
       return `${pathTail(problem.path)} puts member ${problem.memberId} in a team that no longer exists`
     case 'duplicate-number':
       return `Member number ${problem.id} is used ${plural(problem.count, 'time')}`
+    case 'absorbed-number':
+      return `${pathTail(problem.path)} lists member ${problem.memberId} under a number that was merged into member ${problem.into}`
   }
 }
 
@@ -145,6 +147,27 @@ function MembersTable({
     write: ({ id, keepIndex }: { id: number; keepIndex: number }) =>
       window.api.renumberDuplicates(id, keepIndex, snapshot.revision)
   })
+  const repair = useWriteOperation({
+    label: () => 'Tidying rosters',
+    write: () => window.api.repairRosters(snapshot.revision),
+    refreshQueryKey: membersQueryKey
+  })
+  const repairRosters = async (): Promise<void> => {
+    try {
+      const outcome = await repair.run(undefined)
+      const done = `Tidied ${plural(outcome.result, 'roster')}`
+      add({
+        title:
+          outcome.status === 'refresh-failed'
+            ? `${done}, but the list could not be refreshed: ${outcome.refreshError}`
+            : done,
+        variant: outcome.status === 'refresh-failed' ? 'error' : 'success'
+      })
+    } catch (caught) {
+      add({ title: ipcErrorMessage(caught), variant: 'error' })
+    }
+  }
+  const absorbedNumbers = snapshot.problems.some((problem) => problem.kind === 'absorbed-number')
 
   const keepNumber = async (member: Member): Promise<void> => {
     const holders = snapshot.members.filter((candidate) => candidate.id === member.id)
@@ -378,6 +401,18 @@ function MembersTable({
               ))}
             </ul>
           </div>
+          {absorbedNumbers ? (
+            <Button
+              type="button"
+              size="sm"
+              className="ml-auto shrink-0"
+              loading={repair.pending}
+              disabled={repair.pending || paneBusy}
+              onClick={() => void repairRosters()}
+            >
+              {repair.pending ? 'Tidying…' : 'Tidy up rosters'}
+            </Button>
+          ) : null}
         </section>
       ) : null}
       <MembersWorkspace

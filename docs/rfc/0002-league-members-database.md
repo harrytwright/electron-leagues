@@ -356,26 +356,27 @@ New entries in `invokeDefinitions`, each with a zod argument schema and an `Invo
 type; the preload methods follow from the table. Every write names the file revision
 (`mtime:size`) the renderer loaded, and a stale one is refused with a message that says so.
 
-| Name                   | Channel                 | Arguments                                                                   | Result                          |
-| ---------------------- | ----------------------- | --------------------------------------------------------------------------- | ------------------------------- |
-| `enableMembers`        | `members:enable`        | none                                                                        | `void` (creates the file)       |
-| `membersSnapshot`      | `members:snapshot`      | none                                                                        | `MembersSnapshot \| null`       |
-| `saveMember`           | `members:save`          | `MemberInput`, revision                                                     | `Member`                        |
-| `mergeMemberGroup`     | `members:merge-group`   | `sourceIds`, `mainId`, reviewed `result`, revision                          | the surviving `Member`          |
-| `deleteMember`         | `members:delete`        | `id`, revision                                                              | `'hard' \| 'soft'`              |
-| `resetMembers`         | `members:reset`         | revision (development builds only)                                          | `void`                          |
-| `renumberDuplicates`   | `members:renumber`      | `id`, `keepIndex`, revision                                                 | the new numbers                 |
-| `createSeasonRoster`   | `season:create-roster`  | `SeasonRef`, `{ format, carryOver }`                                        | `void`, refuses an existing one |
-| `saveSeason`           | `season:save`           | `SeasonRef`, `SeasonFile`, revision                                         | whether the sheet was remade    |
-| `openSignInSheet`      | `season:sign-in-sheet`  | `SeasonRef`                                                                 | path (generated if stale)       |
-| `pickImportFile`       | `import:pick`           | none                                                                        | path or null                    |
-| `previewImport`        | `import:preview`        | `sourcePath`                                                                | `MappingPreview`                |
-| `planMbdSync`          | `members:plan-sync`     | `sourcePath`, `ImportMapping`                                               | `SyncPlan` and the revision     |
-| `syncMbd`              | `members:sync-mbd`      | `sourcePath`, `ImportMapping`, `SyncDecision[]`, revision                   | `SyncSummary`                   |
-| `planPlayersImport`    | `season:plan-import`    | `SeasonRef`, `sourcePath`, `ImportMapping`                                  | `RosterPlan` and both revisions |
-| `addPlayersFromExport` | `season:import-players` | `SeasonRef`, `sourcePath`, `ImportMapping`, lines to create, both revisions | `ImportSummary`                 |
-| `printCards`           | `members:print-cards`   | `id[]`, revision                                                            | path                            |
-| `exportMembersCsv`     | `members:export-csv`    | `id[]` in table order, `{ marketingOnly }`                                  | path, or null when cancelled    |
+| Name                   | Channel                  | Arguments                                                                   | Result                          |
+| ---------------------- | ------------------------ | --------------------------------------------------------------------------- | ------------------------------- |
+| `enableMembers`        | `members:enable`         | none                                                                        | `void` (creates the file)       |
+| `membersSnapshot`      | `members:snapshot`       | none                                                                        | `MembersSnapshot \| null`       |
+| `saveMember`           | `members:save`           | `MemberInput`, revision                                                     | `Member`                        |
+| `mergeMemberGroup`     | `members:merge-group`    | `sourceIds`, `mainId`, reviewed `result`, revision                          | the surviving `Member`          |
+| `deleteMember`         | `members:delete`         | `id`, revision                                                              | `'hard' \| 'soft'`              |
+| `resetMembers`         | `members:reset`          | revision (development builds only)                                          | `void`                          |
+| `renumberDuplicates`   | `members:renumber`       | `id`, `keepIndex`, revision                                                 | the new numbers                 |
+| `repairRosters`        | `members:repair-rosters` | revision                                                                    | the number of rosters rewritten |
+| `createSeasonRoster`   | `season:create-roster`   | `SeasonRef`, `{ format, carryOver }`                                        | `void`, refuses an existing one |
+| `saveSeason`           | `season:save`            | `SeasonRef`, `SeasonFile`, revision                                         | whether the sheet was remade    |
+| `openSignInSheet`      | `season:sign-in-sheet`   | `SeasonRef`                                                                 | path (generated if stale)       |
+| `pickImportFile`       | `import:pick`            | none                                                                        | path or null                    |
+| `previewImport`        | `import:preview`         | `sourcePath`                                                                | `MappingPreview`                |
+| `planMbdSync`          | `members:plan-sync`      | `sourcePath`, `ImportMapping`                                               | `SyncPlan` and the revision     |
+| `syncMbd`              | `members:sync-mbd`       | `sourcePath`, `ImportMapping`, `SyncDecision[]`, revision                   | `SyncSummary`                   |
+| `planPlayersImport`    | `season:plan-import`     | `SeasonRef`, `sourcePath`, `ImportMapping`                                  | `RosterPlan` and both revisions |
+| `addPlayersFromExport` | `season:import-players`  | `SeasonRef`, `sourcePath`, `ImportMapping`, lines to create, both revisions | `ImportSummary`                 |
+| `printCards`           | `members:print-cards`    | `id[]`, revision                                                            | path                            |
+| `exportMembersCsv`     | `members:export-csv`     | `id[]` in table order, `{ marketingOnly }`                                  | path, or null when cancelled    |
 
 Whether the feature is on is part of the snapshot (`enabled`), so there is no separate query.
 The app still never backfills older seasons on its own, but a live season made before the
@@ -417,8 +418,10 @@ which is why the CSV export takes the ids in table order rather than a filter. A
    the column widths gave way to a remembered divider. Merging became a selection mode over
    any number of records with a field by field comparison, written through one
    `mergeMemberGroup` call that prepares every roster and the master list first and restores
-   the files it touched if a write fails. The pair `mergeMembers` channel, which wrote the
-   master before the rosters with no rollback, went with the dialog that called it.
+   the files it touched if a write fails. The master list is written first, so a merge that
+   stops part way still reads correctly and shows as an `absorbed-number` problem that
+   `repairRosters` clears. The pair `mergeMembers` channel, which had no rollback, went with the
+   dialog that called it.
 3. **Sign-in sheet.** HTML layout, `printToPDF`, virtual row, regenerate-on-save and stale-on-
    open, `Superseded` badge on the docx. Tests: generated text contains teams in `teamNo`
    order and the Subs block; archive never generates. As built, the sheet is stamped with the

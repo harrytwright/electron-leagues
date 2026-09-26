@@ -89,6 +89,8 @@ export interface InvokeOutputs {
   /** Development only: empties every roster and the master list so a sync can be rerun. */
   resetMembers: void
   renumberDuplicates: number[]
+  /** Points live roster entries at the records their numbers resolve to; returns the rosters changed. */
+  repairRosters: number
   saveSeason: SeasonSaveResult
   /** Gives a season made before the database was on a roster file of its own. */
   createSeasonRoster: void
@@ -262,6 +264,11 @@ export const invokeDefinitions = {
     channel: 'members:renumber',
     args: z.tuple([memberIdSchema, z.number().int().nonnegative(), revisionSchema]),
     failureMessage: 'Invalid renumber request'
+  },
+  repairRosters: {
+    channel: 'members:repair-rosters',
+    args: z.tuple([revisionSchema]),
+    failureMessage: 'Invalid roster repair request'
   },
   createSeasonRoster: {
     channel: 'season:create-roster',

@@ -65,7 +65,7 @@ import {
   type MappingMemory
 } from './lib/imports'
 import { readAppJson } from './lib/app-json'
-import { mergeMemberGroup } from './lib/member-group-merge'
+import { mergeMemberGroup, repairRosters } from './lib/member-group-merge'
 import { clearCardSheets, generateCardSheet } from './lib/cards'
 import { renderPdfWithElectron } from './lib/pdf'
 import { listDirEntries, scanLeaguesRoot } from './lib/scanner'
@@ -454,6 +454,12 @@ function registerIpc(): void {
     const renumbered = await renumberDuplicates(requireRoot(), id, keepIndex, revision)
     capture('members_renumbered', { count: renumbered.length })
     return renumbered
+  })
+
+  register('repairRosters', async (_e, revision) => {
+    const repaired = await repairRosters(requireRoot(), revision)
+    capture('rosters_repaired', { count: repaired })
+    return repaired
   })
 
   register('saveSeason', async (_e, ref, file, revision) => {

@@ -1091,6 +1091,45 @@ it('deletes a member, explaining whether they are hidden or removed', async () =
   await waitFor(() => expect(api.deleteMember).toHaveBeenCalledExactlyOnceWith(1, 'rev-2'))
 })
 
+it('names a roster still listing an absorbed number and tidies it on request', async () => {
+  const members = [
+    makeMember({ id: 1, firstName: 'Ann', lastName: 'Lee' }),
+    makeMember({ id: 6, firstName: 'Old Ann', lastName: 'Lee', mergedInto: 1 })
+  ]
+  const membersSnapshot = vi
+    .fn<RendererApi['membersSnapshot']>()
+    .mockResolvedValueOnce(
+      makeSnapshot({
+        revision: 'rev-2',
+        nextId: 7,
+        members,
+        problems: [
+          { kind: 'absorbed-number', path: '/root/monday/Pairs/2026-27', memberId: 6, into: 1 }
+        ]
+      })
+    )
+    .mockResolvedValue(makeSnapshot({ revision: 'rev-3', nextId: 7, members }))
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot,
+    repairRosters: vi.fn().mockResolvedValue(1)
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  const problems = await screen.findByRole('region', { name: 'Problems' })
+  expect(problems).toHaveTextContent(
+    'monday/Pairs/2026-27 lists member 6 under a number that was merged into member 1'
+  )
+  await user.click(within(problems).getByRole('button', { name: 'Tidy up rosters' }))
+
+  expect(await screen.findByText('Tidied 1 roster')).toBeInTheDocument()
+  expect(api.repairRosters).toHaveBeenCalledWith('rev-2')
+  await waitFor(() =>
+    expect(screen.queryByRole('region', { name: 'Problems' })).not.toBeInTheDocument()
+  )
+})
+
 it('lets one holder of a duplicated number keep it', async () => {
   const snapshot = makeSnapshot({
     revision: 'rev-3',

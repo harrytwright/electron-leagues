@@ -248,6 +248,8 @@ export type MembersProblem =
   | { kind: 'unlinked-player'; path: string; memberId: number }
   | { kind: 'unknown-team'; path: string; memberId: number; teamId: string }
   | { kind: 'duplicate-number'; id: number; count: number }
+  /** A live roster still lists a number that was merged away; the record it resolves to is `into`. */
+  | { kind: 'absorbed-number'; path: string; memberId: number; into: number }
 
 export interface MembersSnapshot {
   /** False when the location has no `members.json`; every list is then empty. */
@@ -342,8 +344,16 @@ export function findRosterProblems(snapshot: MembersSnapshot): MembersProblem[] 
   }
   for (const season of snapshot.seasons) {
     for (const player of season.file.players) {
-      if (!resolveMember(snapshot.members, player.memberId)) {
+      const resolved = resolveMember(snapshot.members, player.memberId)
+      if (!resolved) {
         problems.push({ kind: 'unlinked-player', path: season.path, memberId: player.memberId })
+      } else if (!season.archived && resolved.id !== player.memberId) {
+        problems.push({
+          kind: 'absorbed-number',
+          path: season.path,
+          memberId: player.memberId,
+          into: resolved.id
+        })
       }
       if (player.teamId && !season.file.teams.some((team) => team.id === player.teamId)) {
         problems.push({

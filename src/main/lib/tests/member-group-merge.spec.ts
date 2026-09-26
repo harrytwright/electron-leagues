@@ -12,6 +12,8 @@ import {
 import {
   commitPreparedMemberMerge,
   mergeMemberGroup,
+  repairRosterPlayers,
+  repairRosters,
   type MemberMergeFileIo,
   type PreparedMemberMergeFile
 } from '../member-group-merge'
@@ -237,6 +239,25 @@ describe('mergeMemberGroup', () => {
     expect((await stat(unrelatedPath)).mtimeMs).toBe(oldTime.getTime())
   })
 
+  test('writes the master list before any roster', async () => {
+    await writeMaster([member(1), member(2)])
+    const rosterPath = join(root, 'monday/Pairs/2026-27/meta.json')
+    await writeJson(rosterPath, season({ players: [{ memberId: 2, teamId: null }] }))
+    const writes: string[] = []
+    const io: MemberMergeFileIo = {
+      read: (path) => readFile(path, 'utf8'),
+      guard: async () => {},
+      write: async (path, contents) => {
+        writes.push(path)
+        await writeFile(path, contents)
+      }
+    }
+
+    await mergeMemberGroup(root, await mergeRequest([1, 2], 1), new Date(), io)
+
+    expect(writes).toEqual([join(root, 'members.json'), rosterPath])
+  })
+
   test('restores files after a mid-write failure', async () => {
     await writeMaster([member(1), member(2)])
     const first = join(root, 'monday/Pairs/2026-27/meta.json')
@@ -267,6 +288,78 @@ describe('mergeMemberGroup', () => {
         [first, second, join(root, 'members.json')].map((path) => readFile(path, 'utf8'))
       )
     ).toEqual(before)
+  })
+})
+
+describe('repairRosterPlayers', () => {
+  const members = [member(1), member(2), member(6, { mergedInto: 1 }), member(7, { mergedInto: 1 })]
+
+  test('points absorbed numbers at the survivor and keeps one entry, the direct one first', () => {
+    expect(
+      repairRosterPlayers(
+        [
+          { memberId: 6, teamId: 'old', leagueSecretaryId: 'ls-6' },
+          { memberId: 2, teamId: 'two' },
+          { memberId: 1, teamId: 'direct' },
+          { memberId: 7, teamId: 'older' }
+        ],
+        members
+      )
+    ).toEqual([
+      { memberId: 2, teamId: 'two' },
+      { memberId: 1, teamId: 'direct', leagueSecretaryId: 'ls-6' }
+    ])
+    expect(repairRosterPlayers([{ memberId: 7, teamId: null, position: 3 }], members)).toEqual([
+      { memberId: 1, teamId: null, position: 3 }
+    ])
+  })
+
+  test('leaves unlinked and already correct entries alone', () => {
+    const players = [
+      { memberId: 1, teamId: 'a' },
+      { memberId: 9, teamId: null }
+    ]
+    expect(repairRosterPlayers(players, members)).toEqual(players)
+  })
+})
+
+describe('repairRosters', () => {
+  test('rewrites only the live rosters that list an absorbed number', async () => {
+    await writeMaster([member(1), member(2), member(6, { mergedInto: 1 })])
+    const stalePath = join(root, 'monday/Pairs/2026-27/meta.json')
+    const cleanPath = join(root, 'tuesday/Trio/2026-27/meta.json')
+    const archivePath = join(root, '_archives/Pairs/2024-25/meta.json')
+    await writeJson(
+      stalePath,
+      season({
+        teams: [
+          { id: 'direct', teamNo: 1, name: 'Direct' },
+          { id: 'two', teamNo: 2, name: 'Two' }
+        ],
+        players: [
+          { memberId: 6, teamId: 'direct' },
+          { memberId: 1, teamId: 'direct' },
+          { memberId: 2, teamId: 'two' }
+        ]
+      })
+    )
+    await writeJson(cleanPath, season({ players: [{ memberId: 2, teamId: null }] }))
+    await writeJson(archivePath, season({ players: [{ memberId: 6, teamId: null }] }))
+    const cleanBefore = await readFile(cleanPath, 'utf8')
+    const archiveBefore = await readFile(archivePath, 'utf8')
+    const revision = await fileRevision(join(root, 'members.json'))
+
+    await expect(repairRosters(root, 'stale')).rejects.toThrow(STALE_MESSAGE)
+    expect(await repairRosters(root, revision)).toBe(1)
+
+    expect(JSON.parse(await readFile(stalePath, 'utf8')).players).toEqual([
+      { memberId: 1, teamId: 'direct' },
+      { memberId: 2, teamId: 'two' }
+    ])
+    expect(await readFile(cleanPath, 'utf8')).toBe(cleanBefore)
+    expect(await readFile(archivePath, 'utf8')).toBe(archiveBefore)
+    const snapshot = await buildMembersSnapshot(root, await scanLeaguesRoot(root))
+    expect(snapshot.problems).toEqual([])
   })
 })
 
