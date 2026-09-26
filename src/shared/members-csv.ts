@@ -1,4 +1,4 @@
-import { formatMemberNumber, isUnder18, type Member } from './members'
+import { formatMemberNumber, guardianContactText, isUnder18, type Member } from './members'
 
 /** Excel reads a file as UTF-8 only when it starts with a byte order mark. */
 const BOM = '\uFEFF'
@@ -28,6 +28,8 @@ function csvCell(value: string): string {
 export interface MembersCsvOptions {
   nextId: number
   today: Date
+  /** Every member on file, so a linked guardian's contact can be looked up; defaults to the rows. */
+  members?: readonly Member[]
 }
 
 /**
@@ -48,7 +50,7 @@ export function membersCsv(members: readonly Member[], options: MembersCsvOption
       member.gender ?? '',
       junior ? '' : (member.email ?? ''),
       junior ? '' : (member.phone ?? ''),
-      junior ? (member.guardianContact ?? '') : '',
+      junior ? (guardianContactText(member, options.members ?? members) ?? '') : '',
       member.mbdIds.join('; '),
       member.aliases.join('; '),
       member.marketing ? 'yes' : 'no',

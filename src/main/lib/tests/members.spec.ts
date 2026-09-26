@@ -277,6 +277,33 @@ describe('saveMember', () => {
     expect((await snapshotOf()).nextId).toBe(9)
   })
 
+  test('links a guardian only to another live member, following merges', async () => {
+    await enableMembers(root)
+    let snapshot = await snapshotOf()
+    await saveMember(root, input({ firstName: 'Ann' }), snapshot.revision)
+    snapshot = await snapshotOf()
+    await saveMember(root, input({ firstName: 'Old Ann' }), snapshot.revision)
+    await mergeInto(1, 2)
+    snapshot = await snapshotOf()
+    const junior = input({ firstName: 'Kid', dob: '2015-01-01', guardianMemberId: 2 })
+    const saved = await saveMember(root, junior, snapshot.revision)
+    expect(saved.guardianMemberId).toBe(1)
+
+    snapshot = await snapshotOf()
+    await expect(
+      saveMember(root, { ...junior, id: saved.id, guardianMemberId: saved.id }, snapshot.revision)
+    ).rejects.toThrow('The linked guardian must be another member on the list')
+    await expect(
+      saveMember(root, { ...junior, id: saved.id, guardianMemberId: 99 }, snapshot.revision)
+    ).rejects.toThrow('The linked guardian must be another member on the list')
+    const unlinked = await saveMember(
+      root,
+      { ...junior, id: saved.id, guardianMemberId: undefined },
+      snapshot.revision
+    )
+    expect(unlinked.guardianMemberId).toBeUndefined()
+  })
+
   test('refuses to edit a merged, deleted or unknown member', async () => {
     await enableMembers(root)
     let snapshot = await snapshotOf()
@@ -352,6 +379,25 @@ describe('deleteMember', () => {
     snapshot = await snapshotOf()
     expect(snapshot.members).toEqual([expect.objectContaining({ id: 2, deleted: true })])
     expect(snapshot.nextId).toBe(3)
+  })
+
+  test('a member linked as someone’s guardian is soft-deleted', async () => {
+    await enableMembers(root)
+    let snapshot = await snapshotOf()
+    await saveMember(root, input({ firstName: 'Guardian' }), snapshot.revision)
+    snapshot = await snapshotOf()
+    await saveMember(
+      root,
+      input({ firstName: 'Kid', dob: '2015-01-01', guardianMemberId: 1 }),
+      snapshot.revision
+    )
+    snapshot = await snapshotOf()
+    expect(await deleteMember(root, 1, snapshot.revision)).toBe('soft')
+    snapshot = await snapshotOf()
+    expect(snapshot.members).toEqual([
+      expect.objectContaining({ id: 1, deleted: true }),
+      expect.objectContaining({ id: 2, guardianMemberId: 1 })
+    ])
   })
 
   test('a merge survivor referenced only through the merged number is still soft-deleted', async () => {

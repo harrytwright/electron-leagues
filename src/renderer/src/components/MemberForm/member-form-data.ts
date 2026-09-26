@@ -1,4 +1,11 @@
-import { GENDERS, type Gender, type Member, type MemberInput } from '@shared/members'
+import {
+  formatMemberNumber,
+  GENDERS,
+  memberDisplayName,
+  type Gender,
+  type Member,
+  type MemberInput
+} from '@shared/members'
 import { sentenceCase } from '@renderer/lib/sentence-case'
 
 export const NO_GENDER = 'unset'
@@ -16,6 +23,8 @@ export interface MemberDraft {
   email: string
   phone: string
   guardianContact: string
+  /** The linked guardian's member number, or null for none. */
+  guardianMemberId: number | null
   marketing: boolean
   notes: string
   mbdIds: string
@@ -31,6 +40,7 @@ export function memberDraftFrom(member: Member | null): MemberDraft {
     email: member?.email ?? '',
     phone: member?.phone ?? '',
     guardianContact: member?.guardianContact ?? '',
+    guardianMemberId: member?.guardianMemberId ?? null,
     marketing: member?.marketing ?? true,
     notes: member?.notes ?? '',
     mbdIds: member?.mbdIds.join(', ') ?? '',
@@ -73,7 +83,34 @@ export function memberInputFromDraft(draft: MemberDraft, member: Member | null):
   if (phone) input.phone = phone
   const guardianContact = optional(draft.guardianContact)
   if (guardianContact) input.guardianContact = guardianContact
+  if (draft.guardianMemberId !== null) input.guardianMemberId = draft.guardianMemberId
   const notes = optional(draft.notes)
   if (notes) input.notes = notes
   return input
+}
+
+/** Live records other than the one being edited, in list order, for the guardian picker. */
+export function guardianCandidates(members: readonly Member[], selfId?: number): Member[] {
+  return members.filter(
+    (member) => !member.deleted && member.mergedInto === undefined && member.id !== selfId
+  )
+}
+
+const EMAIL_IN_TEXT = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/
+const PHONE_IN_TEXT = /(?:\+44\s?|0)\d(?:[\s-]?\d){8,10}/
+
+/**
+ * A blank adult form for a junior's guardian, seeded from the free text contact:
+ * the email and phone it holds, and a note saying whose guardian this is and
+ * what was written, so nothing typed at the desk is lost.
+ */
+export function guardianDraftFrom(junior: Member, nextId: number): MemberDraft {
+  const text = junior.guardianContact ?? ''
+  const draft = memberDraftFrom(null)
+  draft.email = EMAIL_IN_TEXT.exec(text)?.[0] ?? ''
+  draft.phone = PHONE_IN_TEXT.exec(text)?.[0]?.trim() ?? ''
+  draft.marketing = junior.marketing
+  const who = `${memberDisplayName(junior)} (${formatMemberNumber(junior.id, nextId)})`
+  draft.notes = text ? `Guardian of ${who}. Contact given as: ${text}` : `Guardian of ${who}.`
+  return draft
 }

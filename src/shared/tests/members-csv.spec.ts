@@ -55,3 +55,30 @@ test('writes a spreadsheet-friendly file with each member’s one contact and no
   )
   expect(lines[3]).toBe('')
 })
+
+test('a junior with a linked guardian carries that member’s name and contact', () => {
+  const guardian = member({
+    id: 7,
+    firstName: 'Ann',
+    lastName: 'Lee',
+    dob: '1990-05-04',
+    email: 'ann@example.org',
+    phone: '07700 900000'
+  })
+  const junior = member({
+    id: 8,
+    firstName: 'Kid',
+    lastName: 'Lee',
+    dob: '2015-01-01',
+    guardianMemberId: 7,
+    guardianContact: 'Collects on Tuesdays'
+  })
+  const csv = membersCsv([junior], {
+    nextId: 9,
+    today: new Date(2026, 8, 18),
+    members: [guardian, junior]
+  })
+  expect(csv.split('\r\n')[1]).toBe(
+    '000008,Kid,Lee,2015-01-01,,,,"Ann Lee, ann@example.org, 07700 900000",,,yes,,'
+  )
+})

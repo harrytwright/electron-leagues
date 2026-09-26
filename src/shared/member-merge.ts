@@ -51,7 +51,7 @@ export interface MemberMergeAlternative {
 }
 
 export interface MemberMergeFieldPreview {
-  field: keyof Omit<MemberMergeResult, 'aliases' | 'mbdIds'>
+  field: keyof Omit<MemberMergeResult, 'aliases' | 'mbdIds' | 'guardianMemberId'>
   alternatives: MemberMergeAlternative[]
 }
 
@@ -229,6 +229,13 @@ function defaultResult(sources: readonly Member[], main: Member): MemberMergeRes
   if (phone !== undefined) result.phone = phone
   if (guardianContact !== undefined) result.guardianContact = guardianContact
   if (main.cardIssued !== undefined) result.cardIssued = main.cardIssued
+  const guardianLinks = new Set(
+    sources.flatMap((source) =>
+      source.guardianMemberId === undefined ? [] : [source.guardianMemberId]
+    )
+  )
+  if (main.guardianMemberId !== undefined) result.guardianMemberId = main.guardianMemberId
+  else if (guardianLinks.size === 1) result.guardianMemberId = [...guardianLinks][0]
   const notes = defaultNotes(sources, main)
   if (notes !== undefined) result.notes = notes
   return withOriginalNames(result, sources)

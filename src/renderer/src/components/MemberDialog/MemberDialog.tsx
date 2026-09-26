@@ -5,7 +5,13 @@ import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { useDialogTask } from '@renderer/hooks/use-dialog-task'
 import { useQueryRefresh } from '@renderer/hooks/use-query-refresh'
 import { useWriteOperation } from '@renderer/hooks/use-write-operation'
-import { MemberForm, memberDraftFrom, memberInputFromDraft, type MemberDraft } from '../MemberForm'
+import {
+  guardianCandidates,
+  MemberForm,
+  memberDraftFrom,
+  memberInputFromDraft,
+  type MemberDraft
+} from '../MemberForm'
 import { TaskDialog } from '../TaskDialog'
 import type { Props } from './interface'
 
@@ -106,6 +112,8 @@ export function MemberDialog({
         <MemberForm
           ref={firstNameRef}
           draft={draft}
+          guardians={guardianCandidates(snapshot.members, member?.id)}
+          nextId={snapshot.nextId}
           errorId={errorId}
           invalidNames={invalidNames ?? undefined}
           onChange={update}

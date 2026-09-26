@@ -42,6 +42,8 @@ export const memberSchema = z.object({
   phone: z.string().optional(),
   /** Free text naming a parent or guardian and how to reach them. Under-18s only. */
   guardianContact: z.string().optional(),
+  /** A member who is this junior's parent or guardian; their own contact stands for the junior. */
+  guardianMemberId: z.number().int().positive().optional(),
   /** Every MBD ID known for this person; the MBD itself can hold duplicates. */
   mbdIds: z.array(z.string()),
   /** Every spelling seen for this person, so the sync stops asking. */
@@ -214,8 +216,36 @@ export function isUnder18(member: Pick<Member, 'dob'>, on: Date): boolean {
 export function needsDetails(member: Member, on: Date): boolean {
   if (member.mergedInto !== undefined || member.deleted) return false
   if (member.dob === undefined) return true
-  if (isUnder18(member, on)) return !member.guardianContact
+  if (isUnder18(member, on)) return !member.guardianContact && member.guardianMemberId === undefined
   return !member.email && !member.phone
+}
+
+/** The member linked as this junior's guardian, followed through merges; null when none or gone. */
+export function guardianOf(
+  member: Pick<Member, 'guardianMemberId'>,
+  members: readonly Member[]
+): Member | null {
+  return member.guardianMemberId === undefined
+    ? null
+    : resolveMember(members, member.guardianMemberId)
+}
+
+/**
+ * How to reach a junior's guardian: the linked member's name and their own contact
+ * when there is a link, otherwise whatever was typed.
+ */
+export function guardianContactText(
+  member: Member,
+  members: readonly Member[]
+): string | undefined {
+  const guardian = guardianOf(member, members)
+  if (guardian) {
+    const parts = [memberDisplayName(guardian), guardian.email, guardian.phone].filter(
+      (part): part is string => Boolean(part)
+    )
+    return parts.join(', ')
+  }
+  return member.guardianContact
 }
 
 /** Follow merges to the record that now stands for a number. */

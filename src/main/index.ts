@@ -633,7 +633,11 @@ function registerIpc(): void {
     if (result.canceled || !result.filePath) return null
     await writeFile(
       result.filePath,
-      membersCsv(members, { nextId: master.value.nextId, today: new Date() })
+      membersCsv(members, {
+        nextId: master.value.nextId,
+        today: new Date(),
+        members: master.value.members
+      })
     )
     capture('members_exported', { count: members.length })
     return { path: result.filePath, count: members.length }

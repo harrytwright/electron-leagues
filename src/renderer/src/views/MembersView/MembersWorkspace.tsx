@@ -9,9 +9,16 @@ import type { LeaguesTree } from '@shared/tree'
 import {
   deriveMemberships,
   formatMemberNumber,
+  guardianOf,
+  isUnder18,
   memberDisplayName,
   needsDetails
 } from '@shared/members'
+import { useQueryClient } from '@tanstack/react-query'
+import { memberDraftFrom, memberInputFromDraft } from '@renderer/components/MemberForm'
+import { useWriteOperation } from '@renderer/hooks/use-write-operation'
+import { ipcErrorMessage } from '@renderer/lib/ipc-error'
+import { membersQueryKey } from '@renderer/queries/members'
 import {
   type MemberRow,
   type MembersSort,
@@ -176,6 +183,7 @@ function MembershipList({
 
 function MemberProfile({
   row,
+  members,
   memberships,
   tree,
   compact,
@@ -183,9 +191,11 @@ function MemberProfile({
   renumbering,
   takeFocus,
   onAction,
+  onOpenMember,
   onKeepNumber
 }: {
   row: MemberRow
+  members: readonly Member[]
   memberships: Membership[]
   tree: LeaguesTree
   compact: boolean
@@ -193,7 +203,8 @@ function MemberProfile({
   renumbering: boolean
   /** Called once on mount; true when the profile follows a form or merge and should take focus. */
   takeFocus: () => boolean
-  onAction: (kind: 'edit' | 'merge' | 'delete', member: Member) => void
+  onAction: (kind: ProfileAction, member: Member) => void
+  onOpenMember: (member: Member) => void
   onKeepNumber: (member: Member) => void
 }): React.JSX.Element {
   const select = useWorkspace((workspace) => workspace.select)
@@ -209,6 +220,10 @@ function MemberProfile({
   const member = row.member
   const memberStatus = status(row)
   const hasDuplicateNumber = duplicatedIds.has(member.id)
+  const guardian = guardianOf(member, members)
+  const junior = member.dob !== undefined && isUnder18(member, new Date())
+  const canAddGuardian =
+    junior && !guardian && Boolean(member.guardianContact) && !member.deleted && !hasDuplicateNumber
   const openRoster = (membership: Membership): void => {
     const league = tree.days[membership.day].find(
       (candidate) => candidate.folderName === membership.leagueFolder
@@ -293,9 +308,36 @@ function MemberProfile({
         <dl className="grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-x-6 gap-y-3">
           <DetailItem label="Email" value={member.email} />
           <DetailItem label="Phone" value={member.phone} />
+          {guardian ? (
+            <DetailItem
+              label="Linked guardian"
+              value={
+                <span className="grid gap-0.5">
+                  <button
+                    type="button"
+                    className="text-left font-medium underline-offset-2 hover:underline"
+                    onClick={() => onOpenMember(guardian)}
+                  >
+                    {memberDisplayName(guardian)}
+                  </button>
+                  <span className="text-kumo-subtle">
+                    {[guardian.email, guardian.phone].filter(Boolean).join(', ') ||
+                      'No contact on their record'}
+                  </span>
+                </span>
+              }
+            />
+          ) : null}
           <DetailItem label="Guardian contact" value={member.guardianContact} />
           <DetailItem label="Marketing" value={member.marketing ? 'Allowed' : 'Not allowed'} />
         </dl>
+        {canAddGuardian ? (
+          <div>
+            <Button size="sm" variant="secondary" onClick={() => onAction('guardian', member)}>
+              Add guardian as a member…
+            </Button>
+          </div>
+        ) : null}
       </ProfileSection>
       <ProfileSection title="Record information">
         <dl className="grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-x-6 gap-y-3">
@@ -339,7 +381,7 @@ interface Props {
   paneBusy: boolean
   sort: MembersSort
   onSort: (column: MembersSortColumn) => void
-  onAction: (kind: RowAction, member: Member) => void
+  onAction: (kind: ProfileAction, member: Member) => void
   onKeepNumber: (member: Member) => void
   onPaneBusyChange: (busy: boolean) => void
   paneAction: PaneAction
@@ -350,7 +392,7 @@ interface Props {
 }
 
 export type PaneAction =
-  | { kind: 'new'; instance: number }
+  | { kind: 'new'; instance: number; guardianFor?: Member }
   | { kind: 'edit'; member: Member; instance: number }
   | {
       kind: 'merge'
@@ -383,6 +425,8 @@ function memberIdentity(member: Member, duplicated: boolean): MemberIdentity {
 }
 
 type RowAction = 'edit' | 'merge' | 'delete'
+/** What a profile can start: the row actions plus adding a member for a junior's guardian. */
+type ProfileAction = RowAction | 'guardian'
 
 interface MemberListRowProps {
   row: MemberRow
@@ -542,6 +586,38 @@ export function MembersWorkspace({
   const listId = useId()
   const drag = useRef<{ startX: number; startPercent: number; percent: number } | null>(null)
   const focusProfile = useRef(false)
+  // The link write starts after a save's own refresh, so it reads the list as the cache holds
+  // it then rather than as this render saw it.
+  const queryClient = useQueryClient()
+  const cachedSnapshot = (): MembersSnapshot =>
+    queryClient.getQueryData<MembersSnapshot | null>(membersQueryKey(tree.root)) ?? snapshot
+  const link = useWriteOperation({
+    label: () => 'Linking the guardian',
+    write: (input: ReturnType<typeof memberInputFromDraft>) =>
+      window.api.saveMember(input, cachedSnapshot().revision),
+    refreshQueryKey: membersQueryKey
+  })
+  const linkGuardian = async (junior: Member, guardian: Member): Promise<void> => {
+    const current =
+      cachedSnapshot().members.find(
+        (candidate) => candidate.id === junior.id && candidate.mergedInto === undefined
+      ) ?? junior
+    const input = memberInputFromDraft(memberDraftFrom(current), current)
+    input.guardianMemberId = guardian.id
+    try {
+      const outcome = await link.run(input)
+      setSelectedIdentity(memberIdentity(outcome.result, false))
+      if (outcome.status === 'refresh-failed') {
+        onBackgroundError(
+          `Linked ${memberDisplayName(guardian)} as ${memberDisplayName(junior)}’s guardian, but the members list could not be refreshed: ${outcome.refreshError}`
+        )
+      }
+    } catch (caught) {
+      onBackgroundError(
+        `Added ${memberDisplayName(guardian)}, but could not link them as ${memberDisplayName(junior)}’s guardian: ${ipcErrorMessage(caught)}`
+      )
+    }
+  }
   const membershipsById = useMemo(() => {
     const index = new Map<number, Membership[]>()
     for (const membership of deriveMemberships(snapshot)) {
@@ -602,7 +678,7 @@ export function MembersWorkspace({
     )
     if (list.current) list.current.style.width = `${current.percent}%`
   }
-  const startMemberAction = (kind: RowAction, member: Member): void => {
+  const startMemberAction = (kind: ProfileAction, member: Member): void => {
     if (paneBusy) return
     if (kind === 'edit') {
       setSelectedIdentity(memberIdentity(member, duplicatedIds.has(member.id)))
@@ -871,12 +947,16 @@ export function MembersWorkspace({
             snapshot={snapshot}
             root={tree.root}
             member={paneAction.kind === 'edit' ? paneAction.member : null}
+            guardianFor={paneAction.kind === 'new' ? (paneAction.guardianFor ?? null) : null}
             compact={stacked}
             onCancel={leavePane}
             onSaved={(member) => {
               setSavedProfile({ member, revision: snapshot.revision })
               setSelectedIdentity(memberIdentity(member, false))
               leavePane()
+              if (paneAction.kind === 'new' && paneAction.guardianFor) {
+                void linkGuardian(paneAction.guardianFor, member)
+              }
             }}
             onBusyChange={onPaneBusyChange}
             onBackgroundError={onBackgroundError}
@@ -886,6 +966,7 @@ export function MembersWorkspace({
           <MemberProfile
             key={selected.member.id}
             row={selected}
+            members={snapshot.members}
             memberships={membershipsById.get(selected.member.id) ?? []}
             tree={tree}
             compact={stacked}
@@ -893,6 +974,7 @@ export function MembersWorkspace({
             renumbering={renumbering}
             takeFocus={takeProfileFocus}
             onAction={startMemberAction}
+            onOpenMember={activateRow}
             onKeepNumber={onKeepNumber}
           />
         ) : (

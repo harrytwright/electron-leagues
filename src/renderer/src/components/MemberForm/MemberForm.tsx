@@ -1,6 +1,6 @@
 import { forwardRef } from 'react'
-import { Checkbox, Input, Select, Text, Textarea } from '@cloudflare/kumo'
-import { isUnder18 } from '@shared/members'
+import { Checkbox, Combobox, Input, Select, Text, Textarea } from '@cloudflare/kumo'
+import { formatMemberNumber, isUnder18, memberDisplayName, type Member } from '@shared/members'
 import { DateField } from '../DateField'
 import { GENDER_ITEMS, type MemberDraft } from './member-form-data'
 
@@ -9,17 +9,24 @@ const TYPICAL_AGE = 30
 
 interface Props {
   draft: MemberDraft
+  /** Members a junior may be linked to as their guardian: live records other than this one. */
+  guardians: readonly Member[]
+  nextId: number
   errorId?: string
   invalidNames?: { firstName: boolean; lastName: boolean }
   onChange: <Key extends keyof MemberDraft>(key: Key, value: MemberDraft[Key]) => void
 }
 
 export const MemberForm = forwardRef<HTMLInputElement, Props>(function MemberForm(
-  { draft, errorId, invalidNames, onChange },
+  { draft, guardians, nextId, errorId, invalidNames, onChange },
   firstNameRef
 ) {
   const junior = draft.dob !== '' && isUnder18({ dob: draft.dob }, new Date())
   const thisYear = new Date().getFullYear()
+  const guardianLabel = (guardian: Member): string =>
+    `${formatMemberNumber(guardian.id, nextId)} ${memberDisplayName(guardian)}`
+  const linkedGuardian =
+    guardians.find((guardian) => guardian.id === draft.guardianMemberId) ?? null
 
   return (
     <div className="grid gap-4">
@@ -69,18 +76,45 @@ export const MemberForm = forwardRef<HTMLInputElement, Props>(function MemberFor
       <fieldset className="grid gap-3 border-t border-kumo-line pt-4">
         <legend className="px-1 text-sm font-semibold">Contact details</legend>
         {junior ? (
-          <div className="grid gap-1.5">
-            <Input
-              label="Parent or guardian contact"
-              name="guardian-contact"
+          <div className="grid gap-3">
+            <Combobox<Member>
+              label="Linked guardian"
+              description="A member whose own contact details stand for this junior"
+              items={guardians}
+              value={linkedGuardian}
+              onValueChange={(guardian) => onChange('guardianMemberId', guardian?.id ?? null)}
+              itemToStringLabel={guardianLabel}
               autoComplete="off"
-              value={draft.guardianContact}
-              onChange={(event) => onChange('guardianContact', event.target.value)}
-            />
-            <Text variant="secondary" size="sm">
-              For under-18s, keep the parent or guardian’s details here rather than the young
-              person’s own contact details.
-            </Text>
+            >
+              <Combobox.TriggerInput
+                placeholder="Name or member number"
+                clearLabel="Remove the linked guardian"
+              />
+              <Combobox.Content>
+                <Combobox.Empty>No members match.</Combobox.Empty>
+                <Combobox.List>
+                  {(guardian: Member) => (
+                    <Combobox.Item key={guardian.id} value={guardian}>
+                      {guardianLabel(guardian)}
+                    </Combobox.Item>
+                  )}
+                </Combobox.List>
+              </Combobox.Content>
+            </Combobox>
+            <div className="grid gap-1.5">
+              <Input
+                label="Parent or guardian contact"
+                name="guardian-contact"
+                autoComplete="off"
+                value={draft.guardianContact}
+                onChange={(event) => onChange('guardianContact', event.target.value)}
+              />
+              <Text variant="secondary" size="sm">
+                {linkedGuardian
+                  ? 'Anything else about reaching them. Their own contact details come from the linked record.'
+                  : 'For under-18s, keep the parent or guardian’s details here rather than the young person’s own contact details.'}
+              </Text>
+            </div>
           </div>
         ) : (
           <div className="grid grid-cols-[repeat(auto-fit,minmax(12rem,1fr))] gap-3">

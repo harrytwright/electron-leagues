@@ -73,6 +73,25 @@ describe('buildMemberMergePreview', () => {
     ])
   })
 
+  test('keeps main’s linked guardian, or the only one the other records have', () => {
+    expect(
+      buildMemberMergePreview(
+        [member(1, { guardianMemberId: 7 }), member(2, { guardianMemberId: 8 })],
+        1
+      ).result.guardianMemberId
+    ).toBe(7)
+    expect(
+      buildMemberMergePreview([member(1), member(2, { guardianMemberId: 8 })], 1).result
+        .guardianMemberId
+    ).toBe(8)
+    expect(
+      buildMemberMergePreview(
+        [member(1), member(2, { guardianMemberId: 8 }), member(3, { guardianMemberId: 9 })],
+        1
+      ).result.guardianMemberId
+    ).toBeUndefined()
+  })
+
   test('treats optional whitespace as blank and keeps card metadata from main', () => {
     const sources = [
       member(1, { phone: '   ', cardIssued: undefined }),

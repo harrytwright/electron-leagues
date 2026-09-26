@@ -14,6 +14,7 @@ import {
   applyAgeRules,
   formatMemberNumber,
   GENDERS,
+  guardianOf,
   isSingles,
   isUnder18,
   memberDisplayName,
@@ -433,6 +434,7 @@ export function MergeMemberPane({
   const reviewedResult = result ? applyAgeRules(result, new Date()) : null
   const parsed = reviewedResult ? memberMergeResultSchema.safeParse(reviewedResult) : null
   const junior = reviewedResult ? isUnder18(reviewedResult, new Date()) : false
+  const linkedGuardian = result ? guardianOf(result, openingSnapshot.members) : null
   const guardianRecorded =
     preview?.fields
       .find((candidate) => candidate.field === 'guardianContact')
@@ -741,6 +743,13 @@ export function MergeMemberPane({
                     />
                   </>
                 )}
+                {linkedGuardian ? (
+                  <Text variant="secondary" size="sm">
+                    Linked guardian: {memberDisplayName(linkedGuardian)} (
+                    {formatMemberNumber(linkedGuardian.id, openingSnapshot.nextId)}), kept from the
+                    main record.
+                  </Text>
+                ) : null}
                 {junior || guardianRecorded ? (
                   <>
                     {junior ? null : (

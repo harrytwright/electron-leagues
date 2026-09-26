@@ -203,10 +203,12 @@ function MembersTable({
       return update(pane)
     })
   }
-  const startPaneAction = (kind: 'new' | 'edit' | 'merge', member?: Member): void => {
+  const startPaneAction = (kind: 'new' | 'edit' | 'merge' | 'guardian', member?: Member): void => {
     paneInstance.current += 1
     const instance = paneInstance.current
-    if (kind === 'merge' && member) {
+    if (kind === 'guardian' && member) {
+      setAction({ kind: 'new', instance, guardianFor: member })
+    } else if (kind === 'merge' && member) {
       setAction({
         kind,
         instance,

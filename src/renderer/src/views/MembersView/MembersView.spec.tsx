@@ -245,6 +245,106 @@ it('opens a profile explicitly and links roster memberships to the Players tab',
   })
 })
 
+it('shows a linked guardian on a junior’s profile and opens their record', async () => {
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(
+      makeSnapshot({
+        nextId: 3,
+        members: [
+          makeMember({ id: 1, firstName: 'Ann', lastName: 'Lee', phone: '07700 900000' }),
+          makeMember({
+            id: 2,
+            firstName: 'Kid',
+            lastName: 'Lee',
+            dob: '2015-01-01',
+            email: undefined,
+            guardianMemberId: 1
+          })
+        ]
+      })
+    )
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: /Kid Lee, member/ }))
+  const profile = screen.getByRole('article', { name: 'Kid Lee profile' })
+  expect(profile).toHaveTextContent('Linked guardian')
+  expect(profile).toHaveTextContent('jane@example.org, 07700 900000')
+  expect(screen.queryByRole('row', { name: /Kid Lee/ })).not.toHaveTextContent('Needs details')
+  await user.click(within(profile).getByRole('button', { name: 'Ann Lee' }))
+  expect(screen.getByRole('article', { name: 'Ann Lee profile' })).toBeInTheDocument()
+})
+
+it('adds a guardian as a member from the junior’s contact text and links them', async () => {
+  const junior = makeMember({
+    id: 2,
+    firstName: 'Kid',
+    lastName: 'Lee',
+    dob: '2015-01-01',
+    email: undefined,
+    guardianContact: 'Mum, mum@example.org, 07700 900123'
+  })
+  const guardian = makeMember({
+    id: 3,
+    firstName: 'Meg',
+    lastName: 'Lee',
+    dob: undefined,
+    email: 'mum@example.org',
+    phone: '07700 900123'
+  })
+  const initial = makeSnapshot({ revision: 'rev-2', nextId: 3, members: [junior] })
+  const withGuardian = makeSnapshot({ revision: 'rev-3', nextId: 4, members: [junior, guardian] })
+  const linked = makeSnapshot({
+    revision: 'rev-4',
+    nextId: 4,
+    members: [{ ...junior, guardianMemberId: 3 }, guardian]
+  })
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi
+      .fn<RendererApi['membersSnapshot']>()
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(withGuardian)
+      .mockResolvedValue(linked),
+    saveMember: vi
+      .fn<RendererApi['saveMember']>()
+      .mockResolvedValueOnce(guardian)
+      .mockResolvedValueOnce({ ...junior, guardianMemberId: 3 })
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: /Kid Lee, member/ }))
+  await user.click(screen.getByRole('button', { name: 'Add guardian as a member…' }))
+
+  const form = screen.getByRole('form', { name: 'New member: guardian of Kid Lee' })
+  expect(within(form).getByLabelText(/email/i)).toHaveValue('mum@example.org')
+  expect(within(form).getByLabelText(/phone/i)).toHaveValue('07700 900123')
+  expect(within(form).getByLabelText(/notes/i)).toHaveValue(
+    'Guardian of Kid Lee (000002). Contact given as: Mum, mum@example.org, 07700 900123'
+  )
+  await user.type(within(form).getByLabelText(/first name/i), 'Meg')
+  await user.type(within(form).getByLabelText(/last name/i), 'Lee')
+  await user.click(screen.getByRole('button', { name: 'Add member' }))
+
+  await waitFor(() => expect(api.saveMember).toHaveBeenCalledTimes(2))
+  expect(api.saveMember).toHaveBeenNthCalledWith(
+    1,
+    expect.objectContaining({ firstName: 'Meg', email: 'mum@example.org' }),
+    'rev-2'
+  )
+  expect(api.saveMember).toHaveBeenNthCalledWith(
+    2,
+    expect.objectContaining({ id: 2, firstName: 'Kid', guardianMemberId: 3 }),
+    'rev-3'
+  )
+  const profile = await screen.findByRole('article', { name: 'Kid Lee profile' })
+  expect(profile).toHaveTextContent('Linked guardian')
+  expect(within(profile).getByRole('button', { name: 'Meg Lee' })).toBeInTheDocument()
+})
+
 it('opens an archived Windows roster link on the Players tab', async () => {
   const member = makeMember({ id: 1 })
   const league = makeLeague({

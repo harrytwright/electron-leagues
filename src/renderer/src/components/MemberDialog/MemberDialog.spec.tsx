@@ -83,6 +83,35 @@ it('swaps contact fields for a guardian contact once the date of birth makes the
   expect(screen.getByLabelText(/youth updates/i, { selector: '[role="checkbox"]' })).toBeChecked()
 })
 
+it('links a junior to another member as their guardian', async () => {
+  const api = installMockApi()
+  renderDialog({
+    snapshot: makeSnapshot({
+      revision: 'rev-7',
+      nextId: 2,
+      members: [makeMember({ id: 1, firstName: 'Ann', lastName: 'Lee' })]
+    })
+  })
+  const user = userEvent.setup()
+
+  await user.type(screen.getByLabelText(/first name/i), 'Kid')
+  await user.type(screen.getByLabelText(/last name/i), 'Lee')
+  const thisYear = new Date().getFullYear()
+  await user.type(screen.getByLabelText('Date of birth'), `${thisYear - 10}-01-01`)
+  await user.type(screen.getByRole('combobox', { name: 'Linked guardian' }), 'Ann')
+  await user.click(await screen.findByRole('option', { name: '000001 Ann Lee' }))
+  expect(
+    screen.getByText(/Their own contact details come from the linked record/)
+  ).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Add member' }))
+
+  await waitFor(() => expect(api.saveMember).toHaveBeenCalledOnce())
+  expect(api.saveMember).toHaveBeenCalledWith(
+    expect.objectContaining({ firstName: 'Kid', guardianMemberId: 1 }),
+    'rev-7'
+  )
+})
+
 it('edits an existing member from their current details and keeps their number', async () => {
   const api = installMockApi()
   const member = makeMember({

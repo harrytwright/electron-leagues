@@ -198,6 +198,13 @@ export async function saveMember(
   return withRootLock(root, async () => {
     const file = await readMasterForWrite(root, expected)
     const { id, ...details } = input
+    if (details.guardianMemberId !== undefined) {
+      const guardian = resolveMember(file.members, details.guardianMemberId)
+      if (!guardian || guardian.deleted || guardian.id === id) {
+        throw new UserFacingError('The linked guardian must be another member on the list')
+      }
+      details.guardianMemberId = guardian.id
+    }
     const ruled = applyAgeRules(details, today)
     let saved: Member
     let renamed = false
@@ -214,6 +221,7 @@ export async function saveMember(
         'email',
         'phone',
         'guardianContact',
+        'guardianMemberId',
         'notes',
         'cardIssued'
       ] as const) {
@@ -271,8 +279,11 @@ export async function deleteMember(
   return withRootLock(root, async () => {
     const file = await readMasterForWrite(root, expected)
     const member = liveMember(file, id)
-    // A record merged into this one still resolves here from old rosters, so it counts too.
-    let referenced = file.members.some((candidate) => candidate.mergedInto === id)
+    // A record merged into this one still resolves here from old rosters, and a junior
+    // whose guardian this is still needs the contact, so both count too.
+    let referenced = file.members.some(
+      (candidate) => candidate.mergedInto === id || candidate.guardianMemberId === id
+    )
     for (const location of seasonLocations(root, await scanLeaguesRoot(root))) {
       if (referenced) break
       const season = await readSeasonFile(location.path)

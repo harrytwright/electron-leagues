@@ -108,6 +108,8 @@ interface Member {
   phone?: string
   /** Free text: name and contact of a parent/guardian. Under-18s only. */
   guardianContact?: string
+  /** A member who is the guardian; their own contact stands for the junior. Added after review. */
+  guardianMemberId?: number
   /** Every MBD ID known for this person; the MBD itself can hold duplicates. */
   mbdIds: string[]
   /** Every spelling seen for this person, so the sync stops asking. */
@@ -421,7 +423,12 @@ which is why the CSV export takes the ids in table order rather than a filter. A
    the files it touched if a write fails. The master list is written first, so a merge that
    stops part way still reads correctly and shows as an `absorbed-number` problem that
    `repairRosters` clears. The pair `mergeMembers` channel, which had no rollback, went with the
-   dialog that called it.
+   dialog that called it. A junior's guardian can be a linked member (`guardianMemberId`) as
+   well as, or instead of, free text: the profile, the CSV export and the needs-details check
+   read the linked record's own contact, a linked guardian is soft-deleted rather than removed
+   and `saveMember` refuses a link to anyone but another live member. A junior's profile offers
+   _Add guardian as a member…_, which seeds a new adult record from the contact text and links
+   it on save; a guardian is never created without the desk asking for it.
 3. **Sign-in sheet.** HTML layout, `printToPDF`, virtual row, regenerate-on-save and stale-on-
    open, `Superseded` badge on the docx. Tests: generated text contains teams in `teamNo`
    order and the Subs block; archive never generates. As built, the sheet is stamped with the

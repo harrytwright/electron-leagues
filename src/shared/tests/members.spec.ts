@@ -6,6 +6,8 @@ import {
   fitToFormat,
   disabledMembersSnapshot,
   findRosterProblems,
+  guardianContactText,
+  guardianOf,
   formatMemberNumber,
   isReservedFileName,
   isUnder18,
@@ -132,8 +134,25 @@ describe('ages', () => {
     expect(needsDetails(member({ id: 1, dob: '2012-01-01', guardianContact: 'Mum' }), on)).toBe(
       false
     )
+    expect(needsDetails(member({ id: 1, dob: '2012-01-01', guardianMemberId: 2 }), on)).toBe(false)
     expect(needsDetails(member({ id: 1, mergedInto: 2 }), on)).toBe(false)
     expect(needsDetails(member({ id: 1, deleted: true }), on)).toBe(false)
+  })
+
+  test('a linked guardian is followed through merges and supplies their own contact', () => {
+    const members = [
+      member({ id: 1, firstName: 'Ann', lastName: 'Lee', email: 'ann@x.org', phone: '0770' }),
+      member({ id: 5, firstName: 'Old Ann', lastName: 'Lee', mergedInto: 1 }),
+      member({ id: 2, dob: '2012-01-01', guardianMemberId: 5, guardianContact: 'Ask for Ann' }),
+      member({ id: 3, dob: '2012-01-01', guardianContact: 'Dad 0771' }),
+      member({ id: 4, dob: '2012-01-01', guardianMemberId: 99 })
+    ]
+    expect(guardianOf(members[2], members)?.id).toBe(1)
+    expect(guardianContactText(members[2], members)).toBe('Ann Lee, ann@x.org, 0770')
+    expect(guardianOf(members[3], members)).toBeNull()
+    expect(guardianContactText(members[3], members)).toBe('Dad 0771')
+    expect(guardianOf(members[4], members)).toBeNull()
+    expect(guardianContactText(members[4], members)).toBeUndefined()
   })
 })
 

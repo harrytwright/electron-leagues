@@ -2,6 +2,8 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { Button, Text } from '@cloudflare/kumo'
 import { memberDisplayName, type Member, type MembersSnapshot } from '@shared/members'
 import {
+  guardianCandidates,
+  guardianDraftFrom,
   MemberForm,
   memberDraftFrom,
   memberInputFromDraft,
@@ -25,6 +27,8 @@ type SaveState =
 interface Props {
   snapshot: MembersSnapshot
   member: Member | null
+  /** A junior whose guardian this new member will be; seeds the form from their contact text. */
+  guardianFor: Member | null
   compact: boolean
   root: string
   onCancel: () => void
@@ -37,6 +41,7 @@ interface Props {
 export function MemberEditor({
   snapshot,
   member,
+  guardianFor,
   compact,
   root,
   onCancel,
@@ -45,7 +50,14 @@ export function MemberEditor({
   onBackgroundError,
   onBackgroundSuccess
 }: Props): React.JSX.Element {
-  const [draft, setDraft] = useState<MemberDraft>(() => memberDraftFrom(member))
+  const [draft, setDraft] = useState<MemberDraft>(() =>
+    guardianFor ? guardianDraftFrom(guardianFor, snapshot.nextId) : memberDraftFrom(member)
+  )
+  const title = member
+    ? `Edit ${memberDisplayName(member)}`
+    : guardianFor
+      ? `New member: guardian of ${memberDisplayName(guardianFor)}`
+      : 'New member'
   const [revision] = useState(snapshot.revision)
   const [saveState, setSaveState] = useState<SaveState>({ kind: 'editing', error: null })
   const firstNameRef = useRef<HTMLInputElement>(null)
@@ -162,7 +174,7 @@ export function MemberEditor({
 
   return (
     <form
-      aria-label={member ? `Edit ${memberDisplayName(member)}` : 'New member'}
+      aria-label={title}
       className="flex min-h-0 flex-1 flex-col"
       onSubmit={(event) => void submit(event)}
     >
@@ -171,7 +183,7 @@ export function MemberEditor({
       >
         <div className="grid min-w-0 gap-1">
           <Text as="h2" variant="heading" size="lg">
-            {member ? `Edit ${memberDisplayName(member)}` : 'New member'}
+            {title}
           </Text>
           {compact ? null : (
             <Text variant="secondary" size="sm">
@@ -258,6 +270,8 @@ export function MemberEditor({
           <MemberForm
             ref={firstNameRef}
             draft={draft}
+            guardians={guardianCandidates(snapshot.members, member?.id)}
+            nextId={snapshot.nextId}
             errorId={errorId}
             invalidNames={error?.invalidNames ?? undefined}
             onChange={update}
