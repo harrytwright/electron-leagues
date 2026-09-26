@@ -29,6 +29,7 @@ interface Props {
   root: string
   onCancel: () => void
   onSaved: (member: Member) => void
+  onBusyChange: (busy: boolean) => void
   onBackgroundError: (message: string) => void
   onBackgroundSuccess: (message: string) => void
 }
@@ -40,6 +41,7 @@ export function MemberEditor({
   root,
   onCancel,
   onSaved,
+  onBusyChange,
   onBackgroundError,
   onBackgroundSuccess
 }: Props): React.JSX.Element {
@@ -66,6 +68,11 @@ export function MemberEditor({
       active.current = false
     }
   }, [])
+
+  useEffect(() => {
+    onBusyChange(operation.pending)
+    return () => onBusyChange(false)
+  }, [onBusyChange, operation.pending])
 
   const update = <Key extends keyof MemberDraft>(key: Key, value: MemberDraft[Key]): void => {
     if (saveState.kind === 'written') return

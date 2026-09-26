@@ -293,8 +293,9 @@ sixteen items, applied in the commits that follow `78aa233`:
   the way the file is written, singles bowlers are not called substitutes and a LeagueSecretary
   id moves onto the kept entry. A roster listing main once is left alone, and a merge is refused
   while a roster entry sits under a duplicated number.
-- Cancel is held while a write is in flight and a write that lands after the pane was replaced
-  reports its success. A guardian contact carried onto an adult result is shown for review, a
+- The page is held while a write is in flight: Cancel, the row menus, row selection and the
+  toolbar wait for it, and a write that lands after the page was left reports its outcome as a
+  toast. One counter in the view keys every pane instance. A guardian contact carried onto an adult result is shown for review, a
   survivor never lists its own name as an alias and a blank value groups with a missing one.
 - The editor hands the saved record back when its refresh failed, focus moves to the profile
   heading when a pane is left, statuses have shapes as well as colours, the selected row is

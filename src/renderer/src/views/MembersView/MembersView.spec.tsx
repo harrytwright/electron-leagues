@@ -592,31 +592,20 @@ it('keeps a cached-members warning after closing a completed form', async () => 
   expect(api.saveMember).toHaveBeenCalledOnce()
 })
 
-it('does not let an in-flight save replace a newer row selection', async () => {
-  const initial = twoMembersSnapshot()
-  const save = deferred<ReturnType<typeof makeMember>>()
-  const api = installMockApi({
-    getRoot: vi.fn().mockResolvedValue('/root'),
-    membersSnapshot: vi.fn().mockResolvedValue(initial),
-    saveMember: vi.fn(() => save.promise)
-  })
-  const user = userEvent.setup()
-  renderMembers()
-
-  await user.click(await screen.findByRole('button', { name: 'New member…' }))
-  await user.type(screen.getByLabelText(/first name/i), 'Cy')
-  await user.type(screen.getByLabelText(/last name/i), 'Dee')
-  await user.click(screen.getByRole('button', { name: 'Add member' }))
-  await waitFor(() => expect(api.saveMember).toHaveBeenCalledOnce())
-  await user.click(screen.getByRole('button', { name: /Bob Kay, member/ }))
-  expect(screen.getByRole('article', { name: 'Bob Kay profile' })).toBeInTheDocument()
-
-  await act(async () => save.resolve(makeMember({ id: 3, firstName: 'Cy', lastName: 'Dee' })))
-  await waitFor(() => expect(api.saveMember).toHaveBeenCalledOnce())
-  expect(screen.getByRole('article', { name: 'Bob Kay profile' })).toBeInTheDocument()
-})
-
-it('reports a late save failure without replacing the newer selection', async () => {
+it.each([
+  {
+    outcome: 'succeeds',
+    settle: (save: Deferred<ReturnType<typeof makeMember>>) =>
+      save.resolve(makeMember({ id: 3, firstName: 'Cy', lastName: 'Dee' })),
+    message: 'Saved Cy Dee in /root'
+  },
+  {
+    outcome: 'fails',
+    settle: (save: Deferred<ReturnType<typeof makeMember>>) =>
+      save.reject(new Error('Disk is locked')),
+    message: 'Couldn’t save Cy Dee in /root: Disk is locked'
+  }
+])('reports a save that $outcome after the page was left', async ({ settle, message }) => {
   const save = deferred<ReturnType<typeof makeMember>>()
   const api = installMockApi({
     getRoot: vi.fn().mockResolvedValue('/root'),
@@ -624,20 +613,18 @@ it('reports a late save failure without replacing the newer selection', async ()
     saveMember: vi.fn(() => save.promise)
   })
   const user = userEvent.setup()
-  renderMembers()
+  const view = renderWithProviders(<MembersView tree={makeTree()} />)
 
   await user.click(await screen.findByRole('button', { name: 'New member…' }))
   await user.type(screen.getByLabelText(/first name/i), 'Cy')
   await user.type(screen.getByLabelText(/last name/i), 'Dee')
   await user.click(screen.getByRole('button', { name: 'Add member' }))
   await waitFor(() => expect(api.saveMember).toHaveBeenCalledOnce())
-  await user.click(screen.getByRole('button', { name: /Bob Kay, member/ }))
-  await act(async () => save.reject(new Error('Disk is locked')))
+  view.rerender(<p>Another page</p>)
+  await act(async () => settle(save))
 
-  expect(
-    await screen.findByText(/Couldn’t save Cy Dee in \/root: Disk is locked/)
-  ).toBeInTheDocument()
-  expect(screen.getByRole('article', { name: 'Bob Kay profile' })).toBeInTheDocument()
+  expect(await screen.findByText(message)).toBeInTheDocument()
+  expect(api.saveMember).toHaveBeenCalledOnce()
 })
 
 it('merges an ordered selection in the pane and keeps manual results across source changes', async () => {
@@ -894,34 +881,75 @@ it.each([
       merge.reject(new Error('Disk is locked')),
     message: 'Couldn’t merge Bob Kay in /root: Disk is locked'
   }
-])(
-  'reports a merge that $outcome after New member… replaced the pane',
-  async ({ settle, message }) => {
-    const merge = deferred<ReturnType<typeof makeMember>>()
-    const api = installMockApi({
-      getRoot: vi.fn().mockResolvedValue('/root'),
-      membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot()),
-      mergeMemberGroup: vi.fn(() => merge.promise)
-    })
-    const user = userEvent.setup()
-    renderMembers()
+])('reports a merge that $outcome after the page was left', async ({ settle, message }) => {
+  const merge = deferred<ReturnType<typeof makeMember>>()
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot()),
+    mergeMemberGroup: vi.fn(() => merge.promise)
+  })
+  const user = userEvent.setup()
+  const view = renderWithProviders(<MembersView tree={makeTree()} />)
 
-    await openRowMenu(user, 'Bob Kay')
-    await user.click(screen.getByRole('menuitem', { name: 'Merge with…' }))
-    await user.click(screen.getByRole('checkbox', { name: /Merge Ann Lee/ }))
-    await user.click(screen.getByRole('button', { name: 'Merge members' }))
-    expect(screen.getByRole('checkbox', { name: /Merge Ann Lee/ })).toHaveAttribute(
-      'aria-disabled',
-      'true'
-    )
-    await user.click(screen.getByRole('button', { name: 'New member…' }))
-    await act(async () => settle(merge))
+  await openRowMenu(user, 'Bob Kay')
+  await user.click(screen.getByRole('menuitem', { name: 'Merge with…' }))
+  await user.click(screen.getByRole('checkbox', { name: /Merge Ann Lee/ }))
+  await user.click(screen.getByRole('button', { name: 'Merge members' }))
+  expect(screen.getByRole('checkbox', { name: /Merge Ann Lee/ })).toHaveAttribute(
+    'aria-disabled',
+    'true'
+  )
+  view.rerender(<p>Another page</p>)
+  await act(async () => settle(merge))
 
-    expect(await screen.findByText(message)).toBeInTheDocument()
-    expect(screen.getByRole('form', { name: 'New member' })).toBeInTheDocument()
-    expect(api.mergeMemberGroup).toHaveBeenCalledOnce()
-  }
-)
+  expect(await screen.findByText(message)).toBeInTheDocument()
+  expect(api.mergeMemberGroup).toHaveBeenCalledOnce()
+})
+
+it('holds the rows and toolbar while a member is being written', async () => {
+  const initial = twoMembersSnapshot()
+  const saved = makeMember({ id: 3, firstName: 'Cy', lastName: 'Dee' })
+  const save = deferred<ReturnType<typeof makeMember>>()
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi
+      .fn<RendererApi['membersSnapshot']>()
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValue(
+        makeSnapshot({ revision: 'rev-3', nextId: 4, members: [...initial.members, saved] })
+      ),
+    saveMember: vi.fn(() => save.promise)
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: 'New member…' }))
+  await user.type(screen.getByLabelText(/first name/i), 'Cy')
+  await user.type(screen.getByLabelText(/last name/i), 'Dee')
+  await user.click(screen.getByRole('button', { name: 'Add member' }))
+
+  expect(screen.getByRole('button', { name: 'New member…' })).toHaveAttribute(
+    'aria-disabled',
+    'true'
+  )
+  expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+  await user.click(screen.getByRole('button', { name: /Bob Kay, member/ }))
+  expect(screen.getByRole('form', { name: 'New member' })).toBeInTheDocument()
+  await openRowMenu(user, 'Bob Kay')
+  expect(screen.getByRole('menuitem', { name: 'Edit…' })).toHaveAttribute('aria-disabled', 'true')
+  expect(screen.getByRole('menuitem', { name: 'Merge with…' })).toHaveAttribute(
+    'aria-disabled',
+    'true'
+  )
+  await user.keyboard('{Escape}')
+  await act(async () => save.resolve(saved))
+
+  expect(await screen.findByRole('article', { name: 'Cy Dee profile' })).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'New member…' })).not.toHaveAttribute(
+    'aria-disabled',
+    'true'
+  )
+})
 
 it('reviews a guardian contact carried onto an adult result', async () => {
   const api = installMockApi({

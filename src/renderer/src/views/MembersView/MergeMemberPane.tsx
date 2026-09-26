@@ -53,6 +53,7 @@ interface Props {
   onSaved: (member: Member) => void
   onFreezeSelection: () => void
   onUnfreezeSelection: () => void
+  onBusyChange: (busy: boolean) => void
   onBackgroundError: (message: string) => void
   onBackgroundSuccess: (message: string) => void
 }
@@ -403,6 +404,7 @@ export function MergeMemberPane({
   onSaved,
   onFreezeSelection,
   onUnfreezeSelection,
+  onBusyChange,
   onBackgroundError,
   onBackgroundSuccess
 }: Props): React.JSX.Element {
@@ -449,6 +451,11 @@ export function MergeMemberPane({
       active.current = false
     }
   }, [])
+
+  useEffect(() => {
+    onBusyChange(operation.pending)
+    return () => onBusyChange(false)
+  }, [onBusyChange, operation.pending])
 
   useEffect(() => {
     if (saveState.kind === 'editing' && !saveState.error) return

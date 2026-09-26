@@ -128,6 +128,7 @@ function MembersTable({
   const [action, setAction] = useState<MemberAction | null>(null)
   const [syncPath, setSyncPath] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
+  const [paneBusy, setPaneBusy] = useState(false)
   const paneInstance = useRef(0)
   const [table, setTable] = useState<MembersTablePreference>(loadMembersTable)
   const [compact, setCompact] = useState(false)
@@ -179,13 +180,23 @@ function MembersTable({
       return update(pane)
     })
   }
-  const startPaneAction = (kind: 'new' | 'edit', member?: Member): void => {
+  const startPaneAction = (kind: 'new' | 'edit' | 'merge', member?: Member): void => {
     paneInstance.current += 1
-    setAction(
-      kind === 'edit' && member
-        ? { kind, member, instance: paneInstance.current }
-        : { kind: 'new', instance: paneInstance.current }
-    )
+    const instance = paneInstance.current
+    if (kind === 'merge' && member) {
+      setAction({
+        kind,
+        instance,
+        openingSnapshot: snapshot,
+        selectedIds: [member.id],
+        mainId: member.id,
+        selectionFrozen: false
+      })
+    } else if (kind === 'edit' && member) {
+      setAction({ kind, member, instance })
+    } else {
+      setAction({ kind: 'new', instance })
+    }
   }
   const pickExport = async (): Promise<void> => {
     setAction(null)
@@ -270,7 +281,7 @@ function MembersTable({
             <DropdownMenu>
               <DropdownMenu.Trigger render={<Toolbar.Button>More actions</Toolbar.Button>} />
               <DropdownMenu.Content align="end">
-                <DropdownMenu.Item onClick={() => void pickExport()}>
+                <DropdownMenu.Item disabled={paneBusy} onClick={() => void pickExport()}>
                   Sync from MBD…
                 </DropdownMenu.Item>
                 {/* The `printCards` channel is wired in main; this item wakes up with a template. */}
@@ -278,7 +289,7 @@ function MembersTable({
                   {`Print ${plural(listed.length, 'card')} (${CARDS_PARKED})`}
                 </DropdownMenu.Item>
                 <DropdownMenu.Item
-                  disabled={listed.length === 0}
+                  disabled={listed.length === 0 || paneBusy}
                   onClick={() => {
                     setAction(null)
                     setExporting(true)
@@ -291,6 +302,7 @@ function MembersTable({
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item
                       variant="danger"
+                      disabled={paneBusy}
                       onClick={() => setAction({ kind: 'reset' })}
                     >
                       Delete all members…
@@ -302,6 +314,7 @@ function MembersTable({
             <Toolbar.Button
               type="button"
               icon={<UserPlusIcon aria-hidden size={14} />}
+              disabled={paneBusy}
               onClick={() => startPaneAction('new')}
             >
               New member…
@@ -375,11 +388,12 @@ function MembersTable({
         duplicatedIds={duplicatedIds}
         renumbering={renumber.pending}
         compact={compact}
+        paneBusy={paneBusy}
         sort={table.sort}
         onSort={sortBy}
         onAction={(kind, member) => {
-          if (kind === 'edit') startPaneAction(kind, member)
-          else setAction({ kind, member })
+          if (kind === 'delete') setAction({ kind, member })
+          else startPaneAction(kind, member)
         }}
         onKeepNumber={(member) => {
           setAction(null)
@@ -392,6 +406,7 @@ function MembersTable({
         }
         onPaneActionChange={setPaneAction}
         onPaneActionUpdate={updatePaneAction}
+        onPaneBusyChange={setPaneBusy}
         onBackgroundError={(message) => add({ title: message, variant: 'error' })}
         onBackgroundSuccess={(message) => add({ title: message, variant: 'success' })}
       />

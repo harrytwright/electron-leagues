@@ -335,10 +335,13 @@ interface Props {
   renumbering: boolean
   /** Below the compact width the list stacks above the profile. */
   compact: boolean
+  /** True while a form or merge is writing; the rows and menus hold until it settles. */
+  paneBusy: boolean
   sort: MembersSort
   onSort: (column: MembersSortColumn) => void
-  onAction: (kind: 'edit' | 'delete', member: Member) => void
+  onAction: (kind: RowAction, member: Member) => void
   onKeepNumber: (member: Member) => void
+  onPaneBusyChange: (busy: boolean) => void
   paneAction: PaneAction
   onPaneActionChange: (action: PaneAction) => void
   onPaneActionUpdate: (update: (current: PaneAction) => PaneAction) => void
@@ -390,6 +393,7 @@ interface MemberListRowProps {
   mergeDisabled: boolean
   duplicated: boolean
   renumbering: boolean
+  busy: boolean
   onActivate: (member: Member) => void
   onToggleMerge: (member: Member) => void
   onKeepNumber: (member: Member) => void
@@ -405,6 +409,7 @@ const MemberListRow = memo(function MemberListRow({
   mergeDisabled,
   duplicated,
   renumbering,
+  busy,
   onActivate,
   onToggleMerge,
   onKeepNumber,
@@ -460,7 +465,7 @@ const MemberListRow = memo(function MemberListRow({
           <DropdownMenu.Content>
             {duplicated ? (
               <DropdownMenu.Item
-                disabled={renumbering}
+                disabled={renumbering || busy}
                 onClick={(event) => {
                   event.stopPropagation()
                   onKeepNumber(row.member)
@@ -471,7 +476,7 @@ const MemberListRow = memo(function MemberListRow({
             ) : (
               <>
                 <DropdownMenu.Item
-                  disabled={row.member.deleted}
+                  disabled={row.member.deleted || busy}
                   onClick={(event) => {
                     event.stopPropagation()
                     onRowAction('edit', row.member)
@@ -480,7 +485,7 @@ const MemberListRow = memo(function MemberListRow({
                   Edit…
                 </DropdownMenu.Item>
                 <DropdownMenu.Item
-                  disabled={row.member.deleted}
+                  disabled={row.member.deleted || busy}
                   onClick={(event) => {
                     event.stopPropagation()
                     onRowAction('merge', row.member)
@@ -492,7 +497,7 @@ const MemberListRow = memo(function MemberListRow({
                 <DropdownMenu.Separator />
                 <DropdownMenu.Item
                   variant="danger"
-                  disabled={row.member.deleted}
+                  disabled={row.member.deleted || busy}
                   onClick={(event) => {
                     event.stopPropagation()
                     onRowAction('delete', row.member)
@@ -517,6 +522,7 @@ export function MembersWorkspace({
   duplicatedIds,
   renumbering,
   compact: stacked,
+  paneBusy,
   sort,
   onSort,
   onAction,
@@ -524,6 +530,7 @@ export function MembersWorkspace({
   paneAction,
   onPaneActionChange,
   onPaneActionUpdate,
+  onPaneBusyChange,
   onBackgroundError,
   onBackgroundSuccess
 }: Props): React.JSX.Element {
@@ -534,7 +541,6 @@ export function MembersWorkspace({
   const list = useRef<HTMLElement>(null)
   const listId = useId()
   const drag = useRef<{ startX: number; startPercent: number; percent: number } | null>(null)
-  const mergeInstance = useRef(0)
   const focusProfile = useRef(false)
   const membershipsById = useMemo(() => {
     const index = new Map<number, Membership[]>()
@@ -596,26 +602,18 @@ export function MembersWorkspace({
     )
     if (list.current) list.current.style.width = `${current.percent}%`
   }
-  const startMemberAction = (kind: 'edit' | 'merge' | 'delete', member: Member): void => {
+  const startMemberAction = (kind: RowAction, member: Member): void => {
+    if (paneBusy) return
     if (kind === 'edit') {
       setSelectedIdentity(memberIdentity(member, duplicatedIds.has(member.id)))
     }
-    if (kind === 'merge') {
-      if (member.deleted || member.mergedInto !== undefined || duplicatedIds.has(member.id)) {
-        return
-      }
-      mergeInstance.current += 1
-      onPaneActionChange({
-        kind: 'merge',
-        instance: mergeInstance.current,
-        openingSnapshot: snapshot,
-        selectedIds: [member.id],
-        mainId: member.id,
-        selectionFrozen: false
-      })
+    if (
+      kind === 'merge' &&
+      (member.deleted || member.mergedInto !== undefined || duplicatedIds.has(member.id))
+    ) {
       return
     }
-    if (kind === 'edit' || kind === 'delete') onAction(kind, member)
+    onAction(kind, member)
   }
 
   const mergeAction = paneAction?.kind === 'merge' ? paneAction : null
@@ -649,6 +647,7 @@ export function MembersWorkspace({
       toggleMergeMember(member)
       return
     }
+    if (paneBusy) return
     focusProfile.current = false
     onPaneActionChange(null)
     setSelectedIdentity(memberIdentity(member, duplicatedIds.has(member.id)))
@@ -765,6 +764,7 @@ export function MembersWorkspace({
                       }
                       duplicated={duplicatedIds.has(row.member.id)}
                       renumbering={renumbering}
+                      busy={paneBusy}
                       onActivate={onActivate}
                       onToggleMerge={onToggleMerge}
                       onKeepNumber={onRowKeepNumber}
@@ -861,6 +861,7 @@ export function MembersWorkspace({
                 current?.kind === 'merge' ? { ...current, selectionFrozen: false } : current
               )
             }
+            onBusyChange={onPaneBusyChange}
             onBackgroundError={onBackgroundError}
             onBackgroundSuccess={onBackgroundSuccess}
           />
@@ -877,6 +878,7 @@ export function MembersWorkspace({
               setSelectedIdentity(memberIdentity(member, false))
               leavePane()
             }}
+            onBusyChange={onPaneBusyChange}
             onBackgroundError={onBackgroundError}
             onBackgroundSuccess={onBackgroundSuccess}
           />
