@@ -42,7 +42,6 @@ import { DeleteMemberDialog } from '@renderer/components/DeleteMemberDialog'
 import { ErrorState } from '@renderer/components/ErrorState'
 import { ExportCsvDialog } from '@renderer/components/ExportCsvDialog'
 import { MbdSyncDialog } from '@renderer/components/MbdSyncDialog'
-import { MergeMemberDialog } from '@renderer/components/MergeMemberDialog'
 import { ResetMembersDialog } from '@renderer/components/ResetMembersDialog'
 import type { Props } from './interface'
 import { MembersWorkspace, type PaneAction } from './MembersWorkspace'
@@ -114,10 +113,7 @@ function EnableMembers({ root }: { root: string }): React.JSX.Element {
 }
 
 type MemberAction =
-  | Exclude<PaneAction, null>
-  | { kind: 'reset' }
-  | { kind: 'merge'; member: Member }
-  | { kind: 'delete'; member: Member }
+  Exclude<PaneAction, null> | { kind: 'reset' } | { kind: 'delete'; member: Member }
 
 function MembersTable({
   snapshot,
@@ -174,6 +170,15 @@ function MembersTable({
     if (!open) setAction(null)
   }
   const setPaneAction = (next: PaneAction): void => setAction(next)
+  const updatePaneAction = (update: (current: PaneAction) => PaneAction): void => {
+    setAction((current) => {
+      const pane =
+        current?.kind === 'new' || current?.kind === 'edit' || current?.kind === 'merge'
+          ? current
+          : null
+      return update(pane)
+    })
+  }
   const startPaneAction = (kind: 'new' | 'edit', member?: Member): void => {
     paneInstance.current += 1
     setAction(
@@ -373,14 +378,19 @@ function MembersTable({
         onSort={sortBy}
         onAction={(kind, member) => {
           if (kind === 'edit') startPaneAction(kind, member)
-          else setAction({ kind, member })
+          else if (kind === 'delete') setAction({ kind, member })
         }}
         onKeepNumber={(member) => {
           setAction(null)
           void keepNumber(member)
         }}
-        paneAction={action?.kind === 'new' || action?.kind === 'edit' ? action : null}
+        paneAction={
+          action?.kind === 'new' || action?.kind === 'edit' || action?.kind === 'merge'
+            ? action
+            : null
+        }
         onPaneActionChange={setPaneAction}
+        onPaneActionUpdate={updatePaneAction}
         onBackgroundError={(message) => add({ title: message, variant: 'error' })}
       />
       <div className="flex shrink-0 items-center justify-between border-t border-kumo-line px-4 py-1.5">
@@ -405,13 +415,6 @@ function MembersTable({
         ) : null}
       </div>
 
-      <MergeMemberDialog
-        snapshot={snapshot}
-        member={action?.kind === 'merge' ? action.member : null}
-        open={action?.kind === 'merge'}
-        onOpenChange={closeAction}
-        onMerged={() => setAction(null)}
-      />
       <ExportCsvDialog ids={listed} open={exporting} onOpenChange={setExporting} />
       <MbdSyncDialog
         snapshot={snapshot}

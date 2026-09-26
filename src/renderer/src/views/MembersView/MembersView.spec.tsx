@@ -547,28 +547,249 @@ it('reports a late save failure without replacing the newer selection', async ()
   expect(screen.getByRole('article', { name: 'Bob Kay profile' })).toBeInTheDocument()
 })
 
-it('merges two members from the row menu, keeping whichever record the desk picks', async () => {
+it('merges an ordered selection in the pane and keeps manual results across source changes', async () => {
+  const initial = makeSnapshot({
+    revision: 'rev-3',
+    nextId: 4,
+    members: [
+      makeMember({
+        id: 1,
+        firstName: 'Ann',
+        lastName: 'Lee',
+        aliases: ['Annie'],
+        mbdIds: ['A1'],
+        notes: 'Ann note'
+      }),
+      makeMember({
+        id: 2,
+        firstName: 'Bob',
+        lastName: 'Kay',
+        aliases: ['Bobby'],
+        mbdIds: ['B2'],
+        notes: 'Bob note'
+      }),
+      makeMember({ id: 3, firstName: 'Cy', lastName: 'Dee' })
+    ]
+  })
   const api = installMockApi({
     getRoot: vi.fn().mockResolvedValue('/root'),
-    membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot())
+    membersSnapshot: vi.fn().mockResolvedValue(initial)
   })
   const user = userEvent.setup()
   renderMembers()
 
   await openRowMenu(user, 'Bob Kay')
   await user.click(screen.getByRole('menuitem', { name: 'Merge with…' }))
-  expect(await screen.findByRole('dialog')).toHaveTextContent('Merge Bob Kay with…')
-  expect(screen.queryByRole('radio')).not.toBeInTheDocument()
-  screen.getByLabelText(/merge with/i).focus()
-  await user.keyboard('{ArrowDown}')
-  await user.click(await screen.findByRole('option', { name: '000001 Ann Lee' }))
-  // The chosen record stays by default; the desk can turn the merge round.
-  expect(screen.getByRole('radio', { name: 'Keep 000001 Ann Lee' })).toBeChecked()
-  await user.click(screen.getByRole('radio', { name: 'Keep 000002 Bob Kay' }))
+  expect(await screen.findByRole('region', { name: 'Merge members workspace' })).toHaveTextContent(
+    '1 selected'
+  )
+  expect(screen.getByRole('checkbox', { name: /Merge Bob Kay, member 000002/ })).toBeChecked()
+  await user.click(screen.getByRole('button', { name: /Ann Lee, member 000001/ }))
+  expect(screen.getByText('2 selected')).toBeInTheDocument()
+  expect(screen.getByLabelText('Main record')).toHaveTextContent('000002 Bob Kay')
+
+  await user.clear(screen.getByLabelText('First name'))
+  await user.type(screen.getByLabelText('First name'), 'Robin')
+  await user.click(screen.getByRole('checkbox', { name: /Merge Bob Kay, member 000002/ }))
+  expect(screen.getByText('1 selected')).toBeInTheDocument()
+  await user.click(screen.getByRole('checkbox', { name: /Merge Bob Kay, member 000002/ }))
+  expect(screen.getByLabelText('Main record')).toHaveTextContent('000001 Ann Lee')
+  expect(screen.getByLabelText('First name')).toHaveValue('Robin')
+
+  await user.click(screen.getByRole('checkbox', { name: /Merge Cy Dee, member 000003/ }))
+  const firstNameSources = screen.getByLabelText('First name source values')
+  await user.click(within(firstNameSources).getByRole('button', { name: /Cy.*Cy Dee/ }))
+  expect(screen.getByLabelText('First name')).toHaveValue('Cy')
+  await user.click(screen.getByRole('checkbox', { name: /Merge Cy Dee, member 000003/ }))
+  expect(screen.getByRole('status')).toHaveTextContent('chosen source record was removed')
+  expect(screen.getByLabelText('First name')).toHaveValue('Ann')
+  await user.click(screen.getByRole('button', { name: 'Use default' }))
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
+
+  const noteSources = screen.getByLabelText('Notes source values')
+  await user.click(within(noteSources).getByRole('button', { name: /Bob note/ }))
+  expect(screen.getByLabelText('Combined notes')).toHaveValue('Bob note')
+  await user.click(screen.getByRole('button', { name: /Combined \(default\)/ }))
+  expect(screen.getByLabelText('Combined notes')).toHaveValue('Ann note\n\nBob note')
+  await user.clear(screen.getByLabelText('First name'))
+  await user.type(screen.getByLabelText('First name'), 'Robin')
+
+  await user.type(screen.getByRole('searchbox', { name: 'Filter members' }), 'Ann')
+  expect(screen.queryByRole('row', { name: /Bob Kay/ })).not.toBeInTheDocument()
+  expect(screen.getByText('2 selected')).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Merge members' }))
 
-  await waitFor(() => expect(api.mergeMembers).toHaveBeenCalledExactlyOnceWith(1, 2, 'rev-2'))
+  await waitFor(() => expect(api.mergeMemberGroup).toHaveBeenCalledOnce())
+  expect(api.mergeMemberGroup).toHaveBeenCalledWith(
+    expect.objectContaining({
+      sourceIds: [1, 2],
+      mainId: 1,
+      expectedRevision: 'rev-3',
+      result: expect.objectContaining({
+        firstName: 'Robin',
+        aliases: expect.arrayContaining(['Annie', 'Bobby', 'Ann Lee', 'Bob Kay']),
+        mbdIds: ['A1', 'B2'],
+        notes: 'Ann note\n\nBob note'
+      })
+    })
+  )
 })
+
+it('keeps twenty merge selections compact and refuses duplicate records', async () => {
+  const members = Array.from({ length: 20 }, (_, index) =>
+    makeMember({ id: index + 1, firstName: `Member${index + 1}`, lastName: 'Test' })
+  )
+  members.push(makeMember({ id: 21, firstName: 'Duplicate one', lastName: 'Test' }))
+  members.push(makeMember({ id: 21, firstName: 'Duplicate two', lastName: 'Test' }))
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(
+      makeSnapshot({
+        nextId: 22,
+        members,
+        problems: [{ kind: 'duplicate-number', id: 21, count: 2 }]
+      })
+    )
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await openRowMenu(user, 'Member1 Test')
+  await user.click(screen.getByRole('menuitem', { name: 'Merge with…' }))
+  for (let id = 2; id <= 20; id += 1) {
+    await user.click(screen.getByRole('checkbox', { name: new RegExp(`Merge Member${id} Test`) }))
+  }
+  expect(screen.getByText('20 selected')).toBeInTheDocument()
+  expect(screen.getByRole('button', { name: 'Selected records (20)' })).toHaveAttribute(
+    'aria-expanded',
+    'false'
+  )
+  for (const checkbox of screen.getAllByRole('checkbox', { name: /Merge Duplicate/ })) {
+    expect(checkbox).toHaveAttribute('aria-disabled', 'true')
+  }
+})
+
+it('blocks a merge draft when the members revision changes', async () => {
+  const queryClient = createQueryClient()
+  const initial = twoMembersSnapshot()
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(initial)
+  })
+  const user = userEvent.setup()
+  renderWithProviders(<MembersView tree={makeTree()} />, { queryClient })
+
+  await openRowMenu(user, 'Bob Kay')
+  await user.click(screen.getByRole('menuitem', { name: 'Merge with…' }))
+  await user.click(screen.getByRole('checkbox', { name: /Merge Ann Lee/ }))
+  act(() => queryClient.setQueryData(membersQueryKey('/root'), { ...initial, revision: 'rev-3' }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent('members list changed')
+  expect(screen.getByRole('button', { name: 'Merge members' })).toBeDisabled()
+  expect(screen.getByRole('checkbox', { name: /Merge Ann Lee/ })).toHaveAttribute(
+    'aria-disabled',
+    'true'
+  )
+})
+
+it.each(['Cancel', 'Close'] as const)(
+  'opens the written survivor when a merge refresh fails and %s is used',
+  async (buttonName) => {
+    const initial = twoMembersSnapshot()
+    const saved = makeMember({ id: 2, firstName: 'Robert', lastName: 'Kay' })
+    const membersSnapshot = vi
+      .fn<RendererApi['membersSnapshot']>()
+      .mockResolvedValueOnce(initial)
+      .mockRejectedValueOnce(new Error('Members scan failed'))
+    const api = installMockApi({
+      getRoot: vi.fn().mockResolvedValue('/root'),
+      membersSnapshot,
+      mergeMemberGroup: vi.fn().mockResolvedValue(saved)
+    })
+    const user = userEvent.setup()
+    renderMembers()
+
+    await openRowMenu(user, 'Bob Kay')
+    await user.click(screen.getByRole('menuitem', { name: 'Merge with…' }))
+    await user.click(screen.getByRole('checkbox', { name: /Merge Ann Lee/ }))
+    await user.click(screen.getByRole('button', { name: 'Merge members' }))
+
+    expect(
+      await screen.findByText(/Merged Robert Kay, but the list could not be refreshed/)
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Cancel and start the merge again/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: buttonName }))
+    expect(screen.getByRole('article', { name: 'Robert Kay profile' })).toBeInTheDocument()
+    expect(api.mergeMemberGroup).toHaveBeenCalledOnce()
+  }
+)
+
+it('retries only the refresh after a completed merge', async () => {
+  const initial = twoMembersSnapshot()
+  const saved = makeMember({ id: 2, firstName: 'Robert', lastName: 'Kay' })
+  const refreshed = makeSnapshot({
+    revision: 'rev-3',
+    nextId: 3,
+    members: [saved, { ...initial.members[0], mergedInto: 2 }]
+  })
+  const membersSnapshot = vi
+    .fn<RendererApi['membersSnapshot']>()
+    .mockResolvedValueOnce(initial)
+    .mockRejectedValueOnce(new Error('Members scan failed'))
+    .mockResolvedValueOnce(refreshed)
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot,
+    mergeMemberGroup: vi.fn().mockResolvedValue(saved)
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await openRowMenu(user, 'Bob Kay')
+  await user.click(screen.getByRole('menuitem', { name: 'Merge with…' }))
+  await user.click(screen.getByRole('checkbox', { name: /Merge Ann Lee/ }))
+  await user.click(screen.getByRole('button', { name: 'Merge members' }))
+  await user.click(await screen.findByRole('button', { name: 'Retry refresh' }))
+
+  expect(await screen.findByRole('article', { name: 'Robert Kay profile' })).toBeInTheDocument()
+  expect(api.mergeMemberGroup).toHaveBeenCalledOnce()
+  expect(membersSnapshot).toHaveBeenCalledTimes(3)
+})
+
+it.each(['Cancel', 'New member…'] as const)(
+  'keeps the %s outcome active when a pending merge fails late',
+  async (nextAction) => {
+    const merge = deferred<ReturnType<typeof makeMember>>()
+    const api = installMockApi({
+      getRoot: vi.fn().mockResolvedValue('/root'),
+      membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot()),
+      mergeMemberGroup: vi.fn(() => merge.promise)
+    })
+    const user = userEvent.setup()
+    renderMembers()
+
+    await openRowMenu(user, 'Bob Kay')
+    await user.click(screen.getByRole('menuitem', { name: 'Merge with…' }))
+    await user.click(screen.getByRole('checkbox', { name: /Merge Ann Lee/ }))
+    await user.click(screen.getByRole('button', { name: 'Merge members' }))
+    expect(screen.getByRole('checkbox', { name: /Merge Ann Lee/ })).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    )
+    await user.click(screen.getByRole('button', { name: nextAction }))
+    await act(async () => merge.reject(new Error('Disk is locked')))
+
+    expect(
+      await screen.findByText(/Couldn’t merge Bob Kay in \/root: Disk is locked/)
+    ).toBeInTheDocument()
+    const activePane =
+      nextAction === 'New member…'
+        ? screen.getByRole('form', { name: 'New member' })
+        : screen.getByRole('heading', { name: 'Select a member' })
+    expect(activePane).toBeInTheDocument()
+    expect(api.mergeMemberGroup).toHaveBeenCalledOnce()
+  }
+)
 
 it('deletes a member, explaining whether they are hidden or removed', async () => {
   const snapshot = twoMembersSnapshot()

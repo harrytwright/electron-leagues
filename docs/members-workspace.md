@@ -152,7 +152,7 @@ tools and retains a JSON usage receipt. Sol runs through Codex's agent tool. The
 | 1     | Compact selectable list, resizable/stacked layout, readable profile and roster links. Existing editing/merge dialogs remain transitional until their phases. | Complete |
 | 2     | Shared member form and creation/editing in the detail pane, including save/refresh behaviour and navigation discard.                                         | Complete |
 | 3     | Validated group merge contract, shared preview rules and main-process roster/file handling. Keep old callers working until phase 4.                          | Complete |
-| 4     | Merge selection mode, editable comparison, final integration, responsive/keyboard visual verification and removal of obsolete Members dialog paths.          | Pending  |
+| 4     | Merge selection mode, editable comparison, final integration, responsive/keyboard visual verification and removal of obsolete Members dialog paths.          | Complete |
 
 Use focused components for layout, list, profile, form and merge comparison. Represent mutually
 exclusive pane actions explicitly instead of accumulating boolean flags. Preserve responsive
@@ -271,4 +271,33 @@ remains phase 4, with a design handoff in `.temp/members-workspace/phase4-brief.
 Phase 3 final verification passed: `npm run format`, `npm test` (92 files, 902 tests),
 `npm run typecheck`, `npm run lint` and `git diff --check`. Lint retains only the existing
 anti-slop module-type warning. The next implementation phase is the merge workspace UI;
-no phase 4 application changes have been started.
+phase 4 implementation began after the user approved continuation.
+
+### Phase 4 completion
+
+The Members page now uses ordered row selection and an in-pane merge comparison. The first
+selected member supplies the main record; removing it selects the earliest remaining record.
+Manual field edits survive main-record and selection changes. Source values can be reset to the
+default, with a visible notice when a chosen source disappears. Notes have an explicit combined
+default, while aliases and MBD identifiers combine automatically. The Members merge-dialog path
+has been removed; other consumers retain their existing wrappers.
+
+The bounded Opus 5.5 review identified missing source/default recovery and the wrong profile
+being shown after closing a completed merge whose refresh failed. These findings are resolved.
+The suggestion to retain a draft when Delete is chosen was declined because the approved design
+discards drafts on another explicit action. The review's first finding was truncated in the CLI
+result and could not be evaluated in full; no repeat paid review was run. Independently, the
+completed-write state now suppresses the obsolete instruction to cancel and restart the merge.
+The receipt records $0.9251122 API-equivalent usage across four internal CLI turns, below the $1
+cap. Review and usage files remain in the ignored temporary review directory.
+
+Browser checks covered 20 selections, hidden selections, manual edits, removing the main record,
+clearing all selections then choosing different members, source fallback and a renamed survivor
+shown after a completed write with failed refresh. Selection freezes during saving and recovery.
+The 800 × 500 dark layout retains independently scrolling panes without horizontal overflow;
+the 1100 × 720 light layout was also inspected. Tests cover combined-note/default recovery,
+refresh-only retry with exactly one merge write and late failures after Cancel or New member.
+
+Final verification passed: `npm run format`, `npm test` (92 files, 909 tests),
+`npm run typecheck`, `npm run lint` and `git diff --check`. Lint reports only the existing
+anti-slop module-type warning. All four implementation phases are complete.

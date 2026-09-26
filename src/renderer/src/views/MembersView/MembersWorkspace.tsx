@@ -4,11 +4,17 @@ import { CaretRightIcon, DotsThreeIcon, UserCircleIcon } from '@phosphor-icons/r
 import type { Member, Membership, MembersSnapshot } from '@shared/members'
 import type { LeaguesTree } from '@shared/tree'
 import { deriveMemberships } from '@shared/members'
-import type { MemberRow, MembersSort, MembersSortColumn } from '@renderer/lib/members-filter'
+import {
+  buildMemberRows,
+  type MemberRow,
+  type MembersSort,
+  type MembersSortColumn
+} from '@renderer/lib/members-filter'
 import { useWorkspace } from '@renderer/hooks/use-workspace'
 import { IconButton } from '@renderer/components/IconButton'
 import { STATIC_ROW_CLASS } from '@renderer/components/FileBrowser/styles'
 import { MemberEditor } from './MemberEditor'
+import { MergeMemberPane } from './MergeMemberPane'
 
 const SPLIT_KEY = 'leagues:members-workspace:v1'
 const DEFAULT_LIST_PERCENT = 34
@@ -288,17 +294,33 @@ interface Props {
   onKeepNumber: (member: Member) => void
   paneAction: PaneAction
   onPaneActionChange: (action: PaneAction) => void
+  onPaneActionUpdate: (update: (current: PaneAction) => PaneAction) => void
   onBackgroundError: (message: string) => void
 }
 
 export type PaneAction =
-  { kind: 'new'; instance: number } | { kind: 'edit'; member: Member; instance: number } | null
+  | { kind: 'new'; instance: number }
+  | { kind: 'edit'; member: Member; instance: number }
+  | {
+      kind: 'merge'
+      instance: number
+      openingSnapshot: MembersSnapshot
+      selectedIds: number[]
+      mainId: number
+      selectionFrozen: boolean
+    }
+  | null
 
 interface MemberIdentity {
   id: number
   fingerprint: string
   duplicated: boolean
   reference: Member
+}
+
+interface SavedProfile {
+  member: Member
+  revision: string
 }
 
 function memberFingerprint(member: Member): string {
@@ -322,14 +344,17 @@ export function MembersWorkspace({
   onKeepNumber,
   paneAction,
   onPaneActionChange,
+  onPaneActionUpdate,
   onBackgroundError
 }: Props): React.JSX.Element {
   const [selectedIdentity, setSelectedIdentity] = useState<MemberIdentity | null>(null)
+  const [savedProfile, setSavedProfile] = useState<SavedProfile | null>(null)
   const [listPercent, setListPercent] = useState(loadListPercent)
   const [stacked, setStacked] = useState(false)
   const workspace = useRef<HTMLDivElement>(null)
   const list = useRef<HTMLElement>(null)
   const drag = useRef<{ startX: number; startPercent: number; percent: number } | null>(null)
+  const mergeInstance = useRef(0)
   const memberKeys = useMemo(() => {
     const occurrences = new Map<number, number>()
     const keys = new Map<Member, string>()
@@ -340,8 +365,23 @@ export function MembersWorkspace({
     }
     return keys
   }, [snapshot.members])
+  const savedRow = useMemo(() => {
+    if (!savedProfile || savedProfile.revision !== snapshot.revision) return null
+    const withSaved = {
+      ...snapshot,
+      members: [
+        savedProfile.member,
+        ...snapshot.members.filter((member) => member.id !== savedProfile.member.id)
+      ]
+    }
+    return (
+      buildMemberRows(withSaved, new Date()).find((row) => row.member === savedProfile.member) ??
+      null
+    )
+  }, [savedProfile, snapshot])
   const selected = useMemo(() => {
     if (!selectedIdentity) return null
+    if (savedRow && savedRow.member.id === selectedIdentity.id) return savedRow
     const candidates = rows.filter((row) => row.member.id === selectedIdentity.id)
     const referenced = candidates.filter((row) => row.member === selectedIdentity.reference)
     if (referenced.length === 1) return referenced[0]
@@ -351,7 +391,7 @@ export function MembersWorkspace({
     if (exact.length === 1) return exact[0]
     if (!selectedIdentity.duplicated && candidates.length === 1) return candidates[0]
     return null
-  }, [rows, selectedIdentity])
+  }, [rows, savedRow, selectedIdentity])
 
   useEffect(() => {
     const node = workspace.current
@@ -379,7 +419,47 @@ export function MembersWorkspace({
     if (kind === 'edit') {
       setSelectedIdentity(memberIdentity(member, duplicatedIds.has(member.id)))
     }
+    if (kind === 'merge') {
+      if (member.deleted || member.mergedInto !== undefined || duplicatedIds.has(member.id)) {
+        return
+      }
+      mergeInstance.current += 1
+      onPaneActionChange({
+        kind: 'merge',
+        instance: mergeInstance.current,
+        openingSnapshot: snapshot,
+        selectedIds: [member.id],
+        mainId: member.id,
+        selectionFrozen: false
+      })
+      return
+    }
     onAction(kind, member)
+  }
+
+  const mergeAction = paneAction?.kind === 'merge' ? paneAction : null
+  const toggleMergeMember = (member: Member): void => {
+    if (!mergeAction || mergeAction.selectionFrozen) return
+    if (
+      member.deleted ||
+      member.mergedInto !== undefined ||
+      duplicatedIds.has(member.id) ||
+      mergeAction.openingSnapshot.revision !== snapshot.revision
+    ) {
+      return
+    }
+    onPaneActionUpdate((current) => {
+      if (current?.kind !== 'merge' || current.selectionFrozen) return current
+      const removing = current.selectedIds.includes(member.id)
+      const nextIds = removing
+        ? current.selectedIds.filter((id) => id !== member.id)
+        : [...current.selectedIds, member.id]
+      return {
+        ...current,
+        selectedIds: nextIds,
+        mainId: nextIds.includes(current.mainId) ? current.mainId : (nextIds[0] ?? current.mainId)
+      }
+    })
   }
 
   return (
@@ -400,6 +480,7 @@ export function MembersWorkspace({
         <div className="min-h-0 flex-1 overflow-auto">
           <Table aria-label="Members" layout="fixed">
             <colgroup>
+              {mergeAction ? <col style={{ width: 38 }} /> : null}
               <col style={{ width: 82 }} />
               <col />
               <col style={{ width: 34 }} />
@@ -407,6 +488,11 @@ export function MembersWorkspace({
             </colgroup>
             <Table.Header sticky>
               <Table.Row className="text-kumo-subtle">
+                {mergeAction ? (
+                  <Table.Head>
+                    <span className="sr-only">Selected for merge</span>
+                  </Table.Head>
+                ) : null}
                 <Table.Head aria-sort={sort.column === 'number' ? sort.direction : 'none'}>
                   <button
                     type="button"
@@ -432,7 +518,10 @@ export function MembersWorkspace({
             <Table.Body>
               {visible.length === 0 ? (
                 <Table.Row>
-                  <Table.Cell colSpan={4} className="py-8 text-center text-kumo-subtle">
+                  <Table.Cell
+                    colSpan={mergeAction ? 5 : 4}
+                    className="py-8 text-center text-kumo-subtle"
+                  >
                     {rows.length === 0
                       ? 'No members yet. New seasons add players here as you build their rosters.'
                       : 'No members match this filter.'}
@@ -443,18 +532,41 @@ export function MembersWorkspace({
                   const key = memberKeys.get(row.member) ?? ''
                   const memberStatus = status(row)
                   const isSelected = selected?.member === row.member
+                  const mergeEligible =
+                    !row.member.deleted &&
+                    row.member.mergedInto === undefined &&
+                    !duplicatedIds.has(row.member.id)
+                  const selectedForMerge = mergeAction?.selectedIds.includes(row.member.id) ?? false
+                  const activate = (): void => {
+                    if (mergeAction) {
+                      toggleMergeMember(row.member)
+                      return
+                    }
+                    onPaneActionChange(null)
+                    setSelectedIdentity(
+                      memberIdentity(row.member, duplicatedIds.has(row.member.id))
+                    )
+                  }
                   return (
                     <Table.Row
                       key={key}
                       className={`${STATIC_ROW_CLASS} aria-selected:bg-kumo-brand/10 aria-selected:even:bg-kumo-brand/10`}
-                      aria-selected={isSelected}
-                      onClick={() => {
-                        onPaneActionChange(null)
-                        setSelectedIdentity(
-                          memberIdentity(row.member, duplicatedIds.has(row.member.id))
-                        )
-                      }}
+                      aria-selected={mergeAction ? selectedForMerge : isSelected}
+                      onClick={activate}
                     >
+                      {mergeAction ? (
+                        <Table.CheckCell
+                          label={`Merge ${row.name}, member ${row.number}`}
+                          checked={selectedForMerge}
+                          disabled={
+                            !mergeEligible ||
+                            mergeAction.selectionFrozen ||
+                            mergeAction.openingSnapshot.revision !== snapshot.revision
+                          }
+                          onCheckedChange={() => toggleMergeMember(row.member)}
+                          onClick={(event) => event.stopPropagation()}
+                        />
+                      ) : null}
                       <Table.Cell className="font-mono text-[0.9em] text-kumo-subtle">
                         {row.number}
                       </Table.Cell>
@@ -463,11 +575,9 @@ export function MembersWorkspace({
                           type="button"
                           className="w-full truncate text-left font-medium"
                           aria-label={`${row.name}, member ${row.number}`}
-                          onClick={() => {
-                            onPaneActionChange(null)
-                            setSelectedIdentity(
-                              memberIdentity(row.member, duplicatedIds.has(row.member.id))
-                            )
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            activate()
                           }}
                         >
                           {row.name}
@@ -509,7 +619,9 @@ export function MembersWorkspace({
                             ) : (
                               <>
                                 <DropdownMenu.Item
-                                  disabled={row.member.deleted}
+                                  disabled={
+                                    row.member.deleted || row.member.mergedInto !== undefined
+                                  }
                                   onClick={(event) => {
                                     event.stopPropagation()
                                     startMemberAction('edit', row.member)
@@ -600,7 +712,42 @@ export function MembersWorkspace({
         aria-label="Member profile"
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
       >
-        {paneAction ? (
+        {paneAction?.kind === 'merge' ? (
+          <MergeMemberPane
+            key={paneAction.instance}
+            snapshot={snapshot}
+            openingSnapshot={paneAction.openingSnapshot}
+            selectedIds={paneAction.selectedIds}
+            mainId={paneAction.mainId}
+            compact={stacked}
+            root={tree.root}
+            selectionFrozen={paneAction.selectionFrozen}
+            onMainChange={(mainId) =>
+              onPaneActionUpdate((current) =>
+                current?.kind === 'merge' && !current.selectionFrozen
+                  ? { ...current, mainId }
+                  : current
+              )
+            }
+            onCancel={() => onPaneActionChange(null)}
+            onSaved={(member) => {
+              setSavedProfile({ member, revision: snapshot.revision })
+              setSelectedIdentity(memberIdentity(member, false))
+              onPaneActionChange(null)
+            }}
+            onFreezeSelection={() =>
+              onPaneActionUpdate((current) =>
+                current?.kind === 'merge' ? { ...current, selectionFrozen: true } : current
+              )
+            }
+            onUnfreezeSelection={() =>
+              onPaneActionUpdate((current) =>
+                current?.kind === 'merge' ? { ...current, selectionFrozen: false } : current
+              )
+            }
+            onBackgroundError={onBackgroundError}
+          />
+        ) : paneAction ? (
           <MemberEditor
             key={paneAction.instance}
             snapshot={snapshot}
