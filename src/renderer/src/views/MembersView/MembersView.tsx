@@ -374,11 +374,12 @@ function MembersTable({
         visible={visible}
         duplicatedIds={duplicatedIds}
         renumbering={renumber.pending}
+        compact={compact}
         sort={table.sort}
         onSort={sortBy}
         onAction={(kind, member) => {
           if (kind === 'edit') startPaneAction(kind, member)
-          else if (kind === 'delete') setAction({ kind, member })
+          else setAction({ kind, member })
         }}
         onKeepNumber={(member) => {
           setAction(null)

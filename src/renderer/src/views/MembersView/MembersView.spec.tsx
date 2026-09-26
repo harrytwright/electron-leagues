@@ -224,6 +224,10 @@ it('opens a profile explicitly and links roster memberships to the Players tab',
 
   expect(await screen.findByRole('heading', { name: 'Select a member' })).toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: /Jane Doe, member/ }))
+  expect(screen.getByRole('button', { name: /Jane Doe, member/ })).toHaveAttribute(
+    'aria-current',
+    'true'
+  )
   const profile = screen.getByRole('article', { name: 'Jane Doe profile' })
   expect(profile).toHaveTextContent('Janie Doe')
   expect(profile).toHaveTextContent('M-12')
@@ -375,6 +379,96 @@ it('cancels new and edit forms back to the appropriate profile', async () => {
   await user.type(screen.getByLabelText(/first name/i), 'Changed')
   await user.click(screen.getByRole('button', { name: 'Cancel' }))
   expect(screen.getByRole('article', { name: 'Ann Lee profile' })).toBeInTheDocument()
+})
+
+it('moves focus to the profile heading when a form is left', async () => {
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot())
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: /Ann Lee, member/ }))
+  await user.click(within(screen.getByRole('article')).getByRole('button', { name: 'Edit…' }))
+  await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+  expect(screen.getByRole('heading', { name: 'Ann Lee' })).toHaveFocus()
+  await user.click(screen.getByRole('button', { name: /Bob Kay, member/ }))
+  expect(screen.getByRole('article', { name: 'Bob Kay profile' })).toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Bob Kay' })).not.toHaveFocus()
+})
+
+it.each(['Cancel', 'Close'] as const)(
+  'shows the saved details when an edit is closed with %s after its refresh failed',
+  async (buttonName) => {
+    const initial = twoMembersSnapshot()
+    const saved = makeMember({ id: 1, firstName: 'Ann', lastName: 'Li', phone: '0700' })
+    const membersSnapshot = vi
+      .fn<RendererApi['membersSnapshot']>()
+      .mockResolvedValueOnce(initial)
+      .mockRejectedValueOnce(new Error('Scan failed'))
+    const api = installMockApi({
+      getRoot: vi.fn().mockResolvedValue('/root'),
+      membersSnapshot,
+      saveMember: vi.fn().mockResolvedValue(saved)
+    })
+    const user = userEvent.setup()
+    renderMembers()
+
+    await user.click(await screen.findByRole('button', { name: /Ann Lee, member/ }))
+    await user.click(within(screen.getByRole('article')).getByRole('button', { name: 'Edit…' }))
+    await user.clear(screen.getByLabelText(/last name/i))
+    await user.type(screen.getByLabelText(/last name/i), 'Li')
+    await user.click(screen.getByRole('button', { name: 'Save member' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Saved Ann Li')
+    await user.click(screen.getByRole('button', { name: buttonName }))
+
+    const profile = screen.getByRole('article', { name: 'Ann Li profile' })
+    expect(profile).toHaveTextContent('0700')
+    expect(screen.getByRole('row', { name: /Ann Lee/ })).toBeInTheDocument()
+    expect(api.saveMember).toHaveBeenCalledOnce()
+  }
+)
+
+it('resizes the list from the keyboard and abandons a cancelled drag', async () => {
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot())
+  })
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({
+    width: 1000,
+    height: 600,
+    x: 0,
+    y: 0,
+    top: 0,
+    left: 0,
+    right: 1000,
+    bottom: 600,
+    toJSON: () => ({})
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  const divider = await screen.findByRole('separator', { name: 'Resize member list' })
+  const list = screen.getByRole('region', { name: 'Member list' })
+  expect(divider).toHaveAttribute('aria-controls', list.id)
+  expect(divider).toHaveAttribute('aria-valuenow', '34')
+  divider.focus()
+  await user.keyboard('{End}')
+  expect(divider).toHaveAttribute('aria-valuenow', '55')
+  await user.keyboard('{Home}')
+  expect(divider).toHaveAttribute('aria-valuenow', '24')
+  await user.keyboard('{ArrowRight}')
+  expect(divider).toHaveAttribute('aria-valuetext', 'List takes 26% of the width')
+  expect(localStorage.getItem('leagues:members-workspace:v1')).toBe('26')
+
+  fireEvent.pointerDown(divider, { clientX: 100, pointerId: 1, buttons: 1 })
+  fireEvent.pointerMove(divider, { clientX: 200, pointerId: 1, buttons: 1 })
+  expect(list).toHaveStyle({ width: '36%' })
+  fireEvent.pointerCancel(divider, { pointerId: 1 })
+  expect(list).toHaveStyle({ width: '26%' })
+  expect(divider).toHaveAttribute('aria-valuenow', '26')
 })
 
 it('saves an edit against the revision captured when the form opened', async () => {
@@ -865,7 +959,7 @@ it('reviews a guardian contact carried onto an adult result', async () => {
   await user.click(screen.getByRole('button', { name: 'Merge members' }))
 
   await waitFor(() => expect(api.mergeMemberGroup).toHaveBeenCalledOnce())
-  const [request] = api.mergeMemberGroup.mock.calls[0]
+  const [request] = vi.mocked(api.mergeMemberGroup).mock.calls[0]
   expect(request.result.guardianContact).toBeUndefined()
   expect(request.result.email).toBe('jane@example.org')
 })

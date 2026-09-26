@@ -1,11 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Badge, Button, Collapsible, DropdownMenu, Empty, Table, Text } from '@cloudflare/kumo'
 import { CaretRightIcon, DotsThreeIcon, UserCircleIcon } from '@phosphor-icons/react'
+import { CheckCircleIcon } from '@phosphor-icons/react/dist/csr/CheckCircle'
+import { MinusCircleIcon } from '@phosphor-icons/react/dist/csr/MinusCircle'
+import { WarningCircleIcon } from '@phosphor-icons/react/dist/csr/WarningCircle'
 import type { Member, Membership, MembersSnapshot } from '@shared/members'
 import type { LeaguesTree } from '@shared/tree'
-import { deriveMemberships } from '@shared/members'
 import {
-  buildMemberRows,
+  deriveMemberships,
+  formatMemberNumber,
+  memberDisplayName,
+  needsDetails
+} from '@shared/members'
+import {
   type MemberRow,
   type MembersSort,
   type MembersSortColumn
@@ -61,6 +68,24 @@ function status(row: MemberRow): MemberStatus {
   if (row.member.deleted) return { label: 'Deleted', variant: 'secondary' }
   if (row.needsDetails) return { label: 'Needs details', variant: 'warning' }
   return { label: 'Active', variant: 'success' }
+}
+
+/** Each status has its own shape as well as its colour, so the list reads without colour. */
+function StatusMark({ status: memberStatus }: { status: MemberStatus }): React.JSX.Element {
+  const icon =
+    memberStatus.variant === 'warning' ? (
+      <WarningCircleIcon aria-hidden size={16} weight="fill" className="text-kumo-warning" />
+    ) : memberStatus.variant === 'secondary' ? (
+      <MinusCircleIcon aria-hidden size={16} className="text-kumo-subtle" />
+    ) : (
+      <CheckCircleIcon aria-hidden size={16} className="text-kumo-success" />
+    )
+  return (
+    <span title={memberStatus.label} className="flex h-lh items-center">
+      {icon}
+      <span className="sr-only">{memberStatus.label}</span>
+    </span>
+  )
 }
 
 function DetailItem({
@@ -136,29 +161,34 @@ function MembershipList({
 
 function MemberProfile({
   row,
-  snapshot,
+  memberships,
   tree,
   compact,
   duplicatedIds,
   renumbering,
+  takeFocus,
   onAction,
   onKeepNumber
 }: {
   row: MemberRow
-  snapshot: MembersSnapshot
+  memberships: Membership[]
   tree: LeaguesTree
   compact: boolean
   duplicatedIds: Set<number>
   renumbering: boolean
+  /** Called once on mount; true when the profile follows a form or merge and should take focus. */
+  takeFocus: () => boolean
   onAction: (kind: 'edit' | 'merge' | 'delete', member: Member) => void
   onKeepNumber: (member: Member) => void
 }): React.JSX.Element {
   const select = useWorkspace((workspace) => workspace.select)
   const reportLeagueDir = useWorkspace((workspace) => workspace.reportLeagueDir)
-  const memberships = useMemo(
-    () => deriveMemberships(snapshot).filter((membership) => membership.memberId === row.member.id),
-    [row.member.id, snapshot]
-  )
+  const heading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    if (takeFocus()) heading.current?.focus()
+    // Only the arrival matters; later renders of the same profile must not steal focus.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const current = memberships.filter((membership) => !membership.archived)
   const previous = memberships.filter((membership) => membership.archived)
   const member = row.member
@@ -185,7 +215,7 @@ function MemberProfile({
       >
         <div className="grid min-w-0 gap-1">
           <div className="truncate">
-            <Text as="h2" variant="heading" size="lg">
+            <Text ref={heading} as="h2" variant="heading" size="lg" tabIndex={-1}>
               {row.name}
             </Text>
           </div>
@@ -288,9 +318,11 @@ interface Props {
   visible: MemberRow[]
   duplicatedIds: Set<number>
   renumbering: boolean
+  /** Below the compact width the list stacks above the profile. */
+  compact: boolean
   sort: MembersSort
   onSort: (column: MembersSortColumn) => void
-  onAction: (kind: 'edit' | 'merge' | 'delete', member: Member) => void
+  onAction: (kind: 'edit' | 'delete', member: Member) => void
   onKeepNumber: (member: Member) => void
   paneAction: PaneAction
   onPaneActionChange: (action: PaneAction) => void
@@ -332,6 +364,136 @@ function memberIdentity(member: Member, duplicated: boolean): MemberIdentity {
   return { id: member.id, fingerprint: memberFingerprint(member), duplicated, reference: member }
 }
 
+type RowAction = 'edit' | 'merge' | 'delete'
+
+interface MemberListRowProps {
+  row: MemberRow
+  rowKey: string
+  selected: boolean
+  merging: boolean
+  selectedForMerge: boolean
+  mergeDisabled: boolean
+  duplicated: boolean
+  renumbering: boolean
+  onActivate: (member: Member) => void
+  onToggleMerge: (member: Member) => void
+  onKeepNumber: (member: Member) => void
+  onRowAction: (kind: RowAction, member: Member) => void
+}
+
+/** One list row; memoised so a filter keystroke or a pane change re-renders only the rows that changed. */
+const MemberListRow = memo(function MemberListRow({
+  row,
+  selected,
+  merging,
+  selectedForMerge,
+  mergeDisabled,
+  duplicated,
+  renumbering,
+  onActivate,
+  onToggleMerge,
+  onKeepNumber,
+  onRowAction
+}: MemberListRowProps): React.JSX.Element {
+  const memberStatus = status(row)
+  const highlighted = merging ? selectedForMerge : selected
+  return (
+    <Table.Row
+      variant={highlighted ? 'selected' : 'default'}
+      className={`${STATIC_ROW_CLASS} ${highlighted ? 'bg-kumo-brand/10 shadow-[inset_3px_0_0_var(--color-kumo-brand)] even:bg-kumo-brand/10' : ''}`}
+      onClick={() => onActivate(row.member)}
+    >
+      {merging ? (
+        <Table.CheckCell
+          label={`Merge ${row.name}, member ${row.number}`}
+          checked={selectedForMerge}
+          disabled={mergeDisabled}
+          onCheckedChange={() => onToggleMerge(row.member)}
+          onClick={(event) => event.stopPropagation()}
+        />
+      ) : null}
+      <Table.Cell className="font-mono text-[0.9em] text-kumo-subtle">{row.number}</Table.Cell>
+      <Table.Cell>
+        <button
+          type="button"
+          className="w-full truncate text-left font-medium"
+          aria-label={`${row.name}, member ${row.number}`}
+          aria-current={!merging && selected ? 'true' : undefined}
+          onClick={(event) => {
+            event.stopPropagation()
+            onActivate(row.member)
+          }}
+        >
+          {row.name}
+        </button>
+      </Table.Cell>
+      <Table.Cell>
+        <StatusMark status={memberStatus} />
+      </Table.Cell>
+      <Table.Cell onClick={(event) => event.stopPropagation()}>
+        <DropdownMenu>
+          <DropdownMenu.Trigger
+            render={
+              <IconButton
+                variant="ghost"
+                size="sm"
+                icon={<DotsThreeIcon aria-hidden size={16} weight="bold" />}
+                aria-label={`Actions for ${row.name}`}
+              />
+            }
+          />
+          <DropdownMenu.Content>
+            {duplicated ? (
+              <DropdownMenu.Item
+                disabled={renumbering}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  onKeepNumber(row.member)
+                }}
+              >
+                Keep this number, renumber the others
+              </DropdownMenu.Item>
+            ) : (
+              <>
+                <DropdownMenu.Item
+                  disabled={row.member.deleted}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onRowAction('edit', row.member)
+                  }}
+                >
+                  Edit…
+                </DropdownMenu.Item>
+                <DropdownMenu.Item
+                  disabled={row.member.deleted}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onRowAction('merge', row.member)
+                  }}
+                >
+                  Merge with…
+                </DropdownMenu.Item>
+                <DropdownMenu.Item disabled>Print card (needs a card template)</DropdownMenu.Item>
+                <DropdownMenu.Separator />
+                <DropdownMenu.Item
+                  variant="danger"
+                  disabled={row.member.deleted}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onRowAction('delete', row.member)
+                  }}
+                >
+                  Delete…
+                </DropdownMenu.Item>
+              </>
+            )}
+          </DropdownMenu.Content>
+        </DropdownMenu>
+      </Table.Cell>
+    </Table.Row>
+  )
+})
+
 export function MembersWorkspace({
   snapshot,
   tree,
@@ -339,6 +501,7 @@ export function MembersWorkspace({
   visible,
   duplicatedIds,
   renumbering,
+  compact: stacked,
   sort,
   onSort,
   onAction,
@@ -352,11 +515,21 @@ export function MembersWorkspace({
   const [selectedIdentity, setSelectedIdentity] = useState<MemberIdentity | null>(null)
   const [savedProfile, setSavedProfile] = useState<SavedProfile | null>(null)
   const [listPercent, setListPercent] = useState(loadListPercent)
-  const [stacked, setStacked] = useState(false)
   const workspace = useRef<HTMLDivElement>(null)
   const list = useRef<HTMLElement>(null)
+  const listId = useId()
   const drag = useRef<{ startX: number; startPercent: number; percent: number } | null>(null)
   const mergeInstance = useRef(0)
+  const focusProfile = useRef(false)
+  const membershipsById = useMemo(() => {
+    const index = new Map<number, Membership[]>()
+    for (const membership of deriveMemberships(snapshot)) {
+      const list = index.get(membership.memberId)
+      if (list) list.push(membership)
+      else index.set(membership.memberId, [membership])
+    }
+    return index
+  }, [snapshot])
   const memberKeys = useMemo(() => {
     const occurrences = new Map<number, number>()
     const keys = new Map<Member, string>()
@@ -367,20 +540,19 @@ export function MembersWorkspace({
     }
     return keys
   }, [snapshot.members])
-  const savedRow = useMemo(() => {
+  const savedRow = useMemo((): MemberRow | null => {
     if (!savedProfile || savedProfile.revision !== snapshot.revision) return null
-    const withSaved = {
-      ...snapshot,
-      members: [
-        savedProfile.member,
-        ...snapshot.members.filter((member) => member.id !== savedProfile.member.id)
-      ]
+    const member = savedProfile.member
+    return {
+      member,
+      number: formatMemberNumber(member.id, snapshot.nextId),
+      name: memberDisplayName(member),
+      memberships: (membershipsById.get(member.id) ?? []).filter(
+        (membership) => !membership.archived
+      ),
+      needsDetails: needsDetails(member, new Date())
     }
-    return (
-      buildMemberRows(withSaved, new Date()).find((row) => row.member === savedProfile.member) ??
-      null
-    )
-  }, [savedProfile, snapshot])
+  }, [membershipsById, savedProfile, snapshot.nextId, snapshot.revision])
   const selected = useMemo(() => {
     if (!selectedIdentity) return null
     if (savedRow && savedRow.member.id === selectedIdentity.id) return savedRow
@@ -394,14 +566,6 @@ export function MembersWorkspace({
     if (!selectedIdentity.duplicated && candidates.length === 1) return candidates[0]
     return null
   }, [rows, savedRow, selectedIdentity])
-
-  useEffect(() => {
-    const node = workspace.current
-    if (!node) return
-    const observer = new ResizeObserver(([entry]) => setStacked(entry.contentRect.width < 720))
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [])
 
   const setWidth = (value: number): void => {
     const next = clampListPercent(value)
@@ -436,10 +600,12 @@ export function MembersWorkspace({
       })
       return
     }
-    onAction(kind, member)
+    if (kind === 'edit' || kind === 'delete') onAction(kind, member)
   }
 
   const mergeAction = paneAction?.kind === 'merge' ? paneAction : null
+  const mergeStale =
+    mergeAction !== null && mergeAction.openingSnapshot.revision !== snapshot.revision
   const toggleMergeMember = (member: Member): void => {
     if (!mergeAction || mergeAction.selectionFrozen) return
     if (
@@ -463,6 +629,41 @@ export function MembersWorkspace({
       }
     })
   }
+  const activateRow = (member: Member): void => {
+    if (mergeAction) {
+      toggleMergeMember(member)
+      return
+    }
+    focusProfile.current = false
+    onPaneActionChange(null)
+    setSelectedIdentity(memberIdentity(member, duplicatedIds.has(member.id)))
+  }
+  const rowHandlers = useRef({ activateRow, toggleMergeMember, startMemberAction, onKeepNumber })
+  useEffect(() => {
+    rowHandlers.current = { activateRow, toggleMergeMember, startMemberAction, onKeepNumber }
+  })
+  const onActivate = useCallback((member: Member) => rowHandlers.current.activateRow(member), [])
+  const onToggleMerge = useCallback(
+    (member: Member) => rowHandlers.current.toggleMergeMember(member),
+    []
+  )
+  const onRowKeepNumber = useCallback(
+    (member: Member) => rowHandlers.current.onKeepNumber(member),
+    []
+  )
+  const onRowAction = useCallback(
+    (kind: RowAction, member: Member) => rowHandlers.current.startMemberAction(kind, member),
+    []
+  )
+  const leavePane = (): void => {
+    focusProfile.current = true
+    onPaneActionChange(null)
+  }
+  const takeProfileFocus = (): boolean => {
+    const take = focusProfile.current
+    focusProfile.current = false
+    return take
+  }
 
   return (
     <div
@@ -475,6 +676,7 @@ export function MembersWorkspace({
     >
       <section
         ref={list}
+        id={listId}
         aria-label="Member list"
         className={`flex min-h-0 min-w-0 flex-col overflow-hidden ${stacked ? 'border-b border-kumo-line' : ''}`}
         style={stacked ? undefined : { width: `${listPercent}%` }}
@@ -531,135 +733,28 @@ export function MembersWorkspace({
                 </Table.Row>
               ) : (
                 visible.map((row) => {
-                  const key = memberKeys.get(row.member) ?? ''
-                  const memberStatus = status(row)
-                  const isSelected = selected?.member === row.member
                   const mergeEligible =
                     !row.member.deleted &&
                     row.member.mergedInto === undefined &&
                     !duplicatedIds.has(row.member.id)
-                  const selectedForMerge = mergeAction?.selectedIds.includes(row.member.id) ?? false
-                  const activate = (): void => {
-                    if (mergeAction) {
-                      toggleMergeMember(row.member)
-                      return
-                    }
-                    onPaneActionChange(null)
-                    setSelectedIdentity(
-                      memberIdentity(row.member, duplicatedIds.has(row.member.id))
-                    )
-                  }
                   return (
-                    <Table.Row
-                      key={key}
-                      className={`${STATIC_ROW_CLASS} aria-selected:bg-kumo-brand/10 aria-selected:even:bg-kumo-brand/10`}
-                      aria-selected={mergeAction ? selectedForMerge : isSelected}
-                      onClick={activate}
-                    >
-                      {mergeAction ? (
-                        <Table.CheckCell
-                          label={`Merge ${row.name}, member ${row.number}`}
-                          checked={selectedForMerge}
-                          disabled={
-                            !mergeEligible ||
-                            mergeAction.selectionFrozen ||
-                            mergeAction.openingSnapshot.revision !== snapshot.revision
-                          }
-                          onCheckedChange={() => toggleMergeMember(row.member)}
-                          onClick={(event) => event.stopPropagation()}
-                        />
-                      ) : null}
-                      <Table.Cell className="font-mono text-[0.9em] text-kumo-subtle">
-                        {row.number}
-                      </Table.Cell>
-                      <Table.Cell>
-                        <button
-                          type="button"
-                          className="w-full truncate text-left font-medium"
-                          aria-label={`${row.name}, member ${row.number}`}
-                          onClick={(event) => {
-                            event.stopPropagation()
-                            activate()
-                          }}
-                        >
-                          {row.name}
-                        </button>
-                      </Table.Cell>
-                      <Table.Cell>
-                        <span title={memberStatus.label}>
-                          <Badge
-                            variant={memberStatus.variant}
-                            className="h-2 w-2 overflow-hidden p-0 text-transparent"
-                          >
-                            <span className="sr-only">{memberStatus.label}</span>
-                          </Badge>
-                        </span>
-                      </Table.Cell>
-                      <Table.Cell onClick={(event) => event.stopPropagation()}>
-                        <DropdownMenu>
-                          <DropdownMenu.Trigger
-                            render={
-                              <IconButton
-                                variant="ghost"
-                                size="sm"
-                                icon={<DotsThreeIcon aria-hidden size={16} weight="bold" />}
-                                aria-label={`Actions for ${row.name}`}
-                              />
-                            }
-                          />
-                          <DropdownMenu.Content>
-                            {duplicatedIds.has(row.member.id) ? (
-                              <DropdownMenu.Item
-                                disabled={renumbering}
-                                onClick={(event) => {
-                                  event.stopPropagation()
-                                  onKeepNumber(row.member)
-                                }}
-                              >
-                                Keep this number, renumber the others
-                              </DropdownMenu.Item>
-                            ) : (
-                              <>
-                                <DropdownMenu.Item
-                                  disabled={
-                                    row.member.deleted || row.member.mergedInto !== undefined
-                                  }
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    startMemberAction('edit', row.member)
-                                  }}
-                                >
-                                  Edit…
-                                </DropdownMenu.Item>
-                                <DropdownMenu.Item
-                                  disabled={row.member.deleted}
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    startMemberAction('merge', row.member)
-                                  }}
-                                >
-                                  Merge with…
-                                </DropdownMenu.Item>
-                                <DropdownMenu.Item disabled>
-                                  Print card (needs a card template)
-                                </DropdownMenu.Item>
-                                <DropdownMenu.Separator />
-                                <DropdownMenu.Item
-                                  variant="danger"
-                                  disabled={row.member.deleted}
-                                  onClick={(event) => {
-                                    event.stopPropagation()
-                                    startMemberAction('delete', row.member)
-                                  }}
-                                >
-                                  Delete…
-                                </DropdownMenu.Item>
-                              </>
-                            )}
-                          </DropdownMenu.Content>
-                        </DropdownMenu>
-                      </Table.Cell>
-                    </Table.Row>
+                    <MemberListRow
+                      key={memberKeys.get(row.member) ?? ''}
+                      rowKey={memberKeys.get(row.member) ?? ''}
+                      row={row}
+                      selected={selected?.member === row.member}
+                      merging={mergeAction !== null}
+                      selectedForMerge={mergeAction?.selectedIds.includes(row.member.id) ?? false}
+                      mergeDisabled={
+                        !mergeEligible || (mergeAction?.selectionFrozen ?? false) || mergeStale
+                      }
+                      duplicated={duplicatedIds.has(row.member.id)}
+                      renumbering={renumbering}
+                      onActivate={onActivate}
+                      onToggleMerge={onToggleMerge}
+                      onKeepNumber={onRowKeepNumber}
+                      onRowAction={onRowAction}
+                    />
                   )
                 })
               )}
@@ -671,13 +766,16 @@ export function MembersWorkspace({
         <button
           type="button"
           aria-label="Resize member list"
+          aria-controls={listId}
           aria-valuemin={MIN_LIST_PERCENT}
           aria-valuemax={MAX_LIST_PERCENT}
           aria-valuenow={listPercent}
+          aria-valuetext={`List takes ${listPercent}% of the width`}
           aria-orientation="vertical"
           role="separator"
           className="group relative w-2 shrink-0 cursor-col-resize touch-none border-x border-kumo-line bg-kumo-base focus-visible:outline-2 focus-visible:outline-kumo-focus"
           onPointerDown={(event) => {
+            event.preventDefault()
             drag.current = {
               startX: event.clientX,
               startPercent: listPercent,
@@ -702,9 +800,16 @@ export function MembersWorkspace({
             if (list.current) list.current.style.width = `${listPercent}%`
           }}
           onKeyDown={(event) => {
-            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+            const targets: Record<string, number> = {
+              ArrowLeft: listPercent - RESIZE_STEP,
+              ArrowRight: listPercent + RESIZE_STEP,
+              Home: MIN_LIST_PERCENT,
+              End: MAX_LIST_PERCENT
+            }
+            const next = targets[event.key]
+            if (next === undefined) return
             event.preventDefault()
-            setWidth(listPercent + (event.key === 'ArrowRight' ? RESIZE_STEP : -RESIZE_STEP))
+            setWidth(next)
           }}
         >
           <span className="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-kumo-hairline group-hover:bg-kumo-brand" />
@@ -731,11 +836,11 @@ export function MembersWorkspace({
                   : current
               )
             }
-            onCancel={() => onPaneActionChange(null)}
+            onCancel={leavePane}
             onSaved={(member) => {
               setSavedProfile({ member, revision: snapshot.revision })
               setSelectedIdentity(memberIdentity(member, false))
-              onPaneActionChange(null)
+              leavePane()
             }}
             onFreezeSelection={() =>
               onPaneActionUpdate((current) =>
@@ -757,22 +862,25 @@ export function MembersWorkspace({
             root={tree.root}
             member={paneAction.kind === 'edit' ? paneAction.member : null}
             compact={stacked}
-            onCancel={() => onPaneActionChange(null)}
+            onCancel={leavePane}
             onSaved={(member) => {
+              setSavedProfile({ member, revision: snapshot.revision })
               setSelectedIdentity(memberIdentity(member, false))
-              onPaneActionChange(null)
+              leavePane()
             }}
             onBackgroundError={onBackgroundError}
             onBackgroundSuccess={onBackgroundSuccess}
           />
         ) : selected ? (
           <MemberProfile
+            key={selected.member.id}
             row={selected}
-            snapshot={snapshot}
+            memberships={membershipsById.get(selected.member.id) ?? []}
             tree={tree}
             compact={stacked}
             duplicatedIds={duplicatedIds}
             renumbering={renumbering}
+            takeFocus={takeProfileFocus}
             onAction={startMemberAction}
             onKeepNumber={onKeepNumber}
           />

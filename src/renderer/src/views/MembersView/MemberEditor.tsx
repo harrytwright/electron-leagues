@@ -180,7 +180,7 @@ export function MemberEditor({
             variant="secondary"
             size="sm"
             disabled={operation.pending}
-            onClick={onCancel}
+            onClick={() => (saveState.kind === 'written' ? onSaved(saveState.saved) : onCancel())}
           >
             Cancel
           </Button>
@@ -236,7 +236,12 @@ export function MemberEditor({
               >
                 {saveState.refreshing ? 'Refreshing…' : 'Retry refresh'}
               </Button>
-              <Button type="button" variant="ghost" size="sm" onClick={onCancel}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => onSaved(saveState.saved)}
+              >
                 Close
               </Button>
             </div>
