@@ -1,23 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Checkbox, Collapsible, Input, Select, Text, Textarea } from '@cloudflare/kumo'
+import { CheckIcon } from '@phosphor-icons/react/dist/csr/Check'
 import {
   buildMemberMergePreview,
   memberMergeResultSchema,
+  withOriginalNames,
   type MemberMergeFieldPreview,
   type MemberMergePreview,
-  type MemberMergeResult
+  type MemberMergeResult,
+  type MemberMergeRosterAssignment
 } from '@shared/member-merge'
 import {
   applyAgeRules,
   formatMemberNumber,
   GENDERS,
+  isSingles,
   isUnder18,
   memberDisplayName,
-  normaliseName,
   type Member,
-  type MembersSnapshot
+  type MembersSnapshot,
+  type RosterSeason
 } from '@shared/members'
 import { DateField } from '@renderer/components/DateField'
+import { GENDER_ITEMS, NO_GENDER } from '@renderer/components/MemberForm'
 import { useQueryRefresh } from '@renderer/hooks/use-query-refresh'
 import { useWriteOperation } from '@renderer/hooks/use-write-operation'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
@@ -49,6 +54,7 @@ interface Props {
   onFreezeSelection: () => void
   onUnfreezeSelection: () => void
   onBackgroundError: (message: string) => void
+  onBackgroundSuccess: (message: string) => void
 }
 
 const FIELD_LABELS: Record<Field, string> = {
@@ -62,13 +68,6 @@ const FIELD_LABELS: Record<Field, string> = {
   marketing: 'Marketing',
   cardIssued: 'Card issued',
   notes: 'Notes'
-}
-
-const GENDER_ITEMS = {
-  '': 'Not recorded',
-  male: 'Male',
-  female: 'Female',
-  other: 'Other'
 }
 
 function memberById(members: readonly Member[], id: number): Member | undefined {
@@ -85,19 +84,6 @@ function displayValue(field: Field, value: MergeValue): string {
   if (field === 'marketing') return value ? 'Allowed' : 'Not allowed'
   if (field === 'gender') return String(value).replace(/^./, (letter) => letter.toUpperCase())
   return String(value)
-}
-
-function clean(values: readonly string[]): string[] {
-  const result: string[] = []
-  const seen = new Set<string>()
-  for (const value of values) {
-    const trimmed = value.trim()
-    if (trimmed && !seen.has(trimmed)) {
-      seen.add(trimmed)
-      result.push(trimmed)
-    }
-  }
-  return result
 }
 
 function textValue(value: MergeValue): string {
@@ -155,14 +141,7 @@ function resultFrom(
     cardIssued: optionalText(selectedValue('cardIssued', preview, choices.cardIssued)),
     notes: optionalText(selectedValue('notes', preview, choices.notes))
   }
-  const finalName = normaliseName(result.firstName, result.lastName)
-  result.aliases = clean([
-    ...preview.result.aliases,
-    ...sources
-      .filter((source) => normaliseName(source.firstName, source.lastName) !== finalName)
-      .map(memberDisplayName)
-  ])
-  return result
+  return withOriginalNames(result, sources)
 }
 
 function SourceAlternatives({
@@ -199,7 +178,15 @@ function SourceAlternatives({
           className="grid rounded-md px-3 py-2 text-left ring ring-kumo-line hover:bg-kumo-tint disabled:opacity-60 aria-pressed:ring-kumo-brand"
           onClick={onUseDefault}
         >
-          <span className="font-medium">Combined (default)</span>
+          <span className="flex items-start justify-between gap-3">
+            <span className="font-medium">Combined (default)</span>
+            {!choice || choice.kind === 'default' || missing ? (
+              <span className="flex h-lh shrink-0 items-center text-kumo-brand">
+                <CheckIcon aria-hidden size={14} weight="bold" />
+                <span className="sr-only">Selected</span>
+              </span>
+            ) : null}
+          </span>
           <span className="text-sm whitespace-pre-wrap text-kumo-subtle">
             {displayValue(field, preview.result.notes)}
           </span>
@@ -222,23 +209,39 @@ function SourceAlternatives({
           All selected records: {displayValue(field, alternatives[0]?.value)}
         </Text>
       ) : (
-        <div className="grid gap-1.5" aria-label={`${FIELD_LABELS[field]} source values`}>
+        <div
+          className="grid gap-1.5"
+          role="group"
+          aria-label={`${FIELD_LABELS[field]} source values`}
+        >
           {alternatives.map((alternative, index) => {
             const selected =
-              sameValue(effective, alternative.value) && choice?.kind !== 'manual' && !missing
+              field === 'notes'
+                ? choice?.kind === 'source' &&
+                  sameValue(choice.value, alternative.value) &&
+                  !missing
+                : sameValue(effective, alternative.value) && choice?.kind !== 'manual' && !missing
             return (
               <button
                 key={`${JSON.stringify(alternative.value)}-${index}`}
                 type="button"
                 disabled={disabled}
                 aria-pressed={selected}
-                className="grid rounded-md px-3 py-2 text-left ring ring-kumo-line hover:bg-kumo-tint disabled:opacity-60 aria-pressed:ring-kumo-brand"
+                className="flex items-start justify-between gap-3 rounded-md px-3 py-2 text-left ring ring-kumo-line hover:bg-kumo-tint disabled:opacity-60 aria-pressed:ring-kumo-brand"
                 onClick={() => onChoose({ kind: 'source', value: alternative.value })}
               >
-                <span className="font-medium">{displayValue(field, alternative.value)}</span>
-                <span className="text-sm text-kumo-subtle">
-                  {alternative.sources.map((source) => source.label).join(', ')}
+                <span className="grid min-w-0 gap-0.5">
+                  <span className="font-medium">{displayValue(field, alternative.value)}</span>
+                  <span className="text-sm text-kumo-subtle">
+                    {alternative.sources.map((source) => source.label).join(', ')}
+                  </span>
                 </span>
+                {selected ? (
+                  <span className="flex h-lh shrink-0 items-center text-kumo-brand">
+                    <CheckIcon aria-hidden size={14} weight="bold" />
+                    <span className="sr-only">Selected</span>
+                  </span>
+                ) : null}
               </button>
             )
           })}
@@ -267,7 +270,7 @@ function MergeField({
   const control =
     field === 'marketing' ? (
       <Checkbox
-        label="Allow marketing and club updates"
+        label="Send marketing and club updates"
         checked={Boolean(value)}
         disabled={disabled}
         onCheckedChange={(checked) => onChange({ kind: 'manual', value: checked })}
@@ -275,10 +278,12 @@ function MergeField({
     ) : field === 'gender' ? (
       <Select
         label={FIELD_LABELS[field]}
-        value={textValue(value)}
+        value={textValue(value) || NO_GENDER}
         items={GENDER_ITEMS}
         disabled={disabled}
-        onValueChange={(next) => onChange({ kind: 'manual', value: next ?? '' })}
+        onValueChange={(next) =>
+          onChange({ kind: 'manual', value: next && next !== NO_GENDER ? next : '' })
+        }
       />
     ) : field === 'dob' || field === 'cardIssued' ? (
       <DateField
@@ -317,16 +322,30 @@ function MergeField({
   )
 }
 
+function assignmentLabel(
+  assignment: MemberMergeRosterAssignment,
+  season: RosterSeason | undefined,
+  nextId: number
+): string {
+  const team = season?.file.teams.find((candidate) => candidate.id === assignment.teamId)
+  const parts: string[] = []
+  if (team) parts.push(team.name)
+  else if (assignment.teamId !== null) parts.push('Unknown team')
+  else if (!season || !isSingles(season.file)) parts.push('Substitute')
+  if (assignment.position) parts.push(`position ${assignment.position}`)
+  if (assignment.leagueSecretaryId) parts.push(`LeagueSecretary id ${assignment.leagueSecretaryId}`)
+  if (assignment.memberId !== assignment.source.id) {
+    parts.push(`listed as ${formatMemberNumber(assignment.memberId, nextId)}`)
+  }
+  return parts.join(', ') || 'Listed'
+}
+
 function RosterDifferences({
   preview,
-  snapshot,
-  selectedIds,
-  mainId
+  snapshot
 }: {
   preview: MemberMergePreview
   snapshot: MembersSnapshot
-  selectedIds: number[]
-  mainId: number
 }): React.JSX.Element | null {
   if (preview.rosterDifferences.length === 0) return null
   return (
@@ -335,36 +354,25 @@ function RosterDifferences({
         Roster assignments
       </Text>
       <Text variant="secondary" size="sm">
-        Where selected records differ, the main record’s assignment is retained when present.
+        Where selected records differ, the main record’s own entry is kept, then an old number of
+        the main record, then the earliest selected record.
       </Text>
       <ul className="grid gap-2">
         {preview.rosterDifferences.map((difference) => {
           const season = snapshot.seasons.find((candidate) => candidate.path === difference.path)
-          const retained =
-            difference.assignments.find((assignment) => assignment.source.id === mainId) ??
-            selectedIds.flatMap((id) =>
-              difference.assignments.filter((assignment) => assignment.source.id === id)
-            )[0]
           return (
             <li key={difference.path} className="rounded-md px-3 py-2 ring ring-kumo-line">
               <div className="font-medium">
                 {difference.leagueName} · {difference.season}
               </div>
               <ul className="mt-1 grid gap-0.5 text-sm text-kumo-subtle">
-                {difference.assignments.map((assignment, index) => {
-                  const team = season?.file.teams.find(
-                    (candidate) => candidate.id === assignment.teamId
-                  )
-                  const assignmentText =
-                    team?.name ?? (assignment.teamId === null ? 'Substitute' : 'Unknown team')
-                  return (
-                    <li key={`${assignment.source.id}-${index}`}>
-                      {assignment.source.label}: {assignmentText}
-                      {assignment.position ? `, position ${assignment.position}` : ''}
-                      {assignment === retained ? ' (retained)' : ''}
-                    </li>
-                  )
-                })}
+                {difference.assignments.map((assignment, index) => (
+                  <li key={`${assignment.memberId}-${index}`}>
+                    {assignment.source.label}:{' '}
+                    {assignmentLabel(assignment, season, snapshot.nextId)}
+                    {assignment.retained ? ' (kept)' : ' (dropped)'}
+                  </li>
+                ))}
               </ul>
             </li>
           )
@@ -387,7 +395,8 @@ export function MergeMemberPane({
   onSaved,
   onFreezeSelection,
   onUnfreezeSelection,
-  onBackgroundError
+  onBackgroundError,
+  onBackgroundSuccess
 }: Props): React.JSX.Element {
   const [choices, setChoices] = useState<Partial<Record<Field, Choice>>>({})
   const [saveState, setSaveState] = useState<SaveState>({ kind: 'editing', error: null })
@@ -414,6 +423,11 @@ export function MergeMemberPane({
   const reviewedResult = result ? applyAgeRules(result, new Date()) : null
   const parsed = reviewedResult ? memberMergeResultSchema.safeParse(reviewedResult) : null
   const junior = reviewedResult ? isUnder18(reviewedResult, new Date()) : false
+  const guardianRecorded =
+    preview?.fields
+      .find((candidate) => candidate.field === 'guardianContact')
+      ?.alternatives.some((alternative) => alternative.value !== undefined) ||
+    choices.guardianContact !== undefined
   const frozen = selectionFrozen || saveState.kind === 'written'
   const operation = useWriteOperation({
     label: () => `Merging ${selectedIds.length} members`,
@@ -475,6 +489,8 @@ export function MergeMemberPane({
           onBackgroundError(
             `Merged ${attempted} in ${pathTail(root)}, but the members list could not be refreshed: ${outcome.refreshError}`
           )
+        } else {
+          onBackgroundSuccess(`Merged ${attempted} in ${pathTail(root)}`)
         }
         return
       }
@@ -522,7 +538,13 @@ export function MergeMemberPane({
       `${formatMemberNumber(source.id, openingSnapshot.nextId)} ${memberDisplayName(source)}`
     ])
   )
-  const invalidMessage = parsed && !parsed.success ? parsed.error.issues[0]?.message : null
+  const firstIssue = parsed && !parsed.success ? parsed.error.issues[0] : undefined
+  const issueField = firstIssue?.path[0]
+  const invalidMessage = firstIssue
+    ? typeof issueField === 'string' && issueField in FIELD_LABELS
+      ? `${FIELD_LABELS[issueField as Field]}: ${firstIssue.message}`
+      : firstIssue.message
+    : null
   const disabled = operation.pending || frozen || stale
 
   return (
@@ -547,6 +569,7 @@ export function MergeMemberPane({
             type="button"
             variant="secondary"
             size="sm"
+            disabled={operation.pending}
             onClick={() => (saveState.kind === 'written' ? onSaved(saveState.saved) : onCancel())}
           >
             Cancel
@@ -679,20 +702,10 @@ export function MergeMemberPane({
                   />
                 ))}
                 {junior ? (
-                  <>
-                    <Text variant="secondary" size="sm">
-                      This result is under 18, so the parent or guardian contact is kept and
-                      personal email and phone details are removed.
-                    </Text>
-                    <MergeField
-                      field="guardianContact"
-                      preview={preview}
-                      choice={choices.guardianContact}
-                      disabled={disabled}
-                      onChange={(choice) => change('guardianContact', choice)}
-                      onUseDefault={() => resetField('guardianContact')}
-                    />
-                  </>
+                  <Text variant="secondary" size="sm">
+                    This result is under 18, so the parent or guardian contact is kept and personal
+                    email and phone details are removed.
+                  </Text>
                 ) : (
                   <>
                     <MergeField
@@ -713,6 +726,24 @@ export function MergeMemberPane({
                     />
                   </>
                 )}
+                {junior || guardianRecorded ? (
+                  <>
+                    {junior ? null : (
+                      <Text variant="secondary" size="sm">
+                        A parent or guardian contact from a junior record stays on the result until
+                        it is cleared here.
+                      </Text>
+                    )}
+                    <MergeField
+                      field="guardianContact"
+                      preview={preview}
+                      choice={choices.guardianContact}
+                      disabled={disabled}
+                      onChange={(choice) => change('guardianContact', choice)}
+                      onUseDefault={() => resetField('guardianContact')}
+                    />
+                  </>
+                ) : null}
                 {(['marketing', 'cardIssued'] as const).map((field) => (
                   <MergeField
                     key={field}
@@ -760,12 +791,7 @@ export function MergeMemberPane({
                   {result.mbdIds.join(', ') || 'None'}
                 </div>
               </section>
-              <RosterDifferences
-                preview={preview}
-                snapshot={openingSnapshot}
-                selectedIds={selectedIds}
-                mainId={mainId}
-              />
+              <RosterDifferences preview={preview} snapshot={openingSnapshot} />
             </>
           )}
         </div>

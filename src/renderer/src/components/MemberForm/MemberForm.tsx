@@ -1,17 +1,11 @@
 import { forwardRef } from 'react'
 import { Checkbox, Input, Select, Text, Textarea } from '@cloudflare/kumo'
-import { GENDERS, isUnder18 } from '@shared/members'
-import { sentenceCase } from '@renderer/lib/sentence-case'
+import { isUnder18 } from '@shared/members'
 import { DateField } from '../DateField'
-import { NO_GENDER, type MemberDraft } from './member-form-data'
+import { GENDER_ITEMS, type MemberDraft } from './member-form-data'
 
 const OLDEST_BIRTH_YEARS = 100
 const TYPICAL_AGE = 30
-
-const GENDER_ITEMS = {
-  [NO_GENDER]: 'Not recorded',
-  ...Object.fromEntries(GENDERS.map((gender) => [gender, sentenceCase(gender)]))
-}
 
 interface Props {
   draft: MemberDraft

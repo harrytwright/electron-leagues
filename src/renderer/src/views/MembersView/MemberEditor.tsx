@@ -30,6 +30,7 @@ interface Props {
   onCancel: () => void
   onSaved: (member: Member) => void
   onBackgroundError: (message: string) => void
+  onBackgroundSuccess: (message: string) => void
 }
 
 export function MemberEditor({
@@ -39,7 +40,8 @@ export function MemberEditor({
   root,
   onCancel,
   onSaved,
-  onBackgroundError
+  onBackgroundError,
+  onBackgroundSuccess
 }: Props): React.JSX.Element {
   const [draft, setDraft] = useState<MemberDraft>(() => memberDraftFrom(member))
   const [revision] = useState(snapshot.revision)
@@ -95,6 +97,8 @@ export function MemberEditor({
           onBackgroundError(
             `Saved ${attemptedName} in ${pathTail(root)}, but the members list could not be refreshed: ${outcome.refreshError}`
           )
+        } else {
+          onBackgroundSuccess(`Saved ${attemptedName} in ${pathTail(root)}`)
         }
         return
       }
@@ -171,7 +175,13 @@ export function MemberEditor({
           )}
         </div>
         <div className="flex shrink-0 gap-2">
-          <Button type="button" variant="secondary" size="sm" onClick={onCancel}>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={operation.pending}
+            onClick={onCancel}
+          >
             Cancel
           </Button>
           <Button

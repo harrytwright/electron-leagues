@@ -392,6 +392,7 @@ function MembersTable({
         onPaneActionChange={setPaneAction}
         onPaneActionUpdate={updatePaneAction}
         onBackgroundError={(message) => add({ title: message, variant: 'error' })}
+        onBackgroundSuccess={(message) => add({ title: message, variant: 'success' })}
       />
       <div className="flex shrink-0 items-center justify-between border-t border-kumo-line px-4 py-1.5">
         <Text variant="secondary" size="sm">

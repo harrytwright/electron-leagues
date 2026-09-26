@@ -296,6 +296,7 @@ interface Props {
   onPaneActionChange: (action: PaneAction) => void
   onPaneActionUpdate: (update: (current: PaneAction) => PaneAction) => void
   onBackgroundError: (message: string) => void
+  onBackgroundSuccess: (message: string) => void
 }
 
 export type PaneAction =
@@ -345,7 +346,8 @@ export function MembersWorkspace({
   paneAction,
   onPaneActionChange,
   onPaneActionUpdate,
-  onBackgroundError
+  onBackgroundError,
+  onBackgroundSuccess
 }: Props): React.JSX.Element {
   const [selectedIdentity, setSelectedIdentity] = useState<MemberIdentity | null>(null)
   const [savedProfile, setSavedProfile] = useState<SavedProfile | null>(null)
@@ -746,6 +748,7 @@ export function MembersWorkspace({
               )
             }
             onBackgroundError={onBackgroundError}
+            onBackgroundSuccess={onBackgroundSuccess}
           />
         ) : paneAction ? (
           <MemberEditor
@@ -760,6 +763,7 @@ export function MembersWorkspace({
               onPaneActionChange(null)
             }}
             onBackgroundError={onBackgroundError}
+            onBackgroundSuccess={onBackgroundSuccess}
           />
         ) : selected ? (
           <MemberProfile

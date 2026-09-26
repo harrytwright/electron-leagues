@@ -3,6 +3,7 @@ import {
   buildMemberMergePreview,
   buildMergedMember,
   memberGroupMergeRequestSchema,
+  planRosterMerge,
   type MemberGroupMergeRequest
 } from '../member-merge'
 import type { Member, RosterSeason } from '../members'
@@ -100,8 +101,24 @@ describe('buildMemberMergePreview', () => {
         sources: [expect.objectContaining({ id: 1 }), expect.objectContaining({ id: 3 })]
       },
       { value: 'Other note', sources: [expect.objectContaining({ id: 2 })] },
-      { value: '', sources: [expect.objectContaining({ id: 4 })] }
+      { value: undefined, sources: [expect.objectContaining({ id: 4 })] }
     ])
+  })
+
+  test('groups a blank value with a missing one', () => {
+    const sources = [member(1, { notes: '  ' }), member(2), member(3, { notes: 'Kept' })]
+    expect(
+      buildMemberMergePreview(sources, 1).fields.find(({ field }) => field === 'notes')
+    ).toEqual({
+      field: 'notes',
+      alternatives: [
+        {
+          value: undefined,
+          sources: [expect.objectContaining({ id: 1 }), expect.objectContaining({ id: 2 })]
+        },
+        { value: 'Kept', sources: [expect.objectContaining({ id: 3 })] }
+      ]
+    })
   })
 
   test('shows differing live roster assignments with source labels', () => {
@@ -135,6 +152,54 @@ describe('buildMemberMergePreview', () => {
     ])
   })
 
+  test('marks the kept roster entry the way the write chooses it', () => {
+    const sources = [member(1, { firstName: 'Main' }), member(2, { firstName: 'Other' })]
+    const absorbed = member(6, { mergedInto: 1 })
+    const roster: RosterSeason = {
+      day: 'monday',
+      leagueFolder: 'Pairs',
+      leagueName: 'Pairs',
+      season: '2026-27',
+      path: '/root/monday/Pairs/2026-27',
+      archived: false,
+      revision: 'r1',
+      file: {
+        schemaVersion: 1,
+        format: 2,
+        teams: [],
+        players: [
+          { memberId: 6, teamId: 'old' },
+          { memberId: 1, teamId: 'direct' },
+          { memberId: 2, teamId: 'two', leagueSecretaryId: 'ls-2' }
+        ]
+      }
+    }
+    const [difference] = buildMemberMergePreview(
+      sources,
+      1,
+      [roster],
+      [...sources, absorbed]
+    ).rosterDifferences
+    expect(difference.assignments).toEqual([
+      expect.objectContaining({ memberId: 6, teamId: 'old', retained: false }),
+      expect.objectContaining({ memberId: 1, teamId: 'direct', retained: true }),
+      expect.objectContaining({
+        memberId: 2,
+        teamId: 'two',
+        leagueSecretaryId: 'ls-2',
+        retained: false
+      })
+    ])
+    expect(
+      buildMemberMergePreview(sources, 2, [roster], [...sources, absorbed]).rosterDifferences[0]
+        .assignments
+    ).toEqual([
+      expect.objectContaining({ memberId: 6, retained: false }),
+      expect.objectContaining({ memberId: 1, retained: false }),
+      expect.objectContaining({ memberId: 2, retained: true })
+    ])
+  })
+
   test('resolves roster assignments through an absorbed identity', () => {
     const sources = [member(1, { firstName: 'Main' }), member(2, { firstName: 'Other' })]
     const absorbed = member(5, { mergedInto: 2 })
@@ -159,6 +224,62 @@ describe('buildMemberMergePreview', () => {
     expect(
       buildMemberMergePreview(sources, 1, [roster], [...sources, absorbed]).rosterDifferences
     ).toHaveLength(1)
+  })
+})
+
+describe('planRosterMerge', () => {
+  const members = [member(1), member(2), member(3), member(6, { mergedInto: 1 })]
+
+  test('keeps main directly, then through an old number, then the earliest selection', () => {
+    expect(
+      planRosterMerge(
+        [
+          { memberId: 6, teamId: 'old' },
+          { memberId: 1, teamId: 'direct' }
+        ],
+        members,
+        [2, 1],
+        1
+      ).keep
+    ).toMatchObject({ index: 1, memberId: 1 })
+    expect(
+      planRosterMerge(
+        [
+          { memberId: 2, teamId: 'two' },
+          { memberId: 6, teamId: 'old' }
+        ],
+        members,
+        [2, 1],
+        1
+      ).keep
+    ).toMatchObject({ index: 1, memberId: 6 })
+    expect(
+      planRosterMerge(
+        [
+          { memberId: 3, teamId: 'three' },
+          { memberId: 2, teamId: 'two' }
+        ],
+        members,
+        [1, 2, 3],
+        1
+      ).keep
+    ).toMatchObject({ index: 1, memberId: 2 })
+  })
+
+  test('leaves a roster alone when main is its only selected entry, under any number', () => {
+    expect(planRosterMerge([{ memberId: 6, teamId: null }], members, [1, 2], 1).unchanged).toBe(
+      true
+    )
+    expect(planRosterMerge([{ memberId: 1, teamId: null }], members, [1, 2], 1).unchanged).toBe(
+      true
+    )
+    expect(planRosterMerge([{ memberId: 2, teamId: null }], members, [1, 2], 1).unchanged).toBe(
+      false
+    )
+    expect(planRosterMerge([{ memberId: 3, teamId: null }], members, [1, 2], 1)).toMatchObject({
+      keep: null,
+      unchanged: true
+    })
   })
 })
 
@@ -188,6 +309,18 @@ describe('buildMergedMember', () => {
       mbdIds: ['a', 'b', 'extra'],
       aliases: ['Known', 'Manual', 'Other Bowler']
     })
+  })
+
+  test('never lists the survivor’s own name as an alias', () => {
+    const sources = [
+      member(1, { firstName: 'John', aliases: ['Jon Bowler'] }),
+      member(2, { firstName: 'Jon' })
+    ]
+    const preview = buildMemberMergePreview(sources, 1).result
+    expect(preview.aliases).toEqual(['Jon Bowler'])
+    expect(
+      buildMergedMember(sources, request(sources, 1, { ...preview, firstName: 'Jon' })).aliases
+    ).toEqual(['John Bowler'])
   })
 
   test('restores source identifiers and aliases when a reviewed result omits them', () => {

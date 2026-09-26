@@ -6,6 +6,7 @@ import {
   normaliseName,
   resolveMember,
   type Member,
+  type Player,
   type RosterSeason
 } from './members'
 
@@ -54,16 +55,68 @@ export interface MemberMergeFieldPreview {
   alternatives: MemberMergeAlternative[]
 }
 
+export interface MemberMergeRosterAssignment {
+  source: MemberMergeSource
+  /** The number written on the roster, an old absorbed one when it differs from the source. */
+  memberId: number
+  teamId: string | null
+  position?: number
+  leagueSecretaryId?: string
+  /** True for the one entry the merge keeps on this roster. */
+  retained: boolean
+}
+
 export interface MemberMergeRosterDifference {
   path: string
   leagueName: string
   season: string
-  assignments: Array<{
-    source: MemberMergeSource
-    teamId: string | null
-    position?: number
-    leagueSecretaryId?: string
-  }>
+  assignments: MemberMergeRosterAssignment[]
+}
+
+export interface RosterMergeCandidate {
+  /** Index into the roster's players. */
+  index: number
+  memberId: number
+  sourceId: number
+  sourceOrder: number
+}
+
+export interface RosterMergePlan {
+  candidates: RosterMergeCandidate[]
+  keep: RosterMergeCandidate | null
+  /** A roster that lists main once, under whichever number, is left as it is. */
+  unchanged: boolean
+}
+
+/**
+ * Which roster entries belong to the selected records and which one survives:
+ * main's own entry first, then an old number that resolves to main, then the
+ * earliest selected record. The preview and the write share this rule.
+ */
+export function planRosterMerge(
+  players: readonly Player[],
+  members: readonly Member[],
+  sourceIds: readonly number[],
+  mainId: number
+): RosterMergePlan {
+  const order = new Map(sourceIds.map((id, index) => [id, index] as const))
+  const candidates = players.flatMap((player, index) => {
+    const resolved = resolveMember(members, player.memberId)
+    if (!resolved) return []
+    const sourceOrder = order.get(resolved.id)
+    return sourceOrder === undefined
+      ? []
+      : [{ index, memberId: player.memberId, sourceId: resolved.id, sourceOrder }]
+  })
+  if (candidates.length === 0) return { candidates, keep: null, unchanged: true }
+  const keep =
+    candidates.find((candidate) => candidate.memberId === mainId) ??
+    candidates.find((candidate) => candidate.sourceId === mainId) ??
+    candidates.reduce((earliest, candidate) =>
+      candidate.sourceOrder < earliest.sourceOrder ? candidate : earliest
+    )
+  const unchanged = candidates.length === 1 && keep.sourceId === mainId
+  return { candidates, keep, unchanged }
 }
 
 export interface MemberMergePreview {
@@ -88,7 +141,7 @@ const scalarFields = [
 
 type FillableMemberField = Exclude<MemberMergeFieldPreview['field'], 'marketing' | 'cardIssued'>
 
-function cleanValues(values: readonly string[]): string[] {
+export function cleanValues(values: readonly string[]): string[] {
   const clean: string[] = []
   const seen = new Set<string>()
   for (const value of values) {
@@ -138,7 +191,8 @@ function alternativeValue(
   field: MemberMergeFieldPreview['field']
 ): MemberMergeAlternative['value'] {
   if (field === 'marketing') return source.marketing
-  return source[field]?.trim()
+  const trimmed = source[field]?.trim()
+  return trimmed || undefined
 }
 
 function alternativesFor(
@@ -180,7 +234,12 @@ function defaultResult(sources: readonly Member[], main: Member): MemberMergeRes
   return withOriginalNames(result, sources)
 }
 
-function withOriginalNames(
+/**
+ * Every source's name that differs from the final one becomes an alias, and an
+ * alias that is the final name itself is dropped, so a record never lists its
+ * own name as another spelling.
+ */
+export function withOriginalNames(
   result: MemberMergeResult,
   sources: readonly Member[]
 ): MemberMergeResult {
@@ -188,29 +247,35 @@ function withOriginalNames(
   const originalNames = sources
     .filter((source) => normaliseName(source.firstName, source.lastName) !== finalName)
     .map(memberDisplayName)
-  return { ...result, aliases: cleanValues([...result.aliases, ...originalNames]) }
+  const aliases = cleanValues([...result.aliases, ...originalNames]).filter(
+    (alias) => normaliseName(alias, '') !== finalName
+  )
+  return { ...result, aliases }
 }
 
 function rosterDifferences(
   sources: readonly Member[],
+  mainId: number,
   rosters: readonly RosterSeason[],
   allMembers: readonly Member[]
 ): MemberMergeRosterDifference[] {
-  const sourceIds = new Set(sources.map((source) => source.id))
+  const sourceIds = sources.map((source) => source.id)
   const sourceById = new Map(sources.map((source) => [source.id, source] as const))
   const differences: MemberMergeRosterDifference[] = []
   for (const roster of rosters.filter((candidate) => !candidate.archived)) {
-    const assignments = roster.file.players.flatMap((player) => {
-      const resolved = resolveMember(allMembers, player.memberId)
-      if (!resolved || !sourceIds.has(resolved.id)) return []
-      const source = sourceById.get(resolved.id)
+    const plan = planRosterMerge(roster.file.players, allMembers, sourceIds, mainId)
+    const assignments = plan.candidates.flatMap((candidate) => {
+      const source = sourceById.get(candidate.sourceId)
       if (!source) return []
+      const player = roster.file.players[candidate.index]
       return [
         {
           source: sourceFor(source),
+          memberId: candidate.memberId,
           teamId: player.teamId,
           position: player.position,
-          leagueSecretaryId: player.leagueSecretaryId
+          leagueSecretaryId: player.leagueSecretaryId,
+          retained: candidate.index === plan.keep?.index
         }
       ]
     })
@@ -247,7 +312,7 @@ export function buildMemberMergePreview(
     sources: sources.map(sourceFor),
     result: defaultResult(sources, main),
     fields: scalarFields.map((field) => ({ field, alternatives: alternativesFor(sources, field) })),
-    rosterDifferences: rosterDifferences(sources, rosters, allMembers)
+    rosterDifferences: rosterDifferences(sources, mainId, rosters, allMembers)
   }
 }
 

@@ -137,6 +137,47 @@ describe('mergeMemberGroup', () => {
     expect(await readFile(unrelatedPath, 'utf8')).toBe(unrelatedBefore)
   })
 
+  test('carries a LeagueSecretary id onto the kept entry and skips a roster listing main alone', async () => {
+    await writeMaster([member(1), member(2), member(6, { mergedInto: 1 })])
+    const mergedPath = join(root, 'monday/Pairs/2026-27/meta.json')
+    const mainOnlyPath = join(root, 'tuesday/Trio/2026-27/meta.json')
+    await writeJson(
+      mergedPath,
+      season({
+        players: [
+          { memberId: 1, teamId: 'main' },
+          { memberId: 2, teamId: 'second', leagueSecretaryId: 'ls-2' }
+        ]
+      })
+    )
+    await writeJson(mainOnlyPath, season({ players: [{ memberId: 6, teamId: null }] }))
+    const mainOnlyBefore = await readFile(mainOnlyPath, 'utf8')
+
+    await mergeMemberGroup(root, await mergeRequest([1, 2], 1))
+
+    expect(JSON.parse(await readFile(mergedPath, 'utf8')).players).toEqual([
+      { memberId: 1, teamId: 'main', leagueSecretaryId: 'ls-2' }
+    ])
+    expect(await readFile(mainOnlyPath, 'utf8')).toBe(mainOnlyBefore)
+  })
+
+  test('refuses to move a roster entry written under a duplicated number', async () => {
+    await writeMaster([
+      member(1),
+      member(2),
+      member(7, { firstName: 'Absorbed', mergedInto: 2 }),
+      member(7, { firstName: 'Other holder' })
+    ])
+    const rosterPath = join(root, 'monday/Pairs/2026-27/meta.json')
+    await writeJson(rosterPath, season({ players: [{ memberId: 7, teamId: null }] }))
+    const before = await readFile(rosterPath, 'utf8')
+
+    await expect(mergeMemberGroup(root, await mergeRequest([1, 2], 1))).rejects.toThrow(
+      'Member number 7 is duplicated and listed in Pairs/2026-27'
+    )
+    expect(await readFile(rosterPath, 'utf8')).toBe(before)
+  })
+
   test('rejects stale, missing, duplicate, deleted and already-merged participants', async () => {
     const base = [member(1), member(2)]
     await writeMaster(base)

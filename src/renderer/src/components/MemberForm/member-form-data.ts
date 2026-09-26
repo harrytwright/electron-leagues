@@ -1,6 +1,12 @@
 import { GENDERS, type Gender, type Member, type MemberInput } from '@shared/members'
+import { sentenceCase } from '@renderer/lib/sentence-case'
 
 export const NO_GENDER = 'unset'
+
+export const GENDER_ITEMS = {
+  [NO_GENDER]: 'Not recorded',
+  ...Object.fromEntries(GENDERS.map((gender) => [gender, sentenceCase(gender)]))
+}
 
 export interface MemberDraft {
   firstName: string

@@ -1,8 +1,9 @@
 import { readFile, writeFile } from 'node:fs/promises'
-import { basename } from 'node:path'
+import { basename, dirname } from 'node:path'
 import {
   buildMergedMember,
   memberGroupMergeRequestSchema,
+  planRosterMerge,
   type MemberGroupMergeRequest
 } from '../../shared/member-merge'
 import {
@@ -120,29 +121,47 @@ function mergeRosterPlayers(
   members: readonly Member[],
   request: MemberGroupMergeRequest
 ): Player[] {
-  const order = new Map(request.sourceIds.map((id, index) => [id, index] as const))
-  const candidates = players.flatMap((player, index) => {
-    const resolved = resolveMember(members, player.memberId)
-    if (!resolved) return []
-    const sourceOrder = order.get(resolved.id)
-    return sourceOrder === undefined ? [] : [{ index, sourceId: resolved.id, sourceOrder }]
-  })
-  if (candidates.length === 0) return [...players]
-  const directMain = candidates.find(
-    (candidate) => players[candidate.index].memberId === request.mainId
-  )
-  const resolvedMain = candidates.find((candidate) => candidate.sourceId === request.mainId)
-  const keep =
-    directMain ??
-    resolvedMain ??
-    candidates.reduce((earliest, candidate) =>
-      candidate.sourceOrder < earliest.sourceOrder ? candidate : earliest
-    )
-  const selectedIndexes = new Set(candidates.map((candidate) => candidate.index))
+  const plan = planRosterMerge(players, members, request.sourceIds, request.mainId)
+  if (plan.unchanged || !plan.keep) return [...players]
+  const keep = plan.keep
+  const selectedIndexes = new Set(plan.candidates.map((candidate) => candidate.index))
+  const kept: Player = { ...players[keep.index], memberId: request.mainId }
+  const secretaryId =
+    kept.leagueSecretaryId ??
+    plan.candidates
+      .map((candidate) => players[candidate.index].leagueSecretaryId)
+      .find((id) => id !== undefined)
+  if (secretaryId !== undefined) kept.leagueSecretaryId = secretaryId
   return players.flatMap((player, index) => {
     if (!selectedIndexes.has(index)) return [player]
-    return index === keep.index ? [{ ...player, memberId: request.mainId }] : []
+    return index === keep.index ? [kept] : []
   })
+}
+
+/**
+ * A roster entry under a duplicated number cannot say which holder it means, so
+ * a merge that would move it is refused until the numbers are put right.
+ */
+function refuseDuplicatedRosterEntries(
+  master: MembersFile,
+  seasons: readonly ReadSeason[],
+  request: MemberGroupMergeRequest
+): void {
+  const counts = new Map<number, number>()
+  for (const member of master.members) counts.set(member.id, (counts.get(member.id) ?? 0) + 1)
+  const selected = new Set(request.sourceIds)
+  for (const season of seasons) {
+    for (const player of season.file.players) {
+      if ((counts.get(player.memberId) ?? 0) < 2) continue
+      const resolved = resolveMember(master.members, player.memberId)
+      if (resolved && selected.has(resolved.id)) {
+        const seasonDir = dirname(season.path)
+        throw new UserFacingError(
+          `Member number ${player.memberId} is duplicated and listed in ${basename(dirname(seasonDir))}/${basename(seasonDir)}, so it must be resolved before merging`
+        )
+      }
+    }
+  }
 }
 
 interface ReadSeason {
@@ -205,6 +224,7 @@ export async function mergeMemberGroup(
       throw new UserFacingError(toUserFacing(error).message)
     }
     const seasons = await readLiveSeasons(root)
+    refuseDuplicatedRosterEntries(masterRead.value, seasons, request)
     const files: PreparedMemberMergeFile[] = []
     const main = sources.find((source) => source.id === request.mainId)
     if (!main) throw new UserFacingError('The main member must be one of the selected members')

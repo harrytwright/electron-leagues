@@ -762,9 +762,48 @@ it('retries only the refresh after a completed merge', async () => {
   expect(membersSnapshot).toHaveBeenCalledTimes(3)
 })
 
-it.each(['Cancel', 'New member…'] as const)(
-  'keeps the %s outcome active when a pending merge fails late',
-  async (nextAction) => {
+it('holds Cancel while a merge is being written', async () => {
+  const merge = deferred<ReturnType<typeof makeMember>>()
+  const saved = makeMember({ id: 2, firstName: 'Robert', lastName: 'Kay' })
+  const membersSnapshot = vi
+    .fn<RendererApi['membersSnapshot']>()
+    .mockResolvedValueOnce(twoMembersSnapshot())
+    .mockResolvedValue(makeSnapshot({ revision: 'rev-3', nextId: 3, members: [saved] }))
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot,
+    mergeMemberGroup: vi.fn(() => merge.promise)
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await openRowMenu(user, 'Bob Kay')
+  await user.click(screen.getByRole('menuitem', { name: 'Merge with…' }))
+  await user.click(screen.getByRole('checkbox', { name: /Merge Ann Lee/ }))
+  await user.click(screen.getByRole('button', { name: 'Merge members' }))
+
+  expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Merging…' })).toBeDisabled()
+  await act(async () => merge.resolve(saved))
+  expect(await screen.findByRole('article', { name: 'Robert Kay profile' })).toBeInTheDocument()
+})
+
+it.each([
+  {
+    outcome: 'succeeds',
+    settle: (merge: Deferred<ReturnType<typeof makeMember>>) =>
+      merge.resolve(makeMember({ id: 2, firstName: 'Bob', lastName: 'Kay' })),
+    message: 'Merged Bob Kay in /root'
+  },
+  {
+    outcome: 'fails',
+    settle: (merge: Deferred<ReturnType<typeof makeMember>>) =>
+      merge.reject(new Error('Disk is locked')),
+    message: 'Couldn’t merge Bob Kay in /root: Disk is locked'
+  }
+])(
+  'reports a merge that $outcome after New member… replaced the pane',
+  async ({ settle, message }) => {
     const merge = deferred<ReturnType<typeof makeMember>>()
     const api = installMockApi({
       getRoot: vi.fn().mockResolvedValue('/root'),
@@ -782,20 +821,132 @@ it.each(['Cancel', 'New member…'] as const)(
       'aria-disabled',
       'true'
     )
-    await user.click(screen.getByRole('button', { name: nextAction }))
-    await act(async () => merge.reject(new Error('Disk is locked')))
+    await user.click(screen.getByRole('button', { name: 'New member…' }))
+    await act(async () => settle(merge))
 
-    expect(
-      await screen.findByText(/Couldn’t merge Bob Kay in \/root: Disk is locked/)
-    ).toBeInTheDocument()
-    const activePane =
-      nextAction === 'New member…'
-        ? screen.getByRole('form', { name: 'New member' })
-        : screen.getByRole('heading', { name: 'Select a member' })
-    expect(activePane).toBeInTheDocument()
+    expect(await screen.findByText(message)).toBeInTheDocument()
+    expect(screen.getByRole('form', { name: 'New member' })).toBeInTheDocument()
     expect(api.mergeMemberGroup).toHaveBeenCalledOnce()
   }
 )
+
+it('reviews a guardian contact carried onto an adult result', async () => {
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(
+      makeSnapshot({
+        revision: 'rev-2',
+        nextId: 3,
+        members: [
+          makeMember({ id: 1, firstName: 'Ann', lastName: 'Lee' }),
+          makeMember({
+            id: 2,
+            firstName: 'Annie',
+            lastName: 'Lee',
+            dob: '2000-01-01',
+            email: undefined,
+            guardianContact: 'Mum 07700 900001'
+          })
+        ]
+      })
+    )
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await openRowMenu(user, 'Ann Lee')
+  await user.click(screen.getByRole('menuitem', { name: 'Merge with…' }))
+  await user.click(screen.getByRole('checkbox', { name: /Merge Annie Lee/ }))
+
+  const guardian = screen.getByLabelText('Parent or guardian contact')
+  expect(guardian).toHaveValue('Mum 07700 900001')
+  expect(screen.getByText(/stays on the result until it is cleared here/)).toBeInTheDocument()
+  await user.clear(guardian)
+  await user.click(screen.getByRole('button', { name: 'Merge members' }))
+
+  await waitFor(() => expect(api.mergeMemberGroup).toHaveBeenCalledOnce())
+  const [request] = api.mergeMemberGroup.mock.calls[0]
+  expect(request.result.guardianContact).toBeUndefined()
+  expect(request.result.email).toBe('jane@example.org')
+})
+
+it('shows which roster entry a merge keeps, without calling singles bowlers substitutes', async () => {
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(
+      makeSnapshot({
+        revision: 'rev-2',
+        nextId: 8,
+        members: [
+          makeMember({ id: 1, firstName: 'Ann', lastName: 'Lee' }),
+          makeMember({ id: 2, firstName: 'Annie', lastName: 'Lee' }),
+          makeMember({ id: 6, firstName: 'Old Ann', lastName: 'Lee', mergedInto: 1 })
+        ],
+        seasons: [
+          makeRosterSeason({
+            leagueName: 'Mixed Triples',
+            path: '/root/monday/Mixed triples/2025-26',
+            file: makeSeasonFile({
+              teams: [
+                { id: 'team_a', teamNo: 1, name: 'Strikers' },
+                { id: 'team_b', teamNo: 2, name: 'Spares' }
+              ],
+              players: [
+                { memberId: 6, teamId: 'team_b' },
+                { memberId: 1, teamId: 'team_a', position: 2 },
+                { memberId: 2, teamId: null, leagueSecretaryId: 'ls-2' }
+              ]
+            })
+          }),
+          makeRosterSeason({
+            leagueName: 'Tuesday Singles',
+            leagueFolder: 'Singles',
+            day: 'tuesday',
+            file: makeSeasonFile({
+              format: 1,
+              players: [
+                { memberId: 1, teamId: null, position: 1 },
+                { memberId: 2, teamId: null, position: 4 }
+              ]
+            })
+          })
+        ]
+      })
+    )
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await openRowMenu(user, 'Annie Lee')
+  await user.click(screen.getByRole('menuitem', { name: 'Merge with…' }))
+  await user.click(screen.getByRole('checkbox', { name: /Merge Ann Lee, member 000001/ }))
+
+  const rosters = screen.getByRole('heading', { name: 'Roster assignments' }).closest('section')!
+  const triples = within(rosters)
+    .getByText(/Mixed Triples/)
+    .closest('li')!
+  expect(within(triples).getByText(/Old Ann Lee|listed as 000006/)).toHaveTextContent(
+    'Ann Lee (1): Spares, listed as 000006 (dropped)'
+  )
+  expect(within(triples).getByText(/Strikers/)).toHaveTextContent(
+    'Ann Lee (1): Strikers, position 2 (dropped)'
+  )
+  expect(within(triples).getByText(/LeagueSecretary/)).toHaveTextContent(
+    'Annie Lee (2): Substitute, LeagueSecretary id ls-2 (kept)'
+  )
+  const singles = within(rosters)
+    .getByText(/Tuesday Singles/)
+    .closest('li')!
+  expect(singles).not.toHaveTextContent('Substitute')
+  expect(within(singles).getByText(/position 4/)).toHaveTextContent(
+    'Annie Lee (2): position 4 (kept)'
+  )
+
+  await user.click(screen.getByLabelText('Main record'))
+  await user.click(await screen.findByRole('option', { name: /000001 Ann Lee/ }))
+  expect(within(rosters).getByText(/Strikers/)).toHaveTextContent('(kept)')
+  expect(within(rosters).getByText(/LeagueSecretary/)).toHaveTextContent('(dropped)')
+})
 
 it('deletes a member, explaining whether they are hidden or removed', async () => {
   const snapshot = twoMembersSnapshot()
