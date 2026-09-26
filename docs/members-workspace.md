@@ -58,7 +58,7 @@ That identity supplies the surviving number; choosing field values does not chan
 If main is unticked, the earliest remaining selection becomes main. With fewer than two selected,
 keep the workspace open with instructions and disable merging.
 
-Merging owns the pane until Merge, Cancel, another explicit action such as New/Edit, or navigation
+Merging owns the pane until Merge, Cancel, another explicit action such as New/Edit or navigation
 away. Starting another action discards the merge draft. Selection changes within the merge should
 not unnecessarily wipe manually edited result fields. Successful merging opens the survivor's
 profile. Cancel restores the previously open profile when available.
@@ -123,7 +123,7 @@ handle/report partial filesystem failures. A root lock alone does not make sever
 
 `window.api.mergeMemberGroup` accepts `sourceIds`, `mainId`, `result` and `expectedRevision`,
 returning the surviving `Member`. `src/shared/member-merge.ts` validates the request, builds
-source-labelled field alternatives and roster differences, and enforces identifier/name unions
+source-labelled field alternatives and roster differences and enforces identifier/name unions
 and age rules. Pass all snapshot members to `buildMemberMergePreview` so old absorbed numbers
 resolve consistently with the main process. The legacy pair API remains during phase 4.
 
@@ -140,12 +140,8 @@ This provides recovery from reported write failures, not crash-atomic multi-file
 
 ## Implementation phases
 
-Each phase uses Sol for code implementation. The orchestrator reviews scope and verification,
-requests an independent cold review, routes valid findings back for fixes, then commits after
-all required checks pass. Phase 1 used Claude Fable; subsequent cold reviews use Claude Opus 5.5,
-without the implementer's conversation. Each review receives a bounded source packet, has no
-tools and retains a JSON usage receipt. Sol runs through Codex's agent tool. The repository's
-`.claude/skills/codex-first/SKILL.md` explicitly skips its CLI delegation route in a Codex session.
+Each phase was built, given an independent cold review without the implementer's conversation,
+amended for the findings that held and committed once every required check passed.
 
 | Phase | Deliverable                                                                                                                                                  | Status   |
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------- |
@@ -161,7 +157,7 @@ filtering and avoid rerendering every row for each divider pointer movement.
 ## Verification
 
 - Initial empty profile, explicit selection and stable selection across filters.
-- Correct record identity for duplicate numbers, and eligibility restrictions on writes/merges.
+- Correct record identity for duplicate numbers and eligibility restrictions on writes/merges.
 - Pointer and keyboard row/menu/divider interaction; remembered widths and bounded small layout.
 - Current and historical league links, including archived rosters.
 - In-pane create/edit, required fields and age rules, Save/Cancel and discard on navigation.
@@ -191,7 +187,6 @@ Relevant files:
 
 - `src/renderer/src/views/MembersView/MembersView.tsx` and its tests: list, filters and actions.
 - `src/renderer/src/components/MemberDialog/MemberDialog.tsx`: current forms and draft conversion.
-- `src/renderer/src/components/MergeMemberDialog/MergeMemberDialog.tsx`: current pair merge UI.
 - `src/renderer/src/components/SeasonRoster/SeasonRoster.tsx`: separate member-dialog consumer.
 - `src/renderer/src/lib/members-filter.ts` and `members-table-store.ts`: search and preferences.
 - `src/renderer/src/app/App/App.tsx`, `lib/selection.ts` and navigation hooks: roster navigation.
@@ -208,7 +203,7 @@ outcomes as implementation progresses.
 
 ## Review record
 
-Phase 1's first independent Claude Fable review found clipped profile scrolling, incorrect stacked
+Phase 1's independent review found clipped profile scrolling, incorrect stacked
 grid placement, profile actions bypassing duplicate-number restrictions, weak selection styling,
 Windows archive navigation failures and redundant row focus stops. These findings were accepted.
 Browser inspection also found that sizing the stacked list against viewport height left too little
@@ -222,11 +217,10 @@ and `npm run lint` passed. Browser checks covered the initial empty state, profi
 independent scrolling at 1100 × 720 and 800 × 500, duplicate action guards and live roster
 navigation to Players. Windows archive navigation has regression coverage. The corrected narrow
 layout gives the list 88px and profile 164px at minimum size with the sidebar and problem banner.
-A second Fable invocation returned usage-credit exhaustion, so it produced no further verdict.
-The first Fable review and its required fixes are complete.
-
-Phase 1 committed as `a4d38c3` (`feat: add the members profile workspace`).
-Phase 2 committed as `b3db82a` (`feat: edit members in the profile pane`).
+Phase 1 committed as `0e2f669` (`feat: add the members profile workspace`).
+Phase 2 committed as `7897e17` (`feat: edit members in the profile pane`).
+Phase 3 committed as `fab51fa` (`feat: support merging member groups`).
+Phase 4 committed as `78aa233` (`feat: merge members in the profile pane`).
 
 Phase 2 adds a shared `MemberForm`, a keyed `MemberEditor` and explicit pane actions. SeasonRoster
 retains its dialog wrapper. The editor captures the opening revision, discards drafts on navigation
@@ -237,7 +231,6 @@ background read failures so an active draft survives.
 The phase 2 Opus 5.5 review identified three required fixes: expose cached members read failures,
 notify the user when a save fails after its editor closes and associate name validation with the
 correct fields. All three are resolved. Menu triggers preserve drafts; renumbering discards them.
-The review is retained in `.temp/members-workspace/phase2-opus-review.md`; do not rerun it on resume.
 
 Browser verification before those final fixes covered creation under an excluding search filter,
 refresh-only recovery without a second save, navigation during a held save and visible focused
@@ -246,15 +239,9 @@ closing a saved form leaves its refresh warning visible and retrying reads the s
 without a second write. Final checks passed: format, 90 test files with 882 tests, type checking,
 lint and diff checking. Lint reports only the existing anti-slop module-type warning.
 
-The user requires conservative usage monitoring and a saved checkpoint before either model's
-allowance runs out. Read `.temp/members-workspace/check-quota.py` output before and after agent
-work, reviews and validation. Keep room for the commit and handoff before starting another phase.
-Review receipts and the local usage policy are in the ignored `.temp/members-workspace` directory.
-
-Temporary browser fixture: `/tmp/leagues-members-visual/launch.sh`, port 4179. It renders the real
-App with an in-memory API, explicit Tailwind source scanning and `window.__membersHarness` controls
-for failed saves, persistent failed refresh and held saves. No real league data is written. These
-temporary files may disappear between sessions; do not rely on them as the only handoff.
+Browser checks ran against a temporary fixture that renders the real App with an in-memory API
+and controls for failed saves, persistent failed refresh and held saves. No real league data is
+written. The fixture is not committed.
 
 Phase 3 implements the shared group merge contract and main-process recovery described above.
 Root review corrected card metadata defaults, absorbed-number preview resolution, unrelated
@@ -263,10 +250,6 @@ identified two further fixes: exclude untouched targets from rollback and compar
 alternatives. Both are resolved; the source-note alternatives added after the review packet were
 checked locally. The existing resolver follows absorption chains and the scanner separates
 archives, confirming the reviewer’s questions about those dependencies.
-
-The review and receipt are retained in `.temp/members-workspace/phase3-opus-review.md` and
-`phase3-opus-usage.json`. Do not repeat that paid review when resuming. The merge workspace UI
-remains phase 4, with a design handoff in `.temp/members-workspace/phase4-brief.md`.
 
 Phase 3 final verification passed: `npm run format`, `npm test` (92 files, 902 tests),
 `npm run typecheck`, `npm run lint` and `git diff --check`. Lint retains only the existing
@@ -279,17 +262,16 @@ The Members page now uses ordered row selection and an in-pane merge comparison.
 selected member supplies the main record; removing it selects the earliest remaining record.
 Manual field edits survive main-record and selection changes. Source values can be reset to the
 default, with a visible notice when a chosen source disappears. Notes have an explicit combined
-default, while aliases and MBD identifiers combine automatically. The Members merge-dialog path
-has been removed; other consumers retain their existing wrappers.
+default, while aliases and MBD identifiers combine automatically. The Members merge dialog and
+the pair `mergeMembers` channel it called have been removed; `MemberDialog` remains for the
+season roster.
 
 The bounded Opus 5.5 review identified missing source/default recovery and the wrong profile
 being shown after closing a completed merge whose refresh failed. These findings are resolved.
 The suggestion to retain a draft when Delete is chosen was declined because the approved design
-discards drafts on another explicit action. The review's first finding was truncated in the CLI
-result and could not be evaluated in full; no repeat paid review was run. Independently, the
-completed-write state now suppresses the obsolete instruction to cancel and restart the merge.
-The receipt records $0.9251122 API-equivalent usage across four internal CLI turns, below the $1
-cap. Review and usage files remain in the ignored temporary review directory.
+discards drafts on another explicit action. The review's first finding was truncated and could
+not be evaluated in full. Independently, the completed-write state now suppresses the obsolete
+instruction to cancel and restart the merge.
 
 Browser checks covered 20 selections, hidden selections, manual edits, removing the main record,
 clearing all selections then choosing different members, source fallback and a renamed survivor
@@ -301,3 +283,21 @@ refresh-only retry with exactly one merge write and late failures after Cancel o
 Final verification passed: `npm run format`, `npm test` (92 files, 909 tests),
 `npm run typecheck`, `npm run lint` and `git diff --check`. Lint reports only the existing
 anti-slop module-type warning. All four implementation phases are complete.
+
+### Cold review of the four phases together
+
+A further cold review of the four commits as one change found no blockers in the write path and
+sixteen items, applied in the commits that follow `78aa233`:
+
+- The preview and the write now share `planRosterMerge`, so the kept roster entry is marked
+  the way the file is written, singles bowlers are not called substitutes and a LeagueSecretary
+  id moves onto the kept entry. A roster listing main once is left alone, and a merge is refused
+  while a roster entry sits under a duplicated number.
+- Cancel is held while a write is in flight and a write that lands after the pane was replaced
+  reports its success. A guardian contact carried onto an adult result is shown for review, a
+  survivor never lists its own name as an alias and a blank value groups with a missing one.
+- The editor hands the saved record back when its refresh failed, focus moves to the profile
+  heading when a pane is left, statuses have shapes as well as colours, the selected row is
+  marked with `aria-current` and the divider has `aria-controls`, a value text and Home and End.
+- Rows are memoised, memberships are indexed once per snapshot and the pair merge channel, the
+  old dialog and the unused column width store are gone.
