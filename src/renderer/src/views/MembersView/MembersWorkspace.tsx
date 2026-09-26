@@ -55,6 +55,21 @@ function saveListPercent(value: number): void {
   }
 }
 
+function dividerTarget(key: string, current: number): number | undefined {
+  switch (key) {
+    case 'ArrowLeft':
+      return current - RESIZE_STEP
+    case 'ArrowRight':
+      return current + RESIZE_STEP
+    case 'Home':
+      return MIN_LIST_PERCENT
+    case 'End':
+      return MAX_LIST_PERCENT
+    default:
+      return undefined
+  }
+}
+
 function clampListPercent(value: number): number {
   return Math.min(MAX_LIST_PERCENT, Math.max(MIN_LIST_PERCENT, Math.round(value)))
 }
@@ -800,13 +815,7 @@ export function MembersWorkspace({
             if (list.current) list.current.style.width = `${listPercent}%`
           }}
           onKeyDown={(event) => {
-            const targets: Record<string, number> = {
-              ArrowLeft: listPercent - RESIZE_STEP,
-              ArrowRight: listPercent + RESIZE_STEP,
-              Home: MIN_LIST_PERCENT,
-              End: MAX_LIST_PERCENT
-            }
-            const next = targets[event.key]
+            const next = dividerTarget(event.key, listPercent)
             if (next === undefined) return
             event.preventDefault()
             setWidth(next)

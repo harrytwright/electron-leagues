@@ -70,6 +70,14 @@ const FIELD_LABELS: Record<Field, string> = {
   notes: 'Notes'
 }
 
+/** The label for a validation issue's first path segment, when it names a reviewed field. */
+function fieldLabel(key: PropertyKey | undefined): string | undefined {
+  for (const [field, label] of Object.entries(FIELD_LABELS)) {
+    if (field === key) return label
+  }
+  return undefined
+}
+
 function memberById(members: readonly Member[], id: number): Member | undefined {
   const matches = members.filter((member) => member.id === id)
   return matches.length === 1 ? matches[0] : undefined
@@ -539,10 +547,10 @@ export function MergeMemberPane({
     ])
   )
   const firstIssue = parsed && !parsed.success ? parsed.error.issues[0] : undefined
-  const issueField = firstIssue?.path[0]
+  const issueLabel = firstIssue ? fieldLabel(firstIssue.path[0]) : undefined
   const invalidMessage = firstIssue
-    ? typeof issueField === 'string' && issueField in FIELD_LABELS
-      ? `${FIELD_LABELS[issueField as Field]}: ${firstIssue.message}`
+    ? issueLabel
+      ? `${issueLabel}: ${firstIssue.message}`
       : firstIssue.message
     : null
   const disabled = operation.pending || frozen || stale
