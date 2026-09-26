@@ -16,8 +16,12 @@ export interface Trail {
 }
 
 /** The drill-down position below a base folder; a different base starts over. */
-export function useCrumbs(baseDir: string, onCurrentDirChange?: (path: string) => void): Trail {
-  const [crumbs, setCrumbs] = useKeyedState<string, Crumb[]>(baseDir, [])
+export function useCrumbs(
+  baseDir: string,
+  onCurrentDirChange?: (path: string) => void,
+  initialCrumbs: Crumb[] = []
+): Trail {
+  const [crumbs, setCrumbs] = useKeyedState<string, Crumb[]>(baseDir, initialCrumbs)
   // A one-shot signal for the next directory to mount; a ref because it is consumed once.
   const pendingFocusDir = useRef<string | null>(null)
 

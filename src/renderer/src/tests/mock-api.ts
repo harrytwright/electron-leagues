@@ -115,6 +115,82 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
     listDir: vi.fn<RendererApi['listDir']>().mockResolvedValue([]),
     trashFolder: vi.fn<RendererApi['trashFolder']>().mockResolvedValue(undefined),
     pickFiles: vi.fn<RendererApi['pickFiles']>().mockResolvedValue([]),
+    enableMembers: vi.fn<RendererApi['enableMembers']>().mockResolvedValue(undefined),
+    membersSnapshot: vi.fn<RendererApi['membersSnapshot']>().mockResolvedValue({
+      enabled: false,
+      revision: '',
+      nextId: 1,
+      members: [],
+      seasons: [],
+      problems: []
+    }),
+    saveMember: vi.fn<RendererApi['saveMember']>((input) =>
+      Promise.resolve({ id: input.id ?? 1, ...input })
+    ),
+    mergeMemberGroup: vi.fn<RendererApi['mergeMemberGroup']>((request) =>
+      Promise.resolve({ id: request.mainId, ...request.result })
+    ),
+    deleteMember: vi.fn<RendererApi['deleteMember']>().mockResolvedValue('hard'),
+    resetMembers: vi.fn<RendererApi['resetMembers']>().mockResolvedValue(undefined),
+    renumberDuplicates: vi.fn<RendererApi['renumberDuplicates']>().mockResolvedValue([]),
+    createSeasonRoster: vi.fn<RendererApi['createSeasonRoster']>().mockResolvedValue(undefined),
+    saveSeason: vi.fn<RendererApi['saveSeason']>().mockResolvedValue({ signInSheet: 'updated' }),
+    openSignInSheet: vi.fn<RendererApi['openSignInSheet']>().mockResolvedValue(''),
+    pickImportFile: vi.fn<RendererApi['pickImportFile']>().mockResolvedValue(null),
+    previewImport: vi.fn<RendererApi['previewImport']>((path) =>
+      Promise.resolve({
+        path,
+        fileName: path.split(/[\\/]/).pop() ?? path,
+        columns: [],
+        sample: [],
+        rowCount: 0,
+        choices: [],
+        mapping: {
+          mbdId: null,
+          firstName: null,
+          lastName: null,
+          fullName: null,
+          gender: null,
+          team: null,
+          league: null
+        },
+        remembered: false
+      })
+    ),
+    planMbdSync: vi.fn<RendererApi['planMbdSync']>().mockResolvedValue({
+      plan: { rows: [], invalid: [] },
+      revision: 'members-r1',
+      sourceRevision: 'export-r1'
+    }),
+    syncMbd: vi.fn<RendererApi['syncMbd']>().mockResolvedValue({
+      rows: 0,
+      created: 0,
+      matched: 0,
+      merged: 0,
+      aliased: 0,
+      restored: 0,
+      skipped: 0,
+      failed: [],
+      log: []
+    }),
+    planPlayersImport: vi.fn<RendererApi['planPlayersImport']>().mockResolvedValue({
+      plan: { rows: [], invalid: [], newTeams: [] },
+      membersRevision: 'members-r1',
+      seasonRevision: 'season-r1',
+      sourceRevision: 'export-r1'
+    }),
+    printCards: vi.fn<RendererApi['printCards']>().mockResolvedValue('/tmp/Member cards.pdf'),
+    exportMembersCsv: vi.fn<RendererApi['exportMembersCsv']>().mockResolvedValue(null),
+    addPlayersFromExport: vi.fn<RendererApi['addPlayersFromExport']>().mockResolvedValue({
+      rows: 0,
+      added: 0,
+      created: 0,
+      restored: 0,
+      teamsCreated: 0,
+      skipped: 0,
+      unknown: 0,
+      failed: []
+    }),
     ...overrides
   }
 

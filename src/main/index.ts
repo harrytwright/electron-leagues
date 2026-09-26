@@ -3,7 +3,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, shell } from 'e
 import Store from 'electron-store'
 import { autoUpdater } from 'electron-updater'
 import { randomUUID } from 'node:crypto'
-import { stat } from 'node:fs/promises'
+import { stat, writeFile } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import icon from '../../resources/icon.png?asset'
 import { updateDiagnosticsMenu } from './lib/diagnostics-menu'
@@ -19,6 +19,7 @@ import { oneDriveStatus } from './lib/onedrive'
 import {
   createLeague,
   createSeason,
+  createSeasonRoster,
   importFiles,
   prepareRootSelection,
   renameLeague,
@@ -30,21 +31,53 @@ import { isMissing, toUserFacing, UserFacingError } from './lib/fs-errors'
 import { registerInvokeHandler, type InvokeListener, type IpcErrorReporter } from './lib/ipc-handle'
 import type { AppCommand } from '../shared/app-command'
 import { helpRequested, helpTargetToSearch, type HelpTarget } from '../shared/help'
+import { membersFileSchema } from '../shared/members'
+import { membersCsv } from '../shared/members-csv'
 import type { ImportFilesResult, InvokeName } from '../shared/ipc'
+import type { SeasonSyncRequest } from '../shared/season-create'
 import {
   assertAbsolutePath,
   assertInsideRoot,
   planTrash,
-  resolveImportDestination
+  resolveImportDestination,
+  resolveLiveSeasonRoot
 } from './lib/paths'
 import { pruneRecents, seedRecents, updateRecents, type RootProbe } from './lib/recents'
+import {
+  buildMembersSnapshot,
+  deleteMember,
+  enableMembers,
+  markCardsIssued,
+  membersFilePath,
+  readMasterForWrite,
+  renumberDuplicates,
+  resetMembers,
+  saveMember,
+  saveSeason
+} from './lib/members'
+import {
+  addPlayersFromExport,
+  planPlayersImport,
+  planSync,
+  previewImport,
+  rememberMapping,
+  syncMbd,
+  type MappingMemory
+} from './lib/imports'
+import { readAppJson } from './lib/app-json'
+import { mergeMemberGroup } from './lib/member-group-merge'
+import { clearCardSheets, generateCardSheet } from './lib/cards'
+import { renderPdfWithElectron } from './lib/pdf'
 import { listDirEntries, scanLeaguesRoot } from './lib/scanner'
+import { refreshSignInSheet, signInSheetPath, signInSheetState } from './lib/sign-in-sheet'
 import { executeTrashPlan } from './lib/trash'
 import { createRootWatcher, type RootWatcher } from './lib/watcher'
 import * as Sentry from '@sentry/electron/main'
 
 interface Settings {
   rootPath?: string
+  /** Column mappings from earlier bowler exports, per location and header layout. */
+  importMappings?: MappingMemory[]
   /** Most-recently-used first; the last activated root is at index 0. */
   recentRoots?: string[]
   posthogKey?: string
@@ -304,6 +337,11 @@ function registerIpc(): void {
     return result
   })
 
+  register('createSeasonRoster', async (_e, ref, roster) => {
+    await createSeasonRoster({ ...ref, root: requireRoot(), roster })
+    capture('season_roster_created', { carryOver: roster.carryOver })
+  })
+
   register('syncSeasonTemplates', async (_e, opts) => {
     const result = await syncSeasonWithTemplates({
       ...opts,
@@ -376,6 +414,230 @@ function registerIpc(): void {
   register('openHelp', (_e, target) => {
     helpWindows.open(target)
   })
+
+  register('enableMembers', async () => {
+    if (await enableMembers(requireRoot())) capture('members_enabled')
+  })
+
+  register('membersSnapshot', async () => {
+    const root = currentRoot()
+    if (!root) return null
+    return buildMembersSnapshot(root, await scanLeaguesRoot(root))
+  })
+
+  register('saveMember', async (_e, input, revision) => {
+    const saved = await saveMember(requireRoot(), input, revision)
+    capture(input.id === undefined ? 'member_created' : 'member_updated')
+    return saved
+  })
+
+  register('mergeMemberGroup', async (_e, request) => {
+    const survivor = await mergeMemberGroup(requireRoot(), request)
+    capture('members_merged', { count: request.sourceIds.length })
+    return survivor
+  })
+
+  register('deleteMember', async (_e, id, revision) => {
+    const outcome = await deleteMember(requireRoot(), id, revision)
+    capture('member_deleted', { outcome })
+    return outcome
+  })
+
+  register('resetMembers', async (_e, revision) => {
+    if (app.isPackaged) {
+      throw new UserFacingError('Deleting every member is only offered in development builds')
+    }
+    await resetMembers(requireRoot(), revision)
+  })
+
+  register('renumberDuplicates', async (_e, id, keepIndex, revision) => {
+    const renumbered = await renumberDuplicates(requireRoot(), id, keepIndex, revision)
+    capture('members_renumbered', { count: renumbered.length })
+    return renumbered
+  })
+
+  register('saveSeason', async (_e, ref, file, revision) => {
+    const root = requireRoot()
+    await saveSeason(root, ref, file, revision)
+    capture('season_roster_saved', { players: file.players.length, teams: file.teams.length })
+    // The sheet follows the roster; a failure here leaves the save intact and is retried on open.
+    try {
+      await regenerateSignInSheet(root, ref)
+      return { signInSheet: 'updated' }
+    } catch (err) {
+      console.warn('Could not refresh the sign-in sheet:', err)
+      Sentry.captureException(err, {
+        tags: { ipc_channel: 'season:save', sign_in_sheet: 'refresh-after-save' }
+      })
+      return { signInSheet: 'failed' }
+    }
+  })
+
+  register('openSignInSheet', async (_e, ref) => {
+    const root = requireRoot()
+    const seasonPath = await resolveLiveSeasonRoot(root, ref.day, ref.leagueFolder, ref.seasonName)
+    const state = await signInSheetState(seasonPath)
+    const path =
+      state === 'fresh' ? signInSheetPath(seasonPath) : await regenerateSignInSheet(root, ref)
+    const failure = await shell.openPath(path)
+    if (failure) throw new UserFacingError(`Couldn’t open “${basename(path)}”: ${failure}`)
+    capture('signin_opened', { generated: state !== 'fresh' })
+    return path
+  })
+
+  register('pickImportFile', async () => {
+    if (!mainWindow) return null
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Choose a bowler export',
+      properties: ['openFile'],
+      filters: [{ name: 'Exports', extensions: ['xlsx', 'csv', 'tsv', 'txt'] }]
+    })
+    return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
+  })
+
+  register('previewImport', (_e, path) =>
+    previewImport(requireRoot(), path, store.get('importMappings') ?? [])
+  )
+
+  register('planMbdSync', async (_e, path, mapping) => {
+    const root = requireRoot()
+    const { plan, revision, sourceRevision, signature } = await planSync(root, path, mapping)
+    store.set(
+      'importMappings',
+      rememberMapping(store.get('importMappings') ?? [], { root, signature, mapping })
+    )
+    return { plan, revision, sourceRevision }
+  })
+
+  register('syncMbd', async (_e, path, mapping, decisions, revision, sourceRevision) => {
+    const summary = await syncMbd(requireRoot(), {
+      path,
+      mapping,
+      decisions,
+      revision,
+      sourceRevision
+    })
+    capture('mbd_synced', { rows: summary.rows, created: summary.created, merged: summary.merged })
+    return summary
+  })
+
+  register('planPlayersImport', async (_e, ref, path, mapping, league) => {
+    const root = requireRoot()
+    const result = await planPlayersImport(root, ref, path, mapping, league)
+    store.set(
+      'importMappings',
+      rememberMapping(store.get('importMappings') ?? [], {
+        root,
+        signature: result.signature,
+        mapping
+      })
+    )
+    return {
+      plan: result.plan,
+      membersRevision: result.membersRevision,
+      seasonRevision: result.seasonRevision,
+      sourceRevision: result.sourceRevision
+    }
+  })
+
+  register(
+    'addPlayersFromExport',
+    async (
+      _e,
+      ref,
+      path,
+      mapping,
+      league,
+      createLines,
+      membersRevision,
+      seasonRevision,
+      sourceRevision
+    ) => {
+      const root = requireRoot()
+      const summary = await addPlayersFromExport(root, {
+        ref,
+        path,
+        mapping,
+        league,
+        createLines,
+        membersRevision,
+        seasonRevision,
+        sourceRevision
+      })
+      capture('players_imported', { rows: summary.rows, added: summary.added })
+      // The sheet follows the roster here as it does after a save; a failure is retried on open.
+      if (summary.added > 0) {
+        try {
+          await regenerateSignInSheet(root, ref)
+        } catch (err) {
+          console.warn('Could not refresh the sign-in sheet:', err)
+          Sentry.captureException(err, {
+            tags: { ipc_channel: 'season:import-players', sign_in_sheet: 'refresh-after-import' }
+          })
+        }
+      }
+      return summary
+    }
+  )
+
+  register('printCards', async (_e, ids, revision) => {
+    const root = requireRoot()
+    // A list that moved on is refused before any sheet of names is written anywhere.
+    const master = await readMasterForWrite(root, revision)
+    const wanted = new Set(ids)
+    const members = master.members.filter((member) => wanted.has(member.id))
+    if (members.length !== wanted.size) throw new UserFacingError('A chosen member is missing')
+    const path = await generateCardSheet({
+      members,
+      nextId: master.nextId,
+      title: basename(root),
+      tempRoot: app.getPath('temp'),
+      renderPdf: renderPdfWithElectron,
+      now: new Date()
+    })
+    await markCardsIssued(root, ids, revision)
+    const failure = await shell.openPath(path)
+    if (failure) throw new UserFacingError(`Couldn’t open “${basename(path)}”: ${failure}`)
+    capture('cards_printed', { count: members.length })
+    return path
+  })
+
+  register('exportMembersCsv', async (_e, ids, options) => {
+    if (!mainWindow) return null
+    const root = requireRoot()
+    const master = await readAppJson(membersFilePath(root), membersFileSchema)
+    if (master.status !== 'ok') {
+      throw new UserFacingError(
+        master.status === 'missing' ? 'The members database is not enabled' : master.message
+      )
+    }
+    const byId = new Map(master.value.members.map((member) => [member.id, member]))
+    const chosen = ids.map((id) => byId.get(id))
+    if (chosen.some((member) => member === undefined)) {
+      throw new UserFacingError('A chosen member is missing')
+    }
+    const members = chosen.flatMap((member) =>
+      member && (!options.marketingOnly || member.marketing) ? [member] : []
+    )
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Export members',
+      defaultPath: join(app.getPath('documents'), 'Members.csv'),
+      filters: [{ name: 'CSV', extensions: ['csv'] }]
+    })
+    if (result.canceled || !result.filePath) return null
+    await writeFile(
+      result.filePath,
+      membersCsv(members, { nextId: master.value.nextId, today: new Date() })
+    )
+    capture('members_exported', { count: members.length })
+    return { path: result.filePath, count: members.length }
+  })
+}
+
+async function regenerateSignInSheet(root: string, ref: SeasonSyncRequest): Promise<string> {
+  const path = await refreshSignInSheet(root, ref, renderPdfWithElectron)
+  capture('signin_generated')
+  return path
 }
 
 function windowBackground(): string {
@@ -582,5 +844,9 @@ app.on('before-quit', (event) => {
   if (flushedOnQuit) return
   flushedOnQuit = true
   event.preventDefault()
-  void Promise.allSettled([rootWatcher?.close(), shutdownAnalytics()]).then(() => app.quit())
+  void Promise.allSettled([
+    rootWatcher?.close(),
+    shutdownAnalytics(),
+    clearCardSheets(app.getPath('temp'))
+  ]).then(() => app.quit())
 })

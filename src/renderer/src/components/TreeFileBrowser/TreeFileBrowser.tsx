@@ -18,7 +18,7 @@ import { FileEntryIcon } from '../FileBrowser/components/FileEntryIcon'
 import { fileType } from '../FileBrowser/file-type'
 import { FILE_ROW_CLASS, FILE_TABLE_CLASS } from '../FileBrowser/styles'
 import { fileRows } from './file-tree'
-import type { FileRow, Props, SortColumn } from './interface'
+import type { FileRow, Props, RowDecoration, SortColumn } from './interface'
 import { plural } from '@renderer/lib/plural'
 import { revealLabel } from '@renderer/lib/os-labels'
 import type { RowMenuItem } from '../FileBrowser/row'
@@ -34,12 +34,28 @@ export function TreeFileBrowser({
   onNavigate,
   consumeFocusRequest,
   onDropFiles,
-  onBack
+  onBack,
+  pendingEntries = [],
+  decorate
 }: Props): React.JSX.Element {
   const [query, setQuery] = useKeyedState(currentDir, '')
   const { openFile, revealFile } = useFileActions()
   const filter = query.trim().toLocaleLowerCase()
-  const rows = fileRows(listing.entries ?? [], tree.branches, tree.expanded, sort, filter)
+  const entries = listing.entries
+    ? [
+        ...listing.entries,
+        ...pendingEntries.filter((pending) =>
+          listing.entries?.every((entry) => entry.name !== pending.name)
+        )
+      ]
+    : null
+  const rows = fileRows(entries ?? [], tree.branches, tree.expanded, sort, filter)
+  // A pending row stands for output that does not exist yet, so it has no date and nothing to reveal.
+  const pendingNames = new Set(pendingEntries.map((entry) => entry.name))
+  const isPending = (row: FileRow): boolean =>
+    row.ancestors.length === 0 && pendingNames.has(row.entry.name)
+  const decorationOf = (row: FileRow): RowDecoration | undefined =>
+    row.ancestors.length === 0 ? decorate?.(row.entry) : undefined
   const grid = useBrowserGrid({
     currentDir,
     paths: rows.map((row) => row.entry.path),
@@ -48,8 +64,8 @@ export function TreeFileBrowser({
   })
   const { selection, rowMenu } = grid
   const selectedRow = rows.find((row) => row.entry.path === selection.selected)
-  const folderCount = listing.entries?.filter((entry) => entry.kind === 'folder').length ?? 0
-  const fileCount = (listing.entries?.length ?? 0) - folderCount
+  const folderCount = entries?.filter((entry) => entry.kind === 'folder').length ?? 0
+  const fileCount = (entries?.length ?? 0) - folderCount
 
   const focus = (row: FileRow | undefined): void => {
     if (row) selection.focus(row.entry.path)
@@ -60,7 +76,9 @@ export function TreeFileBrowser({
       onNavigate([...row.ancestors, row.entry], focusFirstRow)
       return
     }
-    await openFile(row.entry.path)
+    const decoration = decorationOf(row)
+    if (decoration?.open) await decoration.open()
+    else await openFile(row.entry.path)
   }
 
   const actions = (row: FileRow | undefined): RowMenuItem[] =>
@@ -68,7 +86,9 @@ export function TreeFileBrowser({
       ? [
           // Menu navigation cannot restore its old row, so the destination owns the focus hand-off.
           { label: 'Open', onSelect: () => void open(row, true) },
-          { label: revealLabel(), onSelect: () => void revealFile(row.entry.path) }
+          ...(isPending(row)
+            ? []
+            : [{ label: revealLabel(), onSelect: () => void revealFile(row.entry.path) }])
         ]
       : []
 
@@ -130,7 +150,7 @@ export function TreeFileBrowser({
       onDropFiles={onDropFiles}
       selection={selectedRow?.entry.name}
       summary={
-        listing.entries
+        entries
           ? filter
             ? `${plural(rows.length, 'item')} shown · Loaded folders only`
             : `${plural(folderCount, 'folder')}, ${plural(fileCount, 'file')}`
@@ -216,6 +236,8 @@ export function TreeFileBrowser({
             rows.map((row, index) => {
               const { entry, ancestors, expanded } = row
               const nameId = `${grid.rowNames}-${index}-name`
+              const decoration = decorationOf(row)
+              const badgeId = decoration?.badge ? `${grid.rowNames}-${index}-badge` : undefined
               const branch = tree.branches.get(entry.path)
               const branchMessage =
                 expanded &&
@@ -226,7 +248,7 @@ export function TreeFileBrowser({
                   <Table.Row
                     {...selection.rowProps(entry.path)}
                     aria-level={ancestors.length + 1}
-                    aria-labelledby={nameId}
+                    aria-labelledby={[nameId, badgeId].filter(Boolean).join(' ')}
                     aria-posinset={row.position}
                     aria-setsize={row.siblings}
                     aria-expanded={entry.kind === 'folder' ? expanded : undefined}
@@ -283,13 +305,18 @@ export function TreeFileBrowser({
                         >
                           {entry.name}
                         </span>
+                        {decoration?.badge ? <span id={badgeId}>{decoration.badge}</span> : null}
                       </div>
                     </Table.Cell>
                     <Table.Cell className="whitespace-nowrap text-kumo-subtle">
-                      <FileModified
-                        mtime={entry.mtime}
-                        title={new Date(entry.mtime).toLocaleString('en-GB')}
-                      />
+                      {isPending(row) ? (
+                        <FileModified mtime={undefined} />
+                      ) : (
+                        <FileModified
+                          mtime={entry.mtime}
+                          title={new Date(entry.mtime).toLocaleString('en-GB')}
+                        />
+                      )}
                     </Table.Cell>
                     <Table.Cell className="truncate text-kumo-subtle">{fileType(entry)}</Table.Cell>
                     <FileActionsButton
