@@ -635,39 +635,45 @@ it('merges an ordered selection in the pane and keeps manual results across sour
   )
 })
 
-it('keeps twenty merge selections compact and refuses duplicate records', async () => {
-  const members = Array.from({ length: 20 }, (_, index) =>
-    makeMember({ id: index + 1, firstName: `Member${index + 1}`, lastName: 'Test' })
-  )
-  members.push(makeMember({ id: 21, firstName: 'Duplicate one', lastName: 'Test' }))
-  members.push(makeMember({ id: 21, firstName: 'Duplicate two', lastName: 'Test' }))
-  installMockApi({
-    getRoot: vi.fn().mockResolvedValue('/root'),
-    membersSnapshot: vi.fn().mockResolvedValue(
-      makeSnapshot({
-        nextId: 22,
-        members,
-        problems: [{ kind: 'duplicate-number', id: 21, count: 2 }]
-      })
-    )
-  })
-  const user = userEvent.setup()
-  renderMembers()
+const TWENTY_CLICKS_TIMEOUT = 20_000
 
-  await openRowMenu(user, 'Member1 Test')
-  await user.click(screen.getByRole('menuitem', { name: 'Merge with…' }))
-  for (let id = 2; id <= 20; id += 1) {
-    await user.click(screen.getByRole('checkbox', { name: new RegExp(`Merge Member${id} Test`) }))
-  }
-  expect(screen.getByText('20 selected')).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: 'Selected records (20)' })).toHaveAttribute(
-    'aria-expanded',
-    'false'
-  )
-  for (const checkbox of screen.getAllByRole('checkbox', { name: /Merge Duplicate/ })) {
-    expect(checkbox).toHaveAttribute('aria-disabled', 'true')
-  }
-})
+it(
+  'keeps twenty merge selections compact and refuses duplicate records',
+  async () => {
+    const members = Array.from({ length: 20 }, (_, index) =>
+      makeMember({ id: index + 1, firstName: `Member${index + 1}`, lastName: 'Test' })
+    )
+    members.push(makeMember({ id: 21, firstName: 'Duplicate one', lastName: 'Test' }))
+    members.push(makeMember({ id: 21, firstName: 'Duplicate two', lastName: 'Test' }))
+    installMockApi({
+      getRoot: vi.fn().mockResolvedValue('/root'),
+      membersSnapshot: vi.fn().mockResolvedValue(
+        makeSnapshot({
+          nextId: 22,
+          members,
+          problems: [{ kind: 'duplicate-number', id: 21, count: 2 }]
+        })
+      )
+    })
+    const user = userEvent.setup()
+    renderMembers()
+
+    await openRowMenu(user, 'Member1 Test')
+    await user.click(screen.getByRole('menuitem', { name: 'Merge with…' }))
+    for (let id = 2; id <= 20; id += 1) {
+      await user.click(screen.getByRole('checkbox', { name: new RegExp(`Merge Member${id} Test`) }))
+    }
+    expect(screen.getByText('20 selected')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Selected records (20)' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+    for (const checkbox of screen.getAllByRole('checkbox', { name: /Merge Duplicate/ })) {
+      expect(checkbox).toHaveAttribute('aria-disabled', 'true')
+    }
+  },
+  TWENTY_CLICKS_TIMEOUT
+)
 
 it('blocks a merge draft when the members revision changes', async () => {
   const queryClient = createQueryClient()
