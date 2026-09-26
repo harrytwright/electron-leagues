@@ -50,7 +50,6 @@ import {
   markCardsIssued,
   membersFilePath,
   readMasterForWrite,
-  mergeMembers,
   renumberDuplicates,
   resetMembers,
   saveMember,
@@ -430,11 +429,6 @@ function registerIpc(): void {
     const saved = await saveMember(requireRoot(), input, revision)
     capture(input.id === undefined ? 'member_created' : 'member_updated')
     return saved
-  })
-
-  register('mergeMembers', async (_e, fromId, intoId, revision) => {
-    await mergeMembers(requireRoot(), fromId, intoId, revision)
-    capture('members_merged')
   })
 
   register('mergeMemberGroup', async (_e, request) => {

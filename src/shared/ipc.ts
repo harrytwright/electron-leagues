@@ -84,7 +84,6 @@ export interface InvokeOutputs {
   enableMembers: void
   membersSnapshot: MembersSnapshot | null
   saveMember: Member
-  mergeMembers: void
   mergeMemberGroup: Member
   deleteMember: 'hard' | 'soft'
   /** Development only: empties every roster and the master list so a sync can be rerun. */
@@ -243,11 +242,6 @@ export const invokeDefinitions = {
     channel: 'members:save',
     args: z.tuple([memberInputSchema, revisionSchema]),
     failureMessage: 'Invalid member details'
-  },
-  mergeMembers: {
-    channel: 'members:merge',
-    args: z.tuple([memberIdSchema, memberIdSchema, revisionSchema]),
-    failureMessage: 'Invalid merge request'
   },
   mergeMemberGroup: {
     channel: 'members:merge-group',

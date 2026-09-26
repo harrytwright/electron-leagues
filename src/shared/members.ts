@@ -276,35 +276,6 @@ export function applyAgeRules<T extends Omit<MemberInput, 'id'>>(input: T, on: D
   return trimmed
 }
 
-/**
- * The surviving record after a merge: every id and spelling from both, and any
- * blank the survivor had filled from the record being merged away.
- */
-export function mergeMemberRecords(into: Member, from: Member): Member {
-  const aliases = new Set(into.aliases)
-  for (const alias of from.aliases) aliases.add(alias)
-  const fromName = memberDisplayName(from)
-  if (
-    normaliseName(from.firstName, from.lastName) !== normaliseName(into.firstName, into.lastName)
-  ) {
-    aliases.add(fromName)
-  }
-  const merged: Member = {
-    ...into,
-    mbdIds: [...new Set([...into.mbdIds, ...from.mbdIds])],
-    aliases: [...aliases]
-  }
-  if (merged.dob === undefined && from.dob !== undefined) merged.dob = from.dob
-  if (merged.gender === undefined && from.gender !== undefined) merged.gender = from.gender
-  if (merged.email === undefined && from.email !== undefined) merged.email = from.email
-  if (merged.phone === undefined && from.phone !== undefined) merged.phone = from.phone
-  if (merged.guardianContact === undefined && from.guardianContact !== undefined) {
-    merged.guardianContact = from.guardianContact
-  }
-  if (merged.notes === undefined && from.notes !== undefined) merged.notes = from.notes
-  return merged
-}
-
 /** A hand-merged conflict copy can leave `nextId` behind the numbers in use; never mint one twice. */
 export function mintNumber(file: MembersFile): number {
   const highest = file.members.reduce((max, member) => Math.max(max, member.id), 0)

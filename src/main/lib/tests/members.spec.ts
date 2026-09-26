@@ -14,7 +14,6 @@ import {
   enableMembers,
   markCardsIssued,
   membersEnabled,
-  mergeMembers,
   renumberDuplicates,
   resetMembers,
   saveMember,
@@ -22,6 +21,8 @@ import {
   STALE_MESSAGE,
   writeSeasonFile
 } from '../members'
+import { buildMemberMergePreview } from '../../../shared/member-merge'
+import { mergeMemberGroup } from '../member-group-merge'
 import { scanLeaguesRoot } from '../scanner'
 
 let root: string
@@ -161,6 +162,19 @@ async function snapshotOf(): Promise<Awaited<ReturnType<typeof buildMembersSnaps
   return buildMembersSnapshot(root, await scanLeaguesRoot(root))
 }
 
+async function mergeInto(mainId: number, otherId: number): Promise<void> {
+  const snapshot = await snapshotOf()
+  const sources = [mainId, otherId].map((id) =>
+    snapshot.members.find((candidate) => candidate.id === id)!
+  )
+  await mergeMemberGroup(root, {
+    sourceIds: [mainId, otherId],
+    mainId,
+    result: buildMemberMergePreview(sources, mainId, snapshot.seasons, snapshot.members).result,
+    expectedRevision: snapshot.revision
+  })
+}
+
 function input(overrides: Partial<MemberInput> = {}): MemberInput {
   return {
     firstName: 'Ann',
@@ -269,8 +283,7 @@ describe('saveMember', () => {
     await saveMember(root, input(), snapshot.revision)
     snapshot = await snapshotOf()
     await saveMember(root, input({ firstName: 'Bea' }), snapshot.revision)
-    snapshot = await snapshotOf()
-    await mergeMembers(root, 2, 1, snapshot.revision)
+    await mergeInto(1, 2)
     snapshot = await snapshotOf()
     await expect(saveMember(root, input({ id: 2 }), snapshot.revision)).rejects.toThrow(
       'Member 2 is not in the list any more'
@@ -278,72 +291,6 @@ describe('saveMember', () => {
     await expect(saveMember(root, input({ id: 9 }), snapshot.revision)).rejects.toThrow(
       'Member 9 is not in the list any more'
     )
-  })
-})
-
-describe('mergeMembers', () => {
-  test('unions ids and aliases, fills blanks, and moves live rosters only', async () => {
-    await enableMembers(root)
-    await makeTree(root, {
-      'monday/Pairs/2025-26/Rules.docx': 'x',
-      '_archives/Pairs/2023-24/Rules.docx': 'x'
-    })
-    let snapshot = await snapshotOf()
-    await saveMember(
-      root,
-      input({ firstName: 'Ann', mbdIds: ['10'], phone: undefined }),
-      snapshot.revision
-    )
-    snapshot = await snapshotOf()
-    await saveMember(
-      root,
-      input({
-        firstName: 'Annie',
-        mbdIds: ['11'],
-        aliases: ['A Lee'],
-        phone: '0770',
-        email: undefined
-      }),
-      snapshot.revision
-    )
-    await writeSeasonFile(
-      join(root, 'monday/Pairs/2025-26'),
-      seasonFile({
-        teams: [{ id: 'team_a', teamNo: 1, name: 'A' }],
-        players: [
-          { memberId: 1, teamId: 'team_a' },
-          { memberId: 2, teamId: null }
-        ]
-      })
-    )
-    await writeSeasonFile(
-      join(root, '_archives/Pairs/2023-24'),
-      seasonFile({
-        players: [{ memberId: 2, teamId: null }]
-      })
-    )
-
-    snapshot = await snapshotOf()
-    await mergeMembers(root, 2, 1, snapshot.revision)
-
-    snapshot = await snapshotOf()
-    expect(snapshot.members).toEqual([
-      expect.objectContaining({
-        id: 1,
-        firstName: 'Ann',
-        mbdIds: ['10', '11'],
-        aliases: ['A Lee', 'Annie Lee'],
-        email: 'ann@example.org',
-        phone: '0770'
-      }),
-      expect.objectContaining({ id: 2, mergedInto: 1 })
-    ])
-    const live = snapshot.seasons.find((season) => !season.archived)
-    const archived = snapshot.seasons.find((season) => season.archived)
-    // Ann was already on the live roster, so the merged row is dropped rather than doubled.
-    expect(live?.file.players).toEqual([{ memberId: 1, teamId: 'team_a' }])
-    expect(archived?.file.players).toEqual([{ memberId: 2, teamId: null }])
-    expect(snapshot.problems).toEqual([])
   })
 })
 
@@ -418,8 +365,7 @@ describe('deleteMember', () => {
       join(root, '_archives/Pairs/2023-24'),
       seasonFile({ players: [{ memberId: 2, teamId: null }] })
     )
-    snapshot = await snapshotOf()
-    await mergeMembers(root, 2, 1, snapshot.revision)
+    await mergeInto(1, 2)
 
     snapshot = await snapshotOf()
     expect(await deleteMember(root, 1, snapshot.revision)).toBe('soft')

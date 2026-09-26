@@ -127,7 +127,6 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
     saveMember: vi.fn<RendererApi['saveMember']>((input) =>
       Promise.resolve({ id: input.id ?? 1, ...input })
     ),
-    mergeMembers: vi.fn<RendererApi['mergeMembers']>().mockResolvedValue(undefined),
     mergeMemberGroup: vi.fn<RendererApi['mergeMemberGroup']>((request) =>
       Promise.resolve({ id: request.mainId, ...request.result })
     ),

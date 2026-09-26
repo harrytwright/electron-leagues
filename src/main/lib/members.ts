@@ -7,7 +7,6 @@ import {
   findRosterProblems,
   MEMBERS_FILE,
   membersFileSchema,
-  mergeMemberRecords,
   mintNumber,
   resolveMember,
   SEASON_FILE,
@@ -241,39 +240,6 @@ async function touchLiveRostersWith(root: string, memberId: number): Promise<voi
     if (!season.value.players.some((player) => player.memberId === memberId)) continue
     await utimes(seasonFilePath(location.path), now, now)
   }
-}
-
-/**
- * Fold one member into another. Live rosters move to the survivor; archived
- * seasons keep the old number and resolve it through `mergedInto` when read.
- */
-export async function mergeMembers(
-  root: string,
-  fromId: number,
-  intoId: number,
-  expected: FileRevision
-): Promise<void> {
-  if (fromId === intoId) throw new UserFacingError('Choose a different member to merge into')
-  return withRootLock(root, async () => {
-    const file = await readMasterForWrite(root, expected)
-    const from = liveMember(file, fromId)
-    const into = liveMember(file, intoId)
-    file.members[file.members.indexOf(into)] = mergeMemberRecords(into, from)
-    file.members[file.members.indexOf(from)] = { ...from, mergedInto: intoId }
-    await writeMaster(root, file)
-    for (const location of seasonLocations(root, await scanLeaguesRoot(root))) {
-      if (location.archived) continue
-      const season = await readSeasonFile(location.path)
-      if (season.status !== 'ok') continue
-      if (!season.value.players.some((player) => player.memberId === fromId)) continue
-      const alreadyThere = season.value.players.some((player) => player.memberId === intoId)
-      const players = season.value.players.flatMap((player) => {
-        if (player.memberId !== fromId) return [player]
-        return alreadyThere ? [] : [{ ...player, memberId: intoId }]
-      })
-      await writeSeasonFile(location.path, { ...season.value, players })
-    }
-  })
 }
 
 /**

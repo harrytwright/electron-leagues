@@ -172,8 +172,7 @@ it('sorts by number or name from the headers and remembers the arrangement', asy
   expect(localStorage.getItem('leagues:members-workspace:v1')).toBe('46')
 
   expect(JSON.parse(localStorage.getItem('leagues:members-table:v1') ?? '{}')).toEqual({
-    sort: { column: 'number', direction: 'descending' },
-    widths: {}
+    sort: { column: 'number', direction: 'descending' }
   })
 })
 
