@@ -24,13 +24,15 @@ Every member gets the next number when they are created, shown padded to six dig
 
 ## The members list
 
-The list opens by surname. Click **Number** or **Member** to sort by that column, and again to turn it round. Drag the handle at the right edge of a column heading to change its width, or focus the handle and use the left and right arrow keys. The arrangement is remembered on this machine. A small warning mark after a name means the record still needs details: a date of birth, a contact or a guardian's contact for a junior. Alias spellings are no longer shown under a name, but the search still finds them.
+The Members page is a compact list of numbers and names beside a profile pane. Nothing is selected to begin with; click a row to read that member's details, contact, aliases, MBD ids, notes and the leagues they bowl in, with a link through to each roster. The list opens by surname. Click **Number** or **Member** to sort by that column, and again to turn it round. Drag the divider between the list and the profile to give either more room, or focus it and use the left and right arrow keys; the split is remembered on this machine, and a narrow window stacks the list above the profile instead. A small warning mark after a name means the record still needs details: a date of birth, a contact or a guardian's contact for a junior. Alias spellings are not shown in the list, but the search still finds them, and searching or filtering never closes the profile you are reading.
 
 ## Adding and editing members
 
-**New member…** on the Members page, or on a season's Players tab, opens the member form. A member under 18 keeps no email or phone of their own; the form asks for a parent or guardian contact instead. When they turn 18 they appear under _Needs details_ so their own contact can be collected.
+**New member…** on the Members page opens a blank form in the profile pane; on a season's Players tab it opens the same form as a dialog. **Edit** on a profile, or **Edit…** in a row's menu, turns the profile into the form with **Save** and **Cancel**. A member under 18 keeps no email or phone of their own; the form asks for a parent or guardian contact instead. When they turn 18 they appear under _Needs details_ so their own contact can be collected. Unsaved changes are dropped without asking when you open another member, start another action or leave the page.
 
-The row menu offers **Edit…**, **Merge with…** for two records that turn out to be the same person, where you choose which record stays, **Print card**, parked until there is a card template, and **Delete…**. A member who is on any roster is hidden rather than removed, so old seasons still read correctly.
+**Merge…** in a row's menu is for records that turn out to be the same person. It puts a tick box on every row and hands the profile pane over to the merge: tick as many records as belong together, including rows the search has hidden. The first record ticked is the main record and keeps its number; you can choose another ticked record instead. Where the records differ the pane shows each value with the record it came from, takes the main record's value by default, fills a blank from the only other record that has one and lets you type your own. Aliases and MBD ids are combined, and the notes are joined in order with a blank line between them, ready to edit. **Merge members** writes the result in one go and opens the survivor. The absorbed records keep their details, and anywhere an old number is still written points to the survivor.
+
+The row menu also offers **Print card**, parked until there is a card template, and **Delete…**. A member who is on any roster is hidden rather than removed, so old seasons still read correctly.
 
 ## Rosters and teams
 

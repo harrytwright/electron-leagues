@@ -362,6 +362,7 @@ type; the preload methods follow from the table. Every write names the file revi
 | `membersSnapshot`      | `members:snapshot`      | none                                                                        | `MembersSnapshot \| null`       |
 | `saveMember`           | `members:save`          | `MemberInput`, revision                                                     | `Member`                        |
 | `mergeMembers`         | `members:merge`         | `fromId`, `intoId`, revision                                                | `void`                          |
+| `mergeMemberGroup`     | `members:merge-group`   | `sourceIds`, `mainId`, reviewed `result`, revision                          | the surviving `Member`          |
 | `deleteMember`         | `members:delete`        | `id`, revision                                                              | `'hard' \| 'soft'`              |
 | `resetMembers`         | `members:reset`         | revision (development builds only)                                          | `void`                          |
 | `renumberDuplicates`   | `members:renumber`      | `id`, `keepIndex`, revision                                                 | the new numbers                 |
@@ -412,6 +413,13 @@ which is why the CSV export takes the ids in table order rather than a filter. A
    printing one block of names. _Add player…_ searches members with a Kumo `Combobox` and queues each
    pick in a ticked list rather than offering one select, so several join a team in one save. Development builds also offer _Delete all
    members…_, which empties every roster and then the master list so a sync can be rerun.
+   A later reshape, planned in `docs/members-workspace.md`, replaced the wide table and its
+   dialogs with a compact list beside a profile pane: create and edit happen in the pane, and
+   the column widths gave way to a remembered divider. Merging became a selection mode over
+   any number of records with a field by field comparison, written through one
+   `mergeMemberGroup` call that prepares every roster and the master list first and restores
+   the files it touched if a write fails. The Members page no longer calls `mergeMembers`;
+   the pair channel stays for now.
 3. **Sign-in sheet.** HTML layout, `printToPDF`, virtual row, regenerate-on-save and stale-on-
    open, `Superseded` badge on the docx. Tests: generated text contains teams in `teamNo`
    order and the Subs block; archive never generates. As built, the sheet is stamped with the
