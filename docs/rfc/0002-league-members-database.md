@@ -443,10 +443,14 @@ which is why the CSV export takes the ids in table order rather than a filter. A
    (M, W, B and G) and, for leagues, a `League Name` column covering every league ticked at
    export, so the reader takes workbooks as well as delimited text and the roster import picks
    one league out of the dump. The MBD's `Birthdate` holds the day a bowler was entered and is
-   never read. The committed fixtures are synthetic copies of that shape. Before a sync writes,
-   every row is listed with its outcome and a tick to leave it out, rows with no surname (the
-   MBD's placeholders) starting unticked, and afterwards the counts and a row by row log stay
-   on screen, copyable, until the dialog is closed. The log is still not written to a file.
+   never read. The committed fixtures are synthetic copies of that shape, and a seeded
+   generator (`src/main/lib/tests/fixtures/mbd-export.ts`, run by hand through
+   `npm run make:mbd-export`) invents a whole centre with the repeats, placeholders and second
+   ids a real dump carries, so the sync and roster import are exercised end to end over
+   hundreds of rows. Before a sync writes, every row is listed with its outcome and a tick to
+   leave it out, rows with no surname (the MBD's placeholders) starting unticked, and afterwards
+   the counts and a row by row log stay on screen, copyable, until the dialog is closed. The
+   log is still not written to a file.
 5. **Cards and CSV export.** Code 128 encoder, card sheet, `cardIssued`, filtered export. As
    built, the card sheet is a PDF opened from a private temporary folder for the desk to print
    and cleared on quit; the barcode carries the raw id while the card prints the padded number;

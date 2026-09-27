@@ -1,4 +1,3 @@
-import AdmZip from 'adm-zip'
 import { mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -16,87 +15,46 @@ import {
   type MappingMemory
 } from '../imports'
 import { enableMembers, STALE_MESSAGE, writeSeasonFile } from '../members'
+import { date, MBD_EXPORT_COLUMNS, number, text, workbookFrom } from './fixtures/mbd-export'
 
 let root: string
 let outside: string
 
 /**
- * A workbook shaped like the MBD's own export: numbers with a thousands format,
+ * A small workbook shaped like the MBD's own export: numbers with a thousands format,
  * a date-formatted birthdate column and shared strings, including one with an
- * ampersand and one bowler in two leagues.
+ * ampersand, a blank surname cell and one bowler in two leagues.
  */
 function mbdWorkbook(): Buffer {
-  const strings = [
-    'League Name',
-    'MBD ID',
-    'First Name',
-    'Middle Name',
-    'Last Name',
-    'Birthdate',
-    'Gender',
-    'Monday Pairs',
-    'Sam',
-    'Ash &amp; Co',
-    'W',
-    'Jo Bloggs',
-    'B',
-    'Thursday Trios'
-  ]
-  const cell = (ref: string, value: string | number, kind: 's' | 'n' | 'd' = 's'): string =>
-    kind === 's'
-      ? `<c r="${ref}" t="s"><v>${strings.indexOf(String(value))}</v></c>`
-      : `<c r="${ref}" s="${kind === 'd' ? 2 : 1}"><v>${value}</v></c>`
-  const header = strings
-    .slice(0, 7)
-    .map((name, index) => cell(`${String.fromCharCode(65 + index)}1`, name))
-    .join('')
-  const rows = [
-    ['Monday Pairs', 155, 'Sam', 'Ash &amp; Co', 1, 'W'],
-    ['Monday Pairs', 262, 'Jo Bloggs', null, 45318, 'B'],
-    ['Thursday Trios', 155, 'Sam', 'Ash &amp; Co', 1, 'W']
-  ]
-    .map(([league, id, first, last, born, gender], index) => {
-      const line = index + 2
-      return [
-        cell(`A${line}`, String(league)),
-        cell(`B${line}`, Number(id), 'n'),
-        cell(`C${line}`, String(first)),
-        // The MBD writes a blank surname as a shared-string cell with no value.
-        last === null ? `<c r="E${line}" t="s"/>` : cell(`E${line}`, String(last)),
-        cell(`F${line}`, Number(born), 'd'),
-        cell(`G${line}`, String(gender))
-      ].join('')
-    })
-    .map((cells, index) => `<row r="${index + 2}">${cells}</row>`)
-  const zip = new AdmZip()
-  const add = (name: string, xml: string): void => {
-    zip.addFile(name, Buffer.from(xml, 'utf8'))
-  }
-  add(
-    '[Content_Types].xml',
-    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>'
-  )
-  add(
-    'xl/workbook.xml',
-    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>'
-  )
-  add(
-    'xl/_rels/workbook.xml.rels',
-    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>'
-  )
-  add(
-    'xl/styles.xml',
-    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="2"><numFmt numFmtId="164" formatCode="#,###,##0"/><numFmt numFmtId="165" formatCode="dd/mm/yyyy"/></numFmts><cellXfs count="3"><xf numFmtId="0"/><xf numFmtId="164" applyNumberFormat="1"/><xf numFmtId="165" applyNumberFormat="1"/></cellXfs></styleSheet>'
-  )
-  add(
-    'xl/sharedStrings.xml',
-    `<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${strings.map((text) => `<si><t>${text}</t></si>`).join('')}</sst>`
-  )
-  add(
-    'xl/worksheets/sheet1.xml',
-    `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1">${header}</row>${rows.join('')}</sheetData></worksheet>`
-  )
-  return zip.toBuffer()
+  return workbookFrom(MBD_EXPORT_COLUMNS, [
+    [
+      text('Monday Pairs'),
+      number(155),
+      text('Sam'),
+      text(''),
+      text('Ash & Co'),
+      date(1),
+      text('W')
+    ],
+    [
+      text('Monday Pairs'),
+      number(262),
+      text('Jo Bloggs'),
+      text(''),
+      text(''),
+      date(45318),
+      text('B')
+    ],
+    [
+      text('Thursday Trios'),
+      number(155),
+      text('Sam'),
+      text(''),
+      text('Ash & Co'),
+      date(1),
+      text('W')
+    ]
+  ])
 }
 
 const MAPPING: ImportMapping = {

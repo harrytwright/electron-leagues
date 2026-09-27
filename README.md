@@ -34,6 +34,8 @@ Two environment variables change how the app runs:
 
 `scripts/make-templates.mjs path/to/output_dir` regenerates the bundled seed templates in `resources/templates/`.
 
+`npm run make:mbd-export -- path/to/MBDExport.xlsx [bowlers] [seed] [leagues]` writes a synthetic bowler export shaped like the MBD's own, with invented names, for trying **Sync from MBD…** and **Add from export…** by hand. The same seed always gives the same file. Real exports hold personal data and must never be committed; the sync tests run over the same generator.
+
 ## Building installers
 
 Each platform has its own build script:
