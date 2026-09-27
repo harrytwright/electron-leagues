@@ -34,8 +34,9 @@ Edit switches the pane into a form with Save and Cancel. New member opens a blan
 same pane. A successful save displays the saved member's profile, including when the new or
 updated record does not match the active filters.
 
-Unsaved edits are discarded without prompting when switching records, starting another pane
-action or leaving Members. There is no draft storage or autosave. Searching, filtering, scrolling
+Switching records or starting another pane action while a form holds unsaved edits asks whether
+to discard them; an untouched form is replaced without asking, and leaving Members drops edits
+without prompting. There is no draft storage or autosave. Searching, filtering, scrolling
 and resizing do not count as leaving the record. Cancel editing returns to the saved profile;
 cancel creation returns to the previous profile or initial Empty State.
 
@@ -59,9 +60,9 @@ If main is unticked, the earliest remaining selection becomes main. With fewer t
 keep the workspace open with instructions and disable merging.
 
 Merging owns the pane until Merge, Cancel, another explicit action such as New/Edit or navigation
-away. Starting another action discards the merge draft. Selection changes within the merge should
-not unnecessarily wipe manually edited result fields. Successful merging opens the survivor's
-profile. Cancel restores the previously open profile when available.
+away. Starting another action asks before discarding a merge draft that has changed. Selection
+changes within the merge should not unnecessarily wipe manually edited result fields. Successful
+merging opens the survivor's profile. Cancel restores the previously open profile when available.
 
 ### Merge comparison
 

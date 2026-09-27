@@ -7,6 +7,7 @@ import {
   MemberForm,
   memberDraftFrom,
   memberInputFromDraft,
+  sameMemberDraft,
   type MemberDraft
 } from '@renderer/components/MemberForm'
 import { useQueryRefresh } from '@renderer/hooks/use-query-refresh'
@@ -31,9 +32,13 @@ interface Props {
   guardianFor: Member | null
   compact: boolean
   root: string
+  /** Cancel; the workspace asks first when the draft has changed. */
   onCancel: () => void
+  /** Discard changes after a failed save; the button already says what it does, so nobody asks. */
+  onDiscard: () => void
   onSaved: (member: Member) => void
   onBusyChange: (busy: boolean) => void
+  onDirtyChange: (dirty: boolean) => void
   onBackgroundError: (message: string) => void
   onBackgroundSuccess: (message: string) => void
 }
@@ -45,14 +50,17 @@ export function MemberEditor({
   compact,
   root,
   onCancel,
+  onDiscard,
   onSaved,
   onBusyChange,
+  onDirtyChange,
   onBackgroundError,
   onBackgroundSuccess
 }: Props): React.JSX.Element {
-  const [draft, setDraft] = useState<MemberDraft>(() =>
+  const [opening] = useState<MemberDraft>(() =>
     guardianFor ? guardianDraftFrom(guardianFor, snapshot.nextId) : memberDraftFrom(member)
   )
+  const [draft, setDraft] = useState(opening)
   const title = member
     ? `Edit ${memberDisplayName(member)}`
     : guardianFor
@@ -85,6 +93,12 @@ export function MemberEditor({
     onBusyChange(operation.pending)
     return () => onBusyChange(false)
   }, [onBusyChange, operation.pending])
+
+  const dirty = saveState.kind !== 'written' && !sameMemberDraft(draft, opening)
+  useEffect(() => {
+    onDirtyChange(dirty)
+    return () => onDirtyChange(false)
+  }, [dirty, onDirtyChange])
 
   const update = <Key extends keyof MemberDraft>(key: Key, value: MemberDraft[Key]): void => {
     if (saveState.kind === 'written') return
@@ -228,7 +242,7 @@ export function MemberEditor({
           >
             <Text variant="error">{error.message}</Text>
             <div>
-              <Button type="button" variant="secondary" size="sm" onClick={onCancel}>
+              <Button type="button" variant="secondary" size="sm" onClick={onDiscard}>
                 Discard changes
               </Button>
             </div>

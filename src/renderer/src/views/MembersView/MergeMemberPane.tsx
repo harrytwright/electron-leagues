@@ -55,6 +55,7 @@ interface Props {
   onFreezeSelection: () => void
   onUnfreezeSelection: () => void
   onBusyChange: (busy: boolean) => void
+  onDirtyChange: (dirty: boolean) => void
   onBackgroundError: (message: string) => void
   onBackgroundSuccess: (message: string) => void
 }
@@ -87,6 +88,10 @@ function memberById(members: readonly Member[], id: number): Member | undefined 
 
 function sameValue(a: MergeValue, b: MergeValue): boolean {
   return a === b
+}
+
+function sameSelection(a: readonly number[], b: readonly number[]): boolean {
+  return a.length === b.length && a.every((id) => b.includes(id))
 }
 
 function displayValue(field: Field, value: MergeValue): string {
@@ -406,11 +411,13 @@ export function MergeMemberPane({
   onFreezeSelection,
   onUnfreezeSelection,
   onBusyChange,
+  onDirtyChange,
   onBackgroundError,
   onBackgroundSuccess
 }: Props): React.JSX.Element {
   const [choices, setChoices] = useState<Partial<Record<Field, Choice>>>({})
   const [saveState, setSaveState] = useState<SaveState>({ kind: 'editing', error: null })
+  const [openingSelection] = useState(() => ({ selectedIds, mainId }))
   const active = useRef(true)
   const bodyRef = useRef<HTMLDivElement>(null)
   const alertRef = useRef<HTMLDivElement>(null)
@@ -458,6 +465,18 @@ export function MergeMemberPane({
     onBusyChange(operation.pending)
     return () => onBusyChange(false)
   }, [onBusyChange, operation.pending])
+
+  // A stale merge can only be cancelled, so leaving it needs no confirmation.
+  const dirty =
+    saveState.kind !== 'written' &&
+    !stale &&
+    (Object.keys(choices).length > 0 ||
+      mainId !== openingSelection.mainId ||
+      !sameSelection(selectedIds, openingSelection.selectedIds))
+  useEffect(() => {
+    onDirtyChange(dirty)
+    return () => onDirtyChange(false)
+  }, [dirty, onDirtyChange])
 
   useEffect(() => {
     if (saveState.kind === 'editing' && !saveState.error) return

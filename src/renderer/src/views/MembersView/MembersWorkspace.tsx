@@ -384,6 +384,9 @@ interface Props {
   onAction: (kind: ProfileAction, member: Member) => void
   onKeepNumber: (member: Member) => void
   onPaneBusyChange: (busy: boolean) => void
+  onPaneDirtyChange: (dirty: boolean) => void
+  /** Runs `proceed` at once, or after the desk agrees to discard an unsaved pane. */
+  onLeavePane: (proceed: () => void) => void
   paneAction: PaneAction
   onPaneActionChange: (action: PaneAction) => void
   onPaneActionUpdate: (update: (current: PaneAction) => PaneAction) => void
@@ -575,6 +578,8 @@ export function MembersWorkspace({
   onPaneActionChange,
   onPaneActionUpdate,
   onPaneBusyChange,
+  onPaneDirtyChange,
+  onLeavePane,
   onBackgroundError,
   onBackgroundSuccess
 }: Props): React.JSX.Element {
@@ -680,16 +685,18 @@ export function MembersWorkspace({
   }
   const startMemberAction = (kind: ProfileAction, member: Member): void => {
     if (paneBusy) return
-    if (kind === 'edit') {
-      setSelectedIdentity(memberIdentity(member, duplicatedIds.has(member.id)))
-    }
     if (
       kind === 'merge' &&
       (member.deleted || member.mergedInto !== undefined || duplicatedIds.has(member.id))
     ) {
       return
     }
-    onAction(kind, member)
+    onLeavePane(() => {
+      if (kind === 'edit') {
+        setSelectedIdentity(memberIdentity(member, duplicatedIds.has(member.id)))
+      }
+      onAction(kind, member)
+    })
   }
 
   const mergeAction = paneAction?.kind === 'merge' ? paneAction : null
@@ -724,9 +731,11 @@ export function MembersWorkspace({
       return
     }
     if (paneBusy) return
-    focusProfile.current = false
-    onPaneActionChange(null)
-    setSelectedIdentity(memberIdentity(member, duplicatedIds.has(member.id)))
+    onLeavePane(() => {
+      focusProfile.current = false
+      onPaneActionChange(null)
+      setSelectedIdentity(memberIdentity(member, duplicatedIds.has(member.id)))
+    })
   }
   const rowHandlers = useRef({ activateRow, toggleMergeMember, startMemberAction, onKeepNumber })
   useEffect(() => {
@@ -745,10 +754,11 @@ export function MembersWorkspace({
     (kind: RowAction, member: Member) => rowHandlers.current.startMemberAction(kind, member),
     []
   )
-  const leavePane = (): void => {
+  const closePane = (): void => {
     focusProfile.current = true
     onPaneActionChange(null)
   }
+  const cancelPane = (): void => onLeavePane(closePane)
   const takeProfileFocus = (): boolean => {
     const take = focusProfile.current
     focusProfile.current = false
@@ -921,11 +931,11 @@ export function MembersWorkspace({
                   : current
               )
             }
-            onCancel={leavePane}
+            onCancel={cancelPane}
             onSaved={(member) => {
               setSavedProfile({ member, revision: snapshot.revision })
               setSelectedIdentity(memberIdentity(member, false))
-              leavePane()
+              closePane()
             }}
             onFreezeSelection={() =>
               onPaneActionUpdate((current) =>
@@ -938,6 +948,7 @@ export function MembersWorkspace({
               )
             }
             onBusyChange={onPaneBusyChange}
+            onDirtyChange={onPaneDirtyChange}
             onBackgroundError={onBackgroundError}
             onBackgroundSuccess={onBackgroundSuccess}
           />
@@ -949,16 +960,18 @@ export function MembersWorkspace({
             member={paneAction.kind === 'edit' ? paneAction.member : null}
             guardianFor={paneAction.kind === 'new' ? (paneAction.guardianFor ?? null) : null}
             compact={stacked}
-            onCancel={leavePane}
+            onCancel={cancelPane}
+            onDiscard={closePane}
             onSaved={(member) => {
               setSavedProfile({ member, revision: snapshot.revision })
               setSelectedIdentity(memberIdentity(member, false))
-              leavePane()
+              closePane()
               if (paneAction.kind === 'new' && paneAction.guardianFor) {
                 void linkGuardian(paneAction.guardianFor, member)
               }
             }}
             onBusyChange={onPaneBusyChange}
+            onDirtyChange={onPaneDirtyChange}
             onBackgroundError={onBackgroundError}
             onBackgroundSuccess={onBackgroundSuccess}
           />

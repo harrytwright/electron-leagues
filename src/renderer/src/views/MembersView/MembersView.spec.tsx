@@ -422,6 +422,15 @@ async function openRowMenu(user: ReturnType<typeof userEvent.setup>, name: strin
   await screen.findByRole('menu')
 }
 
+async function discardDraft(
+  user: ReturnType<typeof userEvent.setup>,
+  title: string
+): Promise<void> {
+  const prompt = await screen.findByRole('dialog', { name: title })
+  await user.click(within(prompt).getByRole('button', { name: 'Discard' }))
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: title })).not.toBeInTheDocument())
+}
+
 it('adds a new member in the pane and opens the saved profile through an active filter', async () => {
   const initial = twoMembersSnapshot()
   const saved = makeMember({ id: 3, firstName: 'Cy', lastName: 'Dee' })
@@ -471,13 +480,96 @@ it('cancels new and edit forms back to the appropriate profile', async () => {
   expect(screen.getByLabelText(/first name/i)).toHaveValue('Unsaved')
   await user.keyboard('{Escape}')
   await user.click(screen.getByRole('button', { name: 'Cancel' }))
+  await discardDraft(user, 'Discard the new member?')
   expect(screen.getByRole('article', { name: 'Ann Lee profile' })).toBeInTheDocument()
 
   await user.click(within(screen.getByRole('article')).getByRole('button', { name: 'Edit…' }))
   await user.clear(screen.getByLabelText(/first name/i))
   await user.type(screen.getByLabelText(/first name/i), 'Changed')
   await user.click(screen.getByRole('button', { name: 'Cancel' }))
+  await discardDraft(user, 'Discard changes to Ann Lee?')
   expect(screen.getByRole('article', { name: 'Ann Lee profile' })).toBeInTheDocument()
+})
+
+it('switches rows and cancels from an untouched form without asking', async () => {
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot())
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: /Ann Lee, member/ }))
+  await user.click(within(screen.getByRole('article')).getByRole('button', { name: 'Edit…' }))
+  await user.type(screen.getByLabelText(/first name/i), '  ')
+  await user.click(screen.getByRole('button', { name: /Bob Kay, member/ }))
+  expect(screen.queryByRole('dialog', { name: /Discard/ })).not.toBeInTheDocument()
+  expect(screen.getByRole('article', { name: 'Bob Kay profile' })).toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: 'New member…' }))
+  await user.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(screen.queryByRole('dialog', { name: /Discard/ })).not.toBeInTheDocument()
+  expect(screen.getByRole('article', { name: 'Bob Kay profile' })).toBeInTheDocument()
+})
+
+it('asks before a row click discards an edited record', async () => {
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot())
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: /Ann Lee, member/ }))
+  await user.click(within(screen.getByRole('article')).getByRole('button', { name: 'Edit…' }))
+  await user.type(screen.getByLabelText(/first name/i), 'ie')
+  await user.click(screen.getByRole('button', { name: /Bob Kay, member/ }))
+
+  const prompt = await screen.findByRole('dialog', { name: 'Discard changes to Ann Lee?' })
+  expect(prompt).toHaveTextContent(
+    'Their record keeps the details it had before you started editing.'
+  )
+  await waitFor(() =>
+    expect(within(prompt).getByRole('button', { name: 'Keep editing' })).toHaveFocus()
+  )
+  await user.click(within(prompt).getByRole('button', { name: 'Keep editing' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog', { name: /Discard/ })).not.toBeInTheDocument()
+  )
+  expect(screen.getByRole('form', { name: 'Edit Ann Lee' })).toBeInTheDocument()
+  expect(screen.getByLabelText(/first name/i)).toHaveValue('Annie')
+
+  await user.click(screen.getByRole('button', { name: /Bob Kay, member/ }))
+  await discardDraft(user, 'Discard changes to Ann Lee?')
+  expect(screen.getByRole('article', { name: 'Bob Kay profile' })).toBeInTheDocument()
+  expect(screen.queryByRole('form')).not.toBeInTheDocument()
+})
+
+it('asks before New member… replaces a dirty form and keeps editing on Escape', async () => {
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot())
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: 'New member…' }))
+  await user.type(screen.getByLabelText(/first name/i), 'Cy')
+  await user.click(screen.getByRole('button', { name: 'New member…' }))
+
+  const prompt = await screen.findByRole('dialog', { name: 'Discard the new member?' })
+  expect(prompt).toHaveTextContent('Nothing has been saved, so nobody is added to the list.')
+  await user.keyboard('{Escape}')
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog', { name: /Discard/ })).not.toBeInTheDocument()
+  )
+  expect(screen.getByLabelText(/first name/i)).toHaveValue('Cy')
+
+  await openRowMenu(user, 'Bob Kay')
+  await user.click(screen.getByRole('menuitem', { name: 'Edit…' }))
+  await discardDraft(user, 'Discard the new member?')
+  expect(screen.getByRole('form', { name: 'Edit Bob Kay' })).toBeInTheDocument()
+  expect(screen.getByLabelText(/first name/i)).toHaveValue('Bob')
 })
 
 it('moves focus to the profile heading when a form is left', async () => {
@@ -622,6 +714,7 @@ it('keeps a failed write draft and discards it when another row is selected', as
   expect(error).toHaveFocus()
   expect(screen.getByLabelText(/first name/i)).toHaveValue('Draft')
   await user.click(screen.getByRole('button', { name: /Bob Kay, member/ }))
+  await discardDraft(user, 'Discard the new member?')
   expect(screen.getByRole('article', { name: 'Bob Kay profile' })).toBeInTheDocument()
   expect(api.saveMember).toHaveBeenCalledOnce()
 })
@@ -942,6 +1035,41 @@ it('retries only the refresh after a completed merge', async () => {
   expect(membersSnapshot).toHaveBeenCalledTimes(3)
 })
 
+it('asks before Cancel discards a merge whose selection changed', async () => {
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot())
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await openRowMenu(user, 'Bob Kay')
+  await user.click(screen.getByRole('menuitem', { name: 'Merge with…' }))
+  await screen.findByRole('region', { name: 'Merge members workspace' })
+  await user.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(screen.queryByRole('dialog', { name: /Discard/ })).not.toBeInTheDocument()
+  expect(screen.queryByRole('region', { name: 'Merge members workspace' })).not.toBeInTheDocument()
+
+  await openRowMenu(user, 'Bob Kay')
+  await user.click(screen.getByRole('menuitem', { name: 'Merge with…' }))
+  await user.click(screen.getByRole('checkbox', { name: /Merge Ann Lee/ }))
+  expect(screen.queryByRole('dialog', { name: /Discard/ })).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+  const prompt = await screen.findByRole('dialog', { name: 'Discard the merge?' })
+  expect(prompt).toHaveTextContent('No records are changed')
+  await user.click(within(prompt).getByRole('button', { name: 'Keep editing' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog', { name: /Discard/ })).not.toBeInTheDocument()
+  )
+  expect(screen.getByText('2 selected')).toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: 'Cancel' }))
+  await discardDraft(user, 'Discard the merge?')
+  expect(screen.queryByRole('region', { name: 'Merge members workspace' })).not.toBeInTheDocument()
+  expect(screen.getByRole('heading', { name: 'Select a member' })).toBeInTheDocument()
+})
+
 it('holds Cancel while a merge is being written', async () => {
   const merge = deferred<ReturnType<typeof makeMember>>()
   const saved = makeMember({ id: 2, firstName: 'Robert', lastName: 'Kay' })
@@ -1252,6 +1380,7 @@ it('lets one holder of a duplicated number keep it', async () => {
   await user.type(screen.getByLabelText(/first name/i), 'Unsaved')
   await openRowMenu(user, 'Second Holder')
   await user.click(screen.getByRole('menuitem', { name: /keep this number/i }))
+  await discardDraft(user, 'Discard the new member?')
 
   expect(screen.queryByRole('form', { name: 'New member' })).not.toBeInTheDocument()
   await waitFor(() => expect(api.renumberDuplicates).toHaveBeenCalledExactlyOnceWith(3, 1, 'rev-3'))

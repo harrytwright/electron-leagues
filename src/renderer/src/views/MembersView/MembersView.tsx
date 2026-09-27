@@ -11,7 +11,12 @@ import {
 import { MagnifyingGlassIcon } from '@phosphor-icons/react'
 import { UserPlusIcon } from '@phosphor-icons/react/dist/csr/UserPlus'
 import { WarningCircleIcon } from '@phosphor-icons/react/dist/csr/WarningCircle'
-import type { Member, MembersProblem, MembersSnapshot } from '@shared/members'
+import {
+  memberDisplayName,
+  type Member,
+  type MembersProblem,
+  type MembersSnapshot
+} from '@shared/members'
 import { useAppCommandHandler } from '@renderer/hooks/use-app-commands'
 import { useImportDrop } from '@renderer/hooks/use-import-drop'
 import { useMembers } from '@renderer/hooks/use-members'
@@ -39,6 +44,7 @@ import { pathTail } from '@renderer/lib/path-basename'
 import { plural } from '@renderer/lib/plural'
 import { membersQueryKey } from '@renderer/queries/members'
 import { DeleteMemberDialog } from '@renderer/components/DeleteMemberDialog'
+import { DiscardDraftDialog, type DraftSubject } from '@renderer/components/DiscardDraftDialog'
 import { ErrorState } from '@renderer/components/ErrorState'
 import { ExportCsvDialog } from '@renderer/components/ExportCsvDialog'
 import { MbdSyncDialog } from '@renderer/components/MbdSyncDialog'
@@ -131,14 +137,26 @@ function MembersTable({
   const [syncPath, setSyncPath] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [paneBusy, setPaneBusy] = useState(false)
+  const [paneDirty, setPaneDirty] = useState(false)
+  const [departure, setDeparture] = useState<(() => void) | null>(null)
   const paneInstance = useRef(0)
   const [table, setTable] = useState<MembersTablePreference>(loadMembersTable)
   const [compact, setCompact] = useState(false)
   const tableRoot = useRef<HTMLDivElement>(null)
-  const drop = useImportDrop((path) => {
-    setAction(null)
-    setSyncPath(path)
-  })
+  const leavePane = (proceed: () => void): void => {
+    if (paneDirty) setDeparture(() => proceed)
+    else proceed()
+  }
+  const discardDraft = (): void => {
+    setDeparture(null)
+    departure?.()
+  }
+  const drop = useImportDrop((path) =>
+    leavePane(() => {
+      setAction(null)
+      setSyncPath(path)
+    })
+  )
   const filterRef = useRef<HTMLInputElement>(null)
   const coordinator = useQueryRefresh()
   const { add } = useKumoToastManager()
@@ -224,7 +242,6 @@ function MembersTable({
     }
   }
   const pickExport = async (): Promise<void> => {
-    setAction(null)
     try {
       const path = await window.api.pickImportFile()
       if (path) setSyncPath(path)
@@ -256,6 +273,15 @@ function MembersTable({
     observer.observe(node)
     return () => observer.disconnect()
   }, [])
+
+  const draftSubject: DraftSubject | null =
+    action?.kind === 'edit'
+      ? { kind: 'edit', name: memberDisplayName(action.member) }
+      : action?.kind === 'new'
+        ? { kind: 'new' }
+        : action?.kind === 'merge'
+          ? { kind: 'merge' }
+          : null
 
   const rows = useMemo(() => buildMemberRows(snapshot, new Date()), [snapshot])
   const leagues = leagueChoices(snapshot)
@@ -306,7 +332,15 @@ function MembersTable({
             <DropdownMenu>
               <DropdownMenu.Trigger render={<Toolbar.Button>More actions</Toolbar.Button>} />
               <DropdownMenu.Content align="end">
-                <DropdownMenu.Item disabled={paneBusy} onClick={() => void pickExport()}>
+                <DropdownMenu.Item
+                  disabled={paneBusy}
+                  onClick={() =>
+                    leavePane(() => {
+                      setAction(null)
+                      void pickExport()
+                    })
+                  }
+                >
                   Sync from MBD…
                 </DropdownMenu.Item>
                 {/* The `printCards` channel is wired in main; this item wakes up with a template. */}
@@ -315,10 +349,12 @@ function MembersTable({
                 </DropdownMenu.Item>
                 <DropdownMenu.Item
                   disabled={listed.length === 0 || paneBusy}
-                  onClick={() => {
-                    setAction(null)
-                    setExporting(true)
-                  }}
+                  onClick={() =>
+                    leavePane(() => {
+                      setAction(null)
+                      setExporting(true)
+                    })
+                  }
                 >
                   Export list to CSV…
                 </DropdownMenu.Item>
@@ -328,7 +364,7 @@ function MembersTable({
                     <DropdownMenu.Item
                       variant="danger"
                       disabled={paneBusy}
-                      onClick={() => setAction({ kind: 'reset' })}
+                      onClick={() => leavePane(() => setAction({ kind: 'reset' }))}
                     >
                       Delete all members…
                     </DropdownMenu.Item>
@@ -340,7 +376,7 @@ function MembersTable({
               type="button"
               icon={<UserPlusIcon aria-hidden size={14} />}
               disabled={paneBusy}
-              onClick={() => startPaneAction('new')}
+              onClick={() => leavePane(() => startPaneAction('new'))}
             >
               New member…
             </Toolbar.Button>
@@ -432,10 +468,12 @@ function MembersTable({
           if (kind === 'delete') setAction({ kind, member })
           else startPaneAction(kind, member)
         }}
-        onKeepNumber={(member) => {
-          setAction(null)
-          void keepNumber(member)
-        }}
+        onKeepNumber={(member) =>
+          leavePane(() => {
+            setAction(null)
+            void keepNumber(member)
+          })
+        }
         paneAction={
           action?.kind === 'new' || action?.kind === 'edit' || action?.kind === 'merge'
             ? action
@@ -444,6 +482,8 @@ function MembersTable({
         onPaneActionChange={setPaneAction}
         onPaneActionUpdate={updatePaneAction}
         onPaneBusyChange={setPaneBusy}
+        onPaneDirtyChange={setPaneDirty}
+        onLeavePane={leavePane}
         onBackgroundError={(message) => add({ title: message, variant: 'error' })}
         onBackgroundSuccess={(message) => add({ title: message, variant: 'success' })}
       />
@@ -476,6 +516,14 @@ function MembersTable({
         onOpenChange={(open) => {
           if (!open) setSyncPath(null)
         }}
+      />
+      <DiscardDraftDialog
+        subject={draftSubject}
+        open={departure !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeparture(null)
+        }}
+        onDiscard={discardDraft}
       />
       <DeleteMemberDialog
         snapshot={snapshot}

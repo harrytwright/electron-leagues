@@ -6,5 +6,6 @@ export {
   guardianDraftFrom,
   memberDraftFrom,
   memberInputFromDraft,
+  sameMemberDraft,
   type MemberDraft
 } from './member-form-data'

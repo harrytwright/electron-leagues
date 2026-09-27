@@ -89,6 +89,26 @@ export function memberInputFromDraft(draft: MemberDraft, member: Member | null):
   return input
 }
 
+/** True when saving either draft would write the same record, so whitespace alone is no change. */
+export function sameMemberDraft(a: MemberDraft, b: MemberDraft): boolean {
+  const left = memberInputFromDraft(a, null)
+  const right = memberInputFromDraft(b, null)
+  return (
+    left.firstName === right.firstName &&
+    left.lastName === right.lastName &&
+    left.dob === right.dob &&
+    left.gender === right.gender &&
+    left.email === right.email &&
+    left.phone === right.phone &&
+    left.guardianContact === right.guardianContact &&
+    left.guardianMemberId === right.guardianMemberId &&
+    left.marketing === right.marketing &&
+    left.notes === right.notes &&
+    left.mbdIds.join(',') === right.mbdIds.join(',') &&
+    left.aliases.join(',') === right.aliases.join(',')
+  )
+}
+
 /** Live records other than the one being edited, in list order, for the guardian picker. */
 export function guardianCandidates(members: readonly Member[], selfId?: number): Member[] {
   return members.filter(
