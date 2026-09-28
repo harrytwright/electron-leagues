@@ -63,6 +63,8 @@ npm run release -- patch    # or minor, major, or an explicit x.y.z
 
 The script refuses to tag from anywhere but `main`, refuses if your `main` is behind `origin/main`, then runs `npm version` and pushes the commit and tag. Wait for `main` to go green before running it.
 
+Watching the release requires an installed and authenticated GitHub CLI (`gh`). After pushing, the script checks every three seconds for up to one minute for the release workflow, then watches it until completion and exits unsuccessfully if the build fails. If discovery times out, the commit and tag remain pushed; check GitHub Actions before trying another release.
+
 Pushing a `v*.*.*` tag triggers `release.yml`, which runs four jobs in order:
 
 1. **verify**: the tag must match `package.json` and every required secret must be present, so a bad tag stops the run before it uses any build minutes.

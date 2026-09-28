@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { setTimeout } from 'node:timers/promises'
 
 /**
  * Tag a release. Wraps `npm version` with the two guards npm does not provide:
@@ -43,5 +44,48 @@ if (behind > 0) {
 forward('npm', ['version', '-m', 'chore(bump): %s', bump])
 forward('git', ['push', '--follow-tags'])
 
+const hash = run('git', ['rev-parse', 'HEAD'])
+
 const version = run('node', ['-p', "require('./package.json').version"])
-console.log(`\n✔ Pushed v${version}. Watch the release workflow for the build.`)
+console.log(`\n✔ Pushed v${version}. Waiting for the release workflow to appear.`)
+
+const workflowDeadline = Date.now() + 60_000
+let workflow
+
+while (Date.now() < workflowDeadline) {
+  const workflows = JSON.parse(
+    run('gh', [
+      'run',
+      'list',
+      '--commit',
+      hash,
+      '--workflow',
+      'release',
+      '--event',
+      'push',
+      '--json',
+      'databaseId'
+    ])
+  )
+
+  if (workflows.length > 1) {
+    fail(
+      `v${version} has already been pushed, but found ${workflows.length} release workflows. Check GitHub Actions before trying another release.`
+    )
+  }
+
+  if (workflows.length === 1) {
+    workflow = workflows[0]
+    break
+  }
+
+  await setTimeout(3_000)
+}
+
+if (!workflow) {
+  fail(
+    `v${version} has already been pushed, but no release workflow appeared within 60 seconds. Check GitHub Actions before trying another release.`
+  )
+}
+
+forward('gh', ['run', 'watch', String(workflow.databaseId), '--exit-status'])
