@@ -25,7 +25,7 @@ async function chooseOption(
   await user.click(await screen.findByRole('option', { name: option }))
 }
 
-function getArchiveCheckbox(name: RegExp): HTMLElement {
+function getCheckbox(name: RegExp): HTMLElement {
   return screen.getByLabelText(name, { selector: '[role="checkbox"]' })
 }
 
@@ -64,7 +64,8 @@ it('is a real dialog with labelled fields and a form that submits on Enter', asy
 
   expect(screen.getByRole('dialog')).toBeInTheDocument()
   expect(screen.getByLabelText(/season type/i)).toBeInTheDocument()
-  expect(screen.getByLabelText(/starting documents/i)).toBeInTheDocument()
+  expect(getCheckbox(/copy documents from previous season/i)).toBeChecked()
+  expect(screen.queryByLabelText(/format/i)).not.toBeInTheDocument()
   const nameInput = screen.getByLabelText(/season name/i)
   await user.clear(nameInput)
   await user.type(nameInput, '2026-27{Enter}')
@@ -168,17 +169,50 @@ it('keeps a completed season open with a qualified scan failure', async () => {
   expect(screen.getByRole('dialog')).toBeInTheDocument()
 })
 
-it('disables copy from previous season when the league is not running', async () => {
-  installMockApi()
-  renderDialog({ league: makeLeague({ running: false }) })
+it('copies from the templates, without offering the previous season, when the league is not running', async () => {
+  const api = installMockApi()
+  renderDialog({ league: makeLeague({ running: false, seasons: [] }) })
   const user = userEvent.setup()
 
-  await user.click(screen.getByLabelText(/starting documents/i))
+  expect(screen.queryByLabelText(/copy documents from previous season/i)).not.toBeInTheDocument()
+  expect(screen.getByText('Documents are copied from the templates.')).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Create season' }))
 
-  expect(screen.getByLabelText(/starting documents/i)).toHaveTextContent('Copy from templates')
-  expect(await screen.findByRole('option', { name: 'Copy from previous season' })).toHaveAttribute(
-    'aria-disabled',
-    'true'
+  await waitFor(() => expect(api.createSeason).toHaveBeenCalledOnce())
+  expect(api.createSeason).toHaveBeenCalledWith(expect.objectContaining({ source: 'templates' }))
+})
+
+it('offers the format and roster carry-over only where members are enabled', async () => {
+  const api = installMockApi()
+  const league = makeLeague({ seasons: [makeSeason('2024-25', 'previous'), makeSeason('2025-26')] })
+  renderDialog({ league, roster: { defaultFormat: 4 } })
+  const user = userEvent.setup()
+
+  expect(screen.getByLabelText(/format/i)).toHaveTextContent('Fours (4 per team)')
+  expect(getCheckbox(/carry over teams and players/i)).toBeChecked()
+
+  await chooseOption(user, /format/i, /doubles/i)
+  await user.click(getCheckbox(/carry over teams and players/i))
+  await user.click(screen.getByRole('button', { name: 'Create season' }))
+
+  await waitFor(() => expect(api.createSeason).toHaveBeenCalledOnce())
+  expect(api.createSeason).toHaveBeenCalledWith(
+    expect.objectContaining({ source: 'previous', roster: { format: 2, carryOver: false } })
+  )
+})
+
+it('never carries a roster over when there is no previous season', async () => {
+  const api = installMockApi()
+  renderDialog({ league: makeLeague({ running: false, seasons: [] }), roster: {} })
+  const user = userEvent.setup()
+
+  expect(screen.getByLabelText(/format/i)).toHaveTextContent('Trios (3 per team)')
+  expect(screen.queryByLabelText(/carry over teams and players/i)).not.toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Create season' }))
+
+  await waitFor(() => expect(api.createSeason).toHaveBeenCalledOnce())
+  expect(api.createSeason).toHaveBeenCalledWith(
+    expect.objectContaining({ source: 'templates', roster: { format: 3, carryOver: false } })
   )
 })
 
@@ -196,7 +230,7 @@ it('only shows the archive checkbox for two or more seasons and pre-checks it', 
     <NewSeasonDialog league={twoSeasons} open onOpenChange={vi.fn()} onCreated={vi.fn()} />
   )
 
-  expect(getArchiveCheckbox(/archive “2024-25”/i)).toBeChecked()
+  expect(getCheckbox(/archive “2024-25”/i)).toBeChecked()
 })
 
 it('submits exactly the selected SeasonCreateRequest payload', async () => {
@@ -209,12 +243,12 @@ it('submits exactly the selected SeasonCreateRequest payload', async () => {
   renderDialog({ league })
   const user = userEvent.setup()
 
-  await chooseOption(user, /starting documents/i, 'Start empty')
+  await user.click(getCheckbox(/copy documents from previous season/i))
   await chooseOption(user, /season type/i, /quarter/i)
   const nameInput = screen.getByLabelText(/season name/i)
   await user.clear(nameInput)
   await user.type(nameInput, '2026-q2')
-  await user.click(getArchiveCheckbox(/archive “2024-Q4”/i))
+  await user.click(getCheckbox(/archive “2024-Q4”/i))
   await user.click(screen.getByRole('button', { name: 'Create season' }))
 
   expect(api.createSeason).toHaveBeenCalledOnce()
@@ -222,7 +256,7 @@ it('submits exactly the selected SeasonCreateRequest payload', async () => {
     day: 'thursday',
     leagueFolder: 'Thursday fours',
     seasonName: '2026-Q2',
-    source: 'empty',
+    source: 'templates',
     archiveOldest: false
   })
 })
@@ -290,8 +324,8 @@ it('resets every field and clears errors each time it opens', async () => {
   const user = userEvent.setup()
 
   await chooseOption(user, /season type/i, /full year/i)
-  await chooseOption(user, /starting documents/i, 'Start empty')
-  await user.click(getArchiveCheckbox(/archive “2024-25”/i))
+  await user.click(getCheckbox(/copy documents from previous season/i))
+  await user.click(getCheckbox(/archive “2024-25”/i))
   await user.type(screen.getByLabelText(/season name/i), '{Enter}')
   expect(await screen.findByRole('alert')).toHaveTextContent('stale error')
 
@@ -302,10 +336,8 @@ it('resets every field and clears errors each time it opens', async () => {
 
   expect(screen.getByLabelText(/season type/i)).toHaveTextContent('Cross-year')
   expect(screen.getByLabelText(/season name/i)).toHaveValue('2026-27')
-  expect(screen.getByLabelText(/starting documents/i)).toHaveTextContent(
-    'Copy from previous season'
-  )
-  expect(getArchiveCheckbox(/archive “2024-25”/i)).toBeChecked()
+  expect(getCheckbox(/copy documents from previous season/i)).toBeChecked()
+  expect(getCheckbox(/archive “2024-25”/i)).toBeChecked()
   expect(screen.queryByRole('alert')).not.toBeInTheDocument()
 })
 

@@ -2,7 +2,8 @@ import { act, waitFor } from '@testing-library/react'
 import { useQuery } from '@tanstack/react-query'
 import { expect, it, vi } from 'vitest'
 import type { LeaguesTree } from '@shared/tree'
-import { OperationFeedbackContext, useOperationFeedback } from '../use-operation-feedback'
+import { OperationFeedbackContext } from '@renderer/contexts/OperationFeedbackContext'
+import { useOperationFeedback } from '../use-operation-feedback'
 import { useWriteOperation } from '../use-write-operation'
 import { createQueryClient } from '../../lib/query-client'
 import { DIR_QUERY_PREFIX, dirQueryKey } from '../../queries/dir'
@@ -151,12 +152,15 @@ it('defers refresh after a root change and marks the captured caches stale', asy
   const api = installMockApi()
   const client = readyClient()
   const directoryKey = dirQueryKey('/root/_shared')
+  const resourceKey = ['resource', '/root'] as const
   client.setQueryData(directoryKey, [makeDirEntry()])
+  client.setQueryData(resourceKey, 'old')
   const { result } = renderHookWithProviders(
     () =>
       useWriteOperation({
         label: () => 'Writing',
-        write: () => write.promise
+        write: () => write.promise,
+        refreshQueryKey: (root) => ['resource', root]
       }),
     { queryClient: client }
   )
@@ -176,6 +180,7 @@ it('defers refresh after a root change and marks the captured caches stale', asy
   expect(outcome).toEqual({ status: 'deferred', result: 'written' })
   expect(client.getQueryState(treeQueryKey('/root'))?.isInvalidated).toBe(true)
   expect(client.getQueryState(directoryKey)?.isInvalidated).toBe(true)
+  expect(client.getQueryState(resourceKey)?.isInvalidated).toBe(true)
   expect(client.getQueryState(DIR_QUERY_PREFIX)).toBeUndefined()
   expect(api.scan).not.toHaveBeenCalled()
 })

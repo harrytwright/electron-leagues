@@ -48,6 +48,23 @@ describe('scanLeaguesRoot', () => {
     ])
   })
 
+  test('hides the app-owned JSON files from every listing', async () => {
+    await makeTree({
+      'members.json': '{}',
+      'monday/Mens Triples/meta.json': '{}',
+      'monday/Mens Triples/2025-26/meta.json': '{}',
+      'monday/Mens Triples/2025-26/Rules.docx': 'x'
+    })
+    const tree = await scanLeaguesRoot(root)
+    expect(tree.unrecognisedRootEntries).toEqual([])
+    const league = tree.days.monday[0]
+    expect(league.otherEntries).toEqual([])
+    expect(league.seasons[0].files.map((f) => f.name)).toEqual(['Rules.docx'])
+    expect((await listDirEntries(league.seasons[0].path)).map((e) => e.name)).toEqual([
+      'Rules.docx'
+    ])
+  })
+
   test('never treats underscore folders as league nights', async () => {
     await makeTree({
       '_shared/Opening Times.docx': 'x',

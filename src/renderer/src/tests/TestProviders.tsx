@@ -1,9 +1,9 @@
 import { ToastProvider } from '@cloudflare/kumo'
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
-import { OperationFeedbackProvider } from '../components/OperationFeedbackProvider'
-import { LocationOperationProvider } from '../components/LocationOperationProvider'
-import { QueryRefreshProvider } from '../components/QueryRefreshProvider'
-import { WorkspaceStoreProvider } from '../components/WorkspaceStoreProvider'
+import { OperationFeedbackProvider } from '@renderer/providers/OperationFeedbackProvider'
+import { LocationOperationProvider } from '@renderer/providers/LocationOperationProvider'
+import { QueryRefreshProvider } from '@renderer/providers/QueryRefreshProvider'
+import { WorkspaceStoreProvider } from '@renderer/providers/WorkspaceStoreProvider'
 import type { WorkspaceStore } from '../lib/workspace-store'
 
 export function TestProviders({

@@ -6,3 +6,14 @@
 #root {
   height: 100vh;
 }
+
+/*
+ * Kumo portals its dialogs, menus, selects and popovers straight under <body>, where
+ * they can sit over the title bar. The title bar is a window drag region, and Chromium
+ * works those regions out from element boxes rather than what is painted on top, so
+ * anything overlaying it has to opt out or a click on it moves the window instead.
+ */
+body > :not(#root),
+body > :not(#root) * {
+  app-region: no-drag;
+}

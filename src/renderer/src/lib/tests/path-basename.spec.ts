@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { pathBasename, pathTail } from '../path-basename'
+import { joinPathLike, pathBasename, pathTail } from '../path-basename'
 
 test('takes the last segment from either separator, ignoring a trailing one', () => {
   expect(pathBasename('/Users/me/LeagueDocs')).toBe('LeagueDocs')
@@ -23,4 +23,16 @@ test('leaves short and root paths intact', () => {
   expect(pathTail('/root/monday')).toBe('/root/monday')
   expect(pathTail('C:\\Leagues\\Pairs')).toBe('C:\\Leagues\\Pairs')
   expect(pathTail('/')).toBe('/')
+})
+
+test('joins a name onto a folder with the separator the folder already uses', () => {
+  expect(joinPathLike('/root/monday/Pairs/2025-26', 'Sign-In Sheet.pdf')).toBe(
+    '/root/monday/Pairs/2025-26/Sign-In Sheet.pdf'
+  )
+  expect(joinPathLike('/root/monday/Pairs/2025-26/', 'Sign-In Sheet.pdf')).toBe(
+    '/root/monday/Pairs/2025-26/Sign-In Sheet.pdf'
+  )
+  expect(joinPathLike('C:\\Leagues\\monday\\Pairs\\2025-26', 'Sign-In Sheet.pdf')).toBe(
+    'C:\\Leagues\\monday\\Pairs\\2025-26\\Sign-In Sheet.pdf'
+  )
 })

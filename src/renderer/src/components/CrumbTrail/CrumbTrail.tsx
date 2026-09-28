@@ -1,8 +1,7 @@
-import { createContext, forwardRef, useContext } from 'react'
+import { forwardRef, useContext } from 'react'
 import { Breadcrumbs, LinkProvider, type LinkComponentProps } from '@cloudflare/kumo'
+import { CrumbNavigationContext } from '@renderer/contexts/CrumbNavigationContext'
 import type { Props } from './interface'
-
-const NavigateContext = createContext<(depth: number) => void>(() => {})
 
 // Kumo breadcrumbs render links through LinkProvider (passing the href as
 // `to`); ours navigate in-app instead of following it.
@@ -10,7 +9,7 @@ const CrumbLink = forwardRef<HTMLAnchorElement, LinkComponentProps>(function Cru
   { href, to, ...rest },
   ref
 ) {
-  const navigate = useContext(NavigateContext)
+  const navigate = useContext(CrumbNavigationContext)
   const target = href ?? to ?? ''
   const depth = Number(target.slice(1))
   return (
@@ -42,10 +41,10 @@ export function CrumbTrail({ names, onNavigate }: Props): React.JSX.Element {
         ]
   )
   return (
-    <NavigateContext.Provider value={onNavigate}>
+    <CrumbNavigationContext.Provider value={onNavigate}>
       <LinkProvider component={CrumbLink}>
         <Breadcrumbs size="sm">{items}</Breadcrumbs>
       </LinkProvider>
-    </NavigateContext.Provider>
+    </CrumbNavigationContext.Provider>
   )
 }

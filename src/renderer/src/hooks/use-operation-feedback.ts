@@ -1,27 +1,11 @@
-import { createContext, use, type ReactNode } from 'react'
-
-export type OperationScope = 'application' | 'location'
-
-export interface OperationActivity {
-  id: number
-  label: string
-}
-
-export interface OperationFeedback {
-  activity: OperationActivity | null
-  begin: (label: string, scope?: OperationScope) => number
-  finish: (id: number) => void
-}
-
-export const OperationFeedbackContext = createContext<OperationFeedback | null>(null)
+import { use } from 'react'
+import {
+  OperationFeedbackContext,
+  type OperationFeedback
+} from '@renderer/contexts/OperationFeedbackContext'
 
 export function useOperationFeedback(): OperationFeedback {
   const value = use(OperationFeedbackContext)
   if (!value) throw new Error('useOperationFeedback must be used inside OperationFeedbackProvider')
   return value
-}
-
-export interface OperationFeedbackProviderProps {
-  children: ReactNode
-  locationKey?: string
 }

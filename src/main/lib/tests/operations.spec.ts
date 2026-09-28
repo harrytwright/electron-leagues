@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import {
   createLeague,
   createSeason,
+  createSeasonRoster,
   importFiles,
   initialiseRoot,
   prepareRootSelection,
@@ -28,9 +29,11 @@ import {
   zipArchivedSeasons
 } from '../operations'
 import { UserFacingError } from '../fs-errors'
+import { seasonFileSchema, type SeasonFile } from '../../../shared/members'
 import type { LeagueMeta } from '../../../shared/meta'
 import { FILE_RULES } from '../template-workflows'
 import { resolveNewLiveSeasonRoot } from '../paths'
+import { enableMembers, writeSeasonFile } from '../members'
 import { scanLeaguesRoot } from '../scanner'
 
 let root: string
@@ -354,7 +357,7 @@ describe('createSeason', () => {
         day: 'monday',
         leagueFolder: '../x',
         seasonName: '2026-27',
-        source: 'empty',
+        source: 'templates',
         archiveOldest: false
       })
     ).rejects.toEqual(new UserFacingError('Invalid league folder'))
@@ -371,7 +374,7 @@ describe('createSeason', () => {
         day: 'monday',
         leagueFolder: 'Mens Triples',
         seasonName: '2025-26',
-        source: 'empty',
+        source: 'templates',
         archiveOldest: false
       })
     ).rejects.toEqual(new UserFacingError('meta.json can’t be a symbolic link'))
@@ -390,7 +393,7 @@ describe('createSeason', () => {
       day: 'monday',
       leagueFolder: 'Pairs',
       seasonName: '2026-27',
-      source: 'empty',
+      source: 'templates',
       archiveOldest: false
     })
 
@@ -452,9 +455,9 @@ describe('createSeason', () => {
     expect(await readFile(join(result.seasonPath, 'Rules.docx'), 'utf8')).toBe('new rules')
   })
 
-  test('empty creates a truly empty season', async () => {
+  test('an empty templates folder creates a season with no documents', async () => {
     await makeTree(root, {
-      '_templates/players.xlsx': 'template',
+      _templates: null,
       'monday/Mens Triples/2024-25/Rules.docx': 'previous'
     })
     const result = await createSeason({
@@ -462,7 +465,7 @@ describe('createSeason', () => {
       day: 'monday',
       leagueFolder: 'Mens Triples',
       seasonName: '2025-26',
-      source: 'empty',
+      source: 'templates',
       archiveOldest: false
     })
     expect(await readdir(result.seasonPath)).toEqual([])
@@ -501,7 +504,7 @@ describe('createSeason', () => {
         day: 'monday',
         leagueFolder: 'Mens Triples',
         seasonName: '2025-26',
-        source: 'empty',
+        source: 'templates',
         archiveOldest: true
       })
     ).rejects.toEqual(
@@ -532,7 +535,7 @@ describe('createSeason', () => {
         day: 'monday',
         leagueFolder: 'Mens Triples',
         seasonName: '2025-26',
-        source: 'empty',
+        source: 'templates',
         archiveOldest: true
       })
     ).rejects.toEqual(
@@ -561,7 +564,7 @@ describe('createSeason', () => {
         day: 'monday',
         leagueFolder: 'Mens Triples',
         seasonName: '2025-26',
-        source: 'empty',
+        source: 'templates',
         archiveOldest: true
       })
     ).rejects.toEqual(new UserFacingError('Path is outside the leagues folder'))
@@ -587,7 +590,7 @@ describe('createSeason', () => {
         day: 'monday',
         leagueFolder: 'Mens Triples',
         seasonName: '2025-26',
-        source: 'empty',
+        source: 'templates',
         archiveOldest: true
       })
     ).rejects.toEqual(new UserFacingError('Reserved folder “_archives” can’t be a symbolic link'))
@@ -628,7 +631,7 @@ describe('createSeason', () => {
       day: 'monday',
       leagueFolder: 'Mens Triples',
       seasonName: '2025-26',
-      source: 'empty',
+      source: 'templates',
       archiveOldest: false
     })
 
@@ -693,7 +696,7 @@ describe('createSeason', () => {
         day: 'monday',
         leagueFolder: 'Mens Triples',
         seasonName: '2025-26',
-        source: 'empty',
+        source: 'templates',
         archiveOldest: false
       })
     ).rejects.toThrow(/outside the leagues folder/)
@@ -711,7 +714,7 @@ describe('createSeason', () => {
         day: 'monday',
         leagueFolder: 'Pairs',
         seasonName: '2025-26',
-        source: 'empty',
+        source: 'templates',
         archiveOldest: false
       })
     ).rejects.toThrow(/does not match/)
@@ -743,6 +746,230 @@ describe('createSeason', () => {
     })
     await expect(attempt).rejects.toBeInstanceOf(UserFacingError)
     await expect(attempt).rejects.toThrow(/exists/i)
+  })
+})
+
+describe('createSeason with the members database', () => {
+  async function seasonFileOf(rel: string): Promise<SeasonFile> {
+    return seasonFileSchema.parse(JSON.parse(await readFile(join(root, rel, 'meta.json'), 'utf8')))
+  }
+
+  test('writes no season file while the location has not enabled members', async () => {
+    await makeTree(root, { 'monday/Pairs': null })
+    await createSeason({
+      root,
+      day: 'monday',
+      leagueFolder: 'Pairs',
+      seasonName: '2025-26',
+      source: 'templates',
+      archiveOldest: false,
+      roster: { format: 2, carryOver: false }
+    })
+    expect(await exists(join(root, 'monday/Pairs/2025-26/meta.json'))).toBe(false)
+  })
+
+  test('writes a default season file when the dialog sent no roster options', async () => {
+    await enableMembers(root)
+    await makeTree(root, { 'monday/Pairs': null })
+    await createSeason({
+      root,
+      day: 'monday',
+      leagueFolder: 'Pairs',
+      seasonName: '2025-26',
+      source: 'templates',
+      archiveOldest: false
+    })
+    expect(await seasonFileOf('monday/Pairs/2025-26')).toEqual({
+      schemaVersion: 1,
+      format: 3,
+      teams: [],
+      players: []
+    })
+  })
+
+  test('carries the roster over even when documents come from the templates', async () => {
+    await enableMembers(root)
+    await makeTree(root, {
+      '_templates/Rules.docx': 'template',
+      'monday/Pairs/2024-25/Rules.docx': 'prev'
+    })
+    await writeSeasonFile(join(root, 'monday/Pairs/2024-25'), {
+      schemaVersion: 1,
+      format: 2,
+      teams: [{ id: 'team_a', teamNo: 1, name: 'Strikers' }],
+      players: [{ memberId: 1, teamId: 'team_a' }]
+    })
+    await createSeason({
+      root,
+      day: 'monday',
+      leagueFolder: 'Pairs',
+      seasonName: '2025-26',
+      source: 'templates',
+      archiveOldest: false,
+      roster: { format: 2, carryOver: true }
+    })
+    expect(await readFile(join(root, 'monday/Pairs/2025-26/Rules.docx'), 'utf8')).toBe('template')
+    expect((await seasonFileOf('monday/Pairs/2025-26')).players).toEqual([
+      { memberId: 1, teamId: 'team_a' }
+    ])
+  })
+
+  test('starts a season file with the chosen format', async () => {
+    await enableMembers(root)
+    await makeTree(root, { 'monday/Pairs': null })
+    await createSeason({
+      root,
+      day: 'monday',
+      leagueFolder: 'Pairs',
+      seasonName: '2025-26',
+      source: 'templates',
+      archiveOldest: false,
+      roster: { format: 2, carryOver: true }
+    })
+    expect(await seasonFileOf('monday/Pairs/2025-26')).toEqual({
+      schemaVersion: 1,
+      format: 2,
+      teams: [],
+      players: []
+    })
+  })
+
+  test('carries teams and players over from the previous season and nothing else', async () => {
+    await enableMembers(root)
+    await makeTree(root, { 'monday/Pairs/2024-25/Rules.docx': 'prev' })
+    await writeSeasonFile(join(root, 'monday/Pairs/2024-25'), {
+      schemaVersion: 1,
+      format: 2,
+      startDate: '2024-09-02',
+      weeks: 30,
+      fees: { total: 10, breakdown: [] },
+      leagueSecretaryId: 'ls-season-1',
+      teams: [{ id: 'team_a', teamNo: 1, name: 'Strikers' }],
+      players: [{ memberId: 1, teamId: 'team_a', position: 2, leagueSecretaryId: 'ls-bowler-9' }]
+    })
+    await createSeason({
+      root,
+      day: 'monday',
+      leagueFolder: 'Pairs',
+      seasonName: '2025-26',
+      source: 'previous',
+      archiveOldest: false,
+      roster: { format: 3, carryOver: true }
+    })
+    // LeagueSecretary ids belong to one season, so neither the season's nor a bowler's comes across.
+    expect(await seasonFileOf('monday/Pairs/2025-26')).toEqual({
+      schemaVersion: 1,
+      format: 3,
+      teams: [{ id: 'team_a', teamNo: 1, name: 'Strikers' }],
+      players: [{ memberId: 1, teamId: 'team_a', position: 2 }]
+    })
+    expect(await readFile(join(root, 'monday/Pairs/2025-26/Rules.docx'), 'utf8')).toBe('prev')
+  })
+
+  test('leaves the roster empty when carry-over is off', async () => {
+    await enableMembers(root)
+    await makeTree(root, { 'monday/Pairs/2024-25/Rules.docx': 'prev' })
+    await writeSeasonFile(join(root, 'monday/Pairs/2024-25'), {
+      schemaVersion: 1,
+      format: 2,
+      teams: [{ id: 'team_a', teamNo: 1, name: 'Strikers' }],
+      players: [{ memberId: 1, teamId: 'team_a' }]
+    })
+    await createSeason({
+      root,
+      day: 'monday',
+      leagueFolder: 'Pairs',
+      seasonName: '2025-26',
+      source: 'previous',
+      archiveOldest: false,
+      roster: { format: 2, carryOver: false }
+    })
+    expect(await seasonFileOf('monday/Pairs/2025-26')).toEqual({
+      schemaVersion: 1,
+      format: 2,
+      teams: [],
+      players: []
+    })
+  })
+})
+
+describe('createSeasonRoster', () => {
+  const ref = { root: '', day: 'monday' as const, leagueFolder: 'Pairs', seasonName: '2025-26' }
+
+  async function seasonFileOf(rel: string): Promise<SeasonFile> {
+    return seasonFileSchema.parse(JSON.parse(await readFile(join(root, rel, 'meta.json'), 'utf8')))
+  }
+
+  test('gives an existing season a roster carried over from the one before it', async () => {
+    await enableMembers(root)
+    await makeTree(root, {
+      'monday/Pairs/2024-25/Rules.docx': 'prev',
+      'monday/Pairs/2025-26/Rules.docx': 'current'
+    })
+    await writeSeasonFile(join(root, 'monday/Pairs/2024-25'), {
+      schemaVersion: 1,
+      format: 2,
+      teams: [{ id: 'team_a', teamNo: 1, name: 'Strikers' }],
+      players: [{ memberId: 1, teamId: 'team_a', leagueSecretaryId: 'ls-1' }]
+    })
+
+    await createSeasonRoster({ ...ref, root, roster: { format: 2, carryOver: true } })
+    expect(await seasonFileOf('monday/Pairs/2025-26')).toEqual({
+      schemaVersion: 1,
+      format: 2,
+      teams: [{ id: 'team_a', teamNo: 1, name: 'Strikers' }],
+      players: [{ memberId: 1, teamId: 'team_a' }]
+    })
+    expect(await readFile(join(root, 'monday/Pairs/2025-26/Rules.docx'), 'utf8')).toBe('current')
+
+    await expect(
+      createSeasonRoster({ ...ref, root, roster: { format: 3, carryOver: false } })
+    ).rejects.toThrow('already has a roster')
+  })
+
+  test('carries players into a singles season without their teams', async () => {
+    await enableMembers(root)
+    await makeTree(root, { 'monday/Pairs/2024-25': null, 'monday/Pairs/2025-26': null })
+    await writeSeasonFile(join(root, 'monday/Pairs/2024-25'), {
+      schemaVersion: 1,
+      format: 2,
+      teams: [{ id: 'team_a', teamNo: 1, name: 'Strikers' }],
+      players: [{ memberId: 1, teamId: 'team_a', position: 1 }]
+    })
+
+    await createSeasonRoster({ ...ref, root, roster: { format: 1, carryOver: true } })
+    expect(await seasonFileOf('monday/Pairs/2025-26')).toEqual({
+      schemaVersion: 1,
+      format: 1,
+      teams: [],
+      players: [{ memberId: 1, teamId: null, position: 1 }]
+    })
+  })
+
+  test('refuses a location without the database, an archived season and a missing one', async () => {
+    await makeTree(root, { 'monday/Pairs/2025-26': null, '_archives/Pairs/2023-24': null })
+    await expect(
+      createSeasonRoster({ ...ref, root, roster: { format: 3, carryOver: false } })
+    ).rejects.toThrow('not enabled')
+
+    await enableMembers(root)
+    await expect(
+      createSeasonRoster({
+        ...ref,
+        root,
+        seasonName: '2023-24',
+        roster: { format: 3, carryOver: false }
+      })
+    ).rejects.toThrow()
+    await expect(
+      createSeasonRoster({
+        ...ref,
+        root,
+        seasonName: '2026-27',
+        roster: { format: 3, carryOver: false }
+      })
+    ).rejects.toThrow()
+    expect(await exists(join(root, '_archives/Pairs/2023-24/meta.json'))).toBe(false)
   })
 })
 

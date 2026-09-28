@@ -1,6 +1,6 @@
 # GoBowling Leagues
 
-GoBowling Leagues is a desktop organiser for bowling league documents stored in a OneDrive folder. The folder tree is the source of truth: the app scans it, adopts folders you create by hand, opens documents in their default program, generates new season folders and archives old seasons. It never overwrites an existing document. Template and import workflows only add new copies, and the only files the app owns are `meta.json` and the archive zips you request.
+GoBowling Leagues is a desktop organiser for bowling league documents stored in a OneDrive folder. The folder tree is the source of truth: the app scans it, adopts folders you create by hand, opens documents in their default program, generates new season folders and archives old seasons. It never overwrites an existing document. Template and import workflows only add new copies, and the only files the app owns are `meta.json`, the optional members database (`members.json` and each season's `meta.json`), the sign-in sheets it generates from a roster and the archive zips you request.
 
 ## Help
 
@@ -22,6 +22,9 @@ npm run typecheck
 npm run lint
 ```
 
+See [the renderer structure](docs/renderer-structure.md) for where apps, views, components, providers
+and contexts belong.
+
 On macOS, using `npm run dev` with a OneDrive-synced leagues folder requires folder access for your terminal app under System Settings, Privacy & Security, Files and Folders. Without it, reads fail with `EPERM`.
 
 Two environment variables change how the app runs:
@@ -30,6 +33,8 @@ Two environment variables change how the app runs:
 - `LEAGUES_POSTHOG_KEY=phc_your_project_key`: enable PostHog analytics; without it analytics are a no-op
 
 `scripts/make-templates.mjs path/to/output_dir` regenerates the bundled seed templates in `resources/templates/`.
+
+`npm run make:mbd-export -- path/to/MBDExport.xlsx [bowlers] [seed] [leagues]` writes a synthetic bowler export shaped like the MBD's own, with invented names, for trying **Sync from MBD…** and **Add from export…** by hand. The same seed always gives the same file. Real exports hold personal data and must never be committed; the sync tests run over the same generator.
 
 ## Building installers
 

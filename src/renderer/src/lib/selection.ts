@@ -2,17 +2,22 @@ import { z } from 'zod'
 import type { LeagueNode, LeaguesTree } from '@shared/tree'
 import { WEEKDAYS, type Weekday } from '@shared/weekday'
 
-export type Selection = { kind: 'home' } | { kind: 'league'; day: Weekday; folderName: string }
+export type Selection =
+  { kind: 'home' } | { kind: 'members' } | { kind: 'league'; day: Weekday; folderName: string }
 
 export const HOME: Selection = { kind: 'home' }
 
+export const MEMBERS: Selection = { kind: 'members' }
+
 export const selectionSchema: z.ZodType<Selection> = z.union([
   z.object({ kind: z.literal('home') }),
+  z.object({ kind: z.literal('members') }),
   z.object({ kind: z.literal('league'), day: z.enum(WEEKDAYS), folderName: z.string() })
 ])
 
 /** A remembered league is only worth restoring while it still exists in the tree. */
 export function restoreSelection(tree: LeaguesTree, stored: Selection | null): Selection {
+  if (stored?.kind === 'members') return stored
   if (stored?.kind === 'league' && findLeague(tree, stored)) return stored
   return HOME
 }

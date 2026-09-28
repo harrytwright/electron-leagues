@@ -9,14 +9,16 @@ import {
 } from '../../shared/season'
 import type { DirEntry, FileEntry, LeagueNode, LeaguesTree, SeasonNode } from '../../shared/tree'
 import { isWeekday, WEEKDAYS, type Weekday } from '../../shared/weekday'
+import { isReservedFileName } from '../../shared/members'
 import { isMissing } from './fs-errors'
 import { META_FILE, MetaSymlinkError, serialiseLeagueMeta, writeLeagueMeta } from './league-meta'
 import { archivePathFor } from './paths'
 
 export type { DirEntry, FileEntry, LeagueNode, LeaguesTree, SeasonNode }
 
+/** Dotfiles and the app's own JSON are never documents, wherever they sit. */
 function visible(name: string): boolean {
-  return !name.startsWith('.')
+  return !name.startsWith('.') && !isReservedFileName(name)
 }
 
 /** Folder-first natural ordering with a case-sensitive tie-break independent of input order. */
@@ -101,7 +103,6 @@ async function scanLeague(
   const seasonFolders: { entry: FileEntry; season: SeasonName }[] = []
   const otherEntries: FileEntry[] = []
   for (const entry of entries) {
-    if (entry.name === META_FILE) continue
     const season = entry.kind === 'folder' ? parseSeasonName(entry.name) : null
     if (season) {
       seasonFolders.push({ entry, season })

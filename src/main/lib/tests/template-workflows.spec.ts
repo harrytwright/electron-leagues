@@ -37,6 +37,26 @@ describe('workflow planning', () => {
     })
   })
 
+  test('a season file is never copied forward, from the previous season or a template', async () => {
+    const previous = [file('meta.json'), file('Rules.docx')]
+    const templates = [file('meta.json')]
+    await expect(WORKFLOW_HANDLERS.previous(previous, templates)).resolves.toEqual({
+      copies: [{ source: 'current', relativePath: 'Rules.docx' }],
+      skips: [
+        { relativePath: 'meta.json', reason: 'reserved' },
+        { relativePath: 'meta.json', reason: 'reserved' }
+      ]
+    })
+  })
+
+  test('a generated sign-in sheet stays with its own season', async () => {
+    const previous = [file('Sign-In Sheet.pdf'), file('Sign-In Sheet.docx')]
+    await expect(WORKFLOW_HANDLERS.previous(previous, [])).resolves.toEqual({
+      copies: [{ source: 'current', relativePath: 'Sign-In Sheet.docx' }],
+      skips: [{ relativePath: 'Sign-In Sheet.pdf', reason: 'generated' }]
+    })
+  })
+
   test('previous wins filename collisions before templates fill gaps', async () => {
     const result = await WORKFLOW_HANDLERS.previous(
       [file('Players.xlsx'), file('.private'), { ...file('folder'), kind: 'directory' }],

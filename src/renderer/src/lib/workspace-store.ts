@@ -19,6 +19,8 @@ export interface WorkspaceLocation {
 export interface LeagueNavigation {
   ownerPath: string
   currentDir: string
+  /** Opens a roster tab when navigation begins outside the league view. */
+  tab?: 'players' | 'teams' | 'settings'
 }
 
 export interface HomeNavigation {

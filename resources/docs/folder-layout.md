@@ -4,8 +4,8 @@ description: The fixed layout the app expects inside a leagues folder and what i
 section: Basics
 order: 2
 status: draft
-updated: 2026-09-17
-version: 0.2.3
+updated: 2026-09-18
+version: 0.3.0
 ---
 
 # Folder layout
@@ -14,6 +14,7 @@ The leagues folder follows a fixed layout. The app treats anything outside it as
 
 ```text
 /leagues/
+  members.json                       # the members database, once turned on (app-owned)
   _templates/                        # season templates, copied into new seasons
   _shared/                           # general documents for every league
   _archives/{League Name}/{season}/  # archived seasons (plain folders)
@@ -21,6 +22,8 @@ The leagues folder follows a fixed layout. The app treats anything outside it as
     {League Name}/
       meta.json                      # app-owned and auto-healed: the scan always wins
       2025-26/                       # seasons: 2025-26, 2025, or 2026-Q1
+        meta.json                    # the season's roster, teams and settings (app-owned)
+        Sign-In Sheet.pdf            # generated from the roster, never copied forward
         Rules.docx, Sign-In Sheet.docx, …
 ```
 
@@ -37,6 +40,10 @@ The seven weekday folders hold league nights. They are lowercase on disk and the
 ## League folders
 
 Each league night folder contains one folder per league. Inside it the app keeps a `meta.json` file that records the league's display name. That file is app owned and healed on every scan, so the folder tree always wins over anything stored in it. See [Leagues](leagues.md) for how leagues are created and renamed.
+
+## Members files
+
+Once the [members database](members.md) is on, the root holds `members.json` and each new season holds its own `meta.json` with the roster, teams and settings. Both are app owned, hidden from the file browser and edited only through the app. A season with a roster also shows a generated `Sign-In Sheet.pdf`, which is remade whenever the roster changes.
 
 ## Season folders
 

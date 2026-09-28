@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, beforeEach, expect, test } from 'vitest'
-import { createSeason, repairReservedLocations, withTemplateLock } from '../operations'
+import { createSeason, repairReservedLocations } from '../operations'
+import { withRootLock } from '../root-lock'
 import { readEntryMetadata } from '../template-workflows'
 
 let root: string
@@ -30,7 +31,7 @@ test('season creation waits for an in-flight template transaction to finish writ
 
   const started = Promise.withResolvers<void>()
   const finishCopy = Promise.withResolvers<void>()
-  const repairing = withTemplateLock(root, async () => {
+  const repairing = withRootLock(root, async () => {
     const target = join(templates, 'Rules.docx')
     await writeFile(target, 'partial')
     started.resolve()

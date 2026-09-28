@@ -42,7 +42,7 @@ export interface DialogTaskOptions {
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Focused whenever a failure is recorded for the current submission. */
-  fieldRef: RefObject<HTMLInputElement | null>
+  fieldRef: RefObject<HTMLElement | null>
   /** Extra key whose change also resets the lifecycle, e.g. the delete target's path. */
   resetKey?: string | null
 }
