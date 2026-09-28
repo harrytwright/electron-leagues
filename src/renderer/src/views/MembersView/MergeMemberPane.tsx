@@ -832,7 +832,7 @@ export function MergeMemberPane({
       </header>
       <div
         ref={bodyRef}
-        className={`min-h-0 flex-1 overflow-auto ${compact ? 'px-3 py-3' : 'px-5 py-4'}`}
+        className={`relative min-h-0 flex-1 overflow-auto ${compact ? 'px-3 py-3' : 'px-5 py-4'}`}
       >
         <div className="grid gap-4">
           {stale && saveState.kind !== 'written' ? (

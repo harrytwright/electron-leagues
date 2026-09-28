@@ -185,7 +185,7 @@ function PlayersTab({ season, snapshot }: Omit<Props, 'tab'>): React.JSX.Element
           </div>
         )}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="relative min-h-0 flex-1 overflow-auto">
         <Table aria-label="Players" layout="fixed" className={FILE_TABLE_CLASS}>
           <Table.Header sticky>
             <Table.Row className="text-kumo-subtle">
@@ -391,7 +391,7 @@ function TeamsTab({ season }: Omit<Props, 'tab' | 'snapshot'>): React.JSX.Elemen
           </Button>
         )}
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="relative min-h-0 flex-1 overflow-auto">
         <Table aria-label="Teams" layout="fixed" className={FILE_TABLE_CLASS}>
           <Table.Header sticky>
             <Table.Row className="text-kumo-subtle">
@@ -485,7 +485,7 @@ function SettingsTab({ season }: Omit<Props, 'tab' | 'snapshot'>): React.JSX.Ele
           Keep the format, schedule and fees used at the desk in one place.
         </Text>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="relative min-h-0 flex-1 overflow-auto">
         <SettingsForm
           file={season.file}
           revision={season.revision}

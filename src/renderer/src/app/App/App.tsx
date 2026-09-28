@@ -289,7 +289,7 @@ function LocationContent({ root }: LocationContentProps): React.JSX.Element {
             selection={effectiveSelection}
             onSelect={select}
           />
-          <main className="h-full min-w-0 flex-1 overflow-auto">
+          <main className="relative h-full min-w-0 flex-1 overflow-auto">
             <PaneErrorBoundary resetKeys={[selectedLeague?.path ?? scanned.root]}>
               {selectedLeague ? (
                 <LeagueView

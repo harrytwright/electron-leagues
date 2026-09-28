@@ -240,7 +240,7 @@ function MemberProfile({
   }
 
   return (
-    <article aria-label={`${row.name} profile`} className="min-h-0 flex-1 overflow-auto">
+    <article aria-label={`${row.name} profile`} className="relative min-h-0 flex-1 overflow-auto">
       <header
         className={`sticky top-0 z-10 flex items-start justify-between border-b border-kumo-line bg-kumo-base ${compact ? 'gap-2 px-3 py-2' : 'gap-4 px-5 py-4'}`}
       >
@@ -807,7 +807,7 @@ export function MembersWorkspace({
         className={`flex min-h-0 min-w-0 flex-col overflow-hidden ${stacked ? 'border-b border-kumo-line' : ''}`}
         style={stacked ? undefined : { width: `${listPercent}%` }}
       >
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div className="relative min-h-0 flex-1 overflow-auto">
           <Table aria-label="Members" layout="fixed">
             <colgroup>
               {mergeAction ? <col style={{ width: 38 }} /> : null}
