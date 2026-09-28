@@ -636,7 +636,8 @@ function registerIpc(): void {
       membersCsv(members, {
         nextId: master.value.nextId,
         today: new Date(),
-        members: master.value.members
+        members: master.value.members,
+        marketingOnly: options.marketingOnly
       })
     )
     capture('members_exported', { count: members.length })

@@ -127,16 +127,45 @@ describe('ages', () => {
   })
 
   test('needsDetails asks adults for contact and juniors for a guardian', () => {
-    expect(needsDetails(member({ id: 1 }), on)).toBe(true)
-    expect(needsDetails(member({ id: 1, dob: '1990-01-01', email: 'j@x.org' }), on)).toBe(false)
-    expect(needsDetails(member({ id: 1, dob: '1990-01-01' }), on)).toBe(true)
-    expect(needsDetails(member({ id: 1, dob: '2012-01-01' }), on)).toBe(true)
-    expect(needsDetails(member({ id: 1, dob: '2012-01-01', guardianContact: 'Mum' }), on)).toBe(
+    expect(needsDetails(member({ id: 1 }), on, [])).toBe(true)
+    expect(needsDetails(member({ id: 1, dob: '1990-01-01', email: 'j@x.org' }), on, [])).toBe(false)
+    expect(needsDetails(member({ id: 1, dob: '1990-01-01' }), on, [])).toBe(true)
+    expect(needsDetails(member({ id: 1, dob: '2012-01-01' }), on, [])).toBe(true)
+    expect(needsDetails(member({ id: 1, dob: '2012-01-01', guardianContact: 'Mum' }), on, [])).toBe(
       false
     )
-    expect(needsDetails(member({ id: 1, dob: '2012-01-01', guardianMemberId: 2 }), on)).toBe(false)
-    expect(needsDetails(member({ id: 1, mergedInto: 2 }), on)).toBe(false)
-    expect(needsDetails(member({ id: 1, deleted: true }), on)).toBe(false)
+    expect(needsDetails(member({ id: 1, mergedInto: 2 }), on, [])).toBe(false)
+    expect(needsDetails(member({ id: 1, deleted: true }), on, [])).toBe(false)
+  })
+
+  test('needsDetails only counts a junior guardian link when it resolves to a live, contactable adult', () => {
+    const adultGuardian = member({
+      id: 2,
+      firstName: 'Ann',
+      lastName: 'Lee',
+      email: 'ann@x.org'
+    })
+    const deletedGuardian = member({ id: 3, deleted: true, email: 'gone@x.org' })
+    const contactlessGuardian = member({ id: 4 })
+    const juniorGuardian = member({ id: 5, dob: '2012-01-01', email: 'kid@x.org' })
+    // A dangling or missing link still needs collecting.
+    expect(needsDetails(member({ id: 1, dob: '2012-01-01', guardianMemberId: 99 }), on, [])).toBe(
+      true
+    )
+    expect(
+      needsDetails(member({ id: 1, dob: '2012-01-01', guardianMemberId: 2 }), on, [adultGuardian])
+    ).toBe(false)
+    expect(
+      needsDetails(member({ id: 1, dob: '2012-01-01', guardianMemberId: 3 }), on, [deletedGuardian])
+    ).toBe(true)
+    expect(
+      needsDetails(member({ id: 1, dob: '2012-01-01', guardianMemberId: 4 }), on, [
+        contactlessGuardian
+      ])
+    ).toBe(true)
+    expect(
+      needsDetails(member({ id: 1, dob: '2012-01-01', guardianMemberId: 5 }), on, [juniorGuardian])
+    ).toBe(true)
   })
 
   test('a linked guardian is followed through merges and supplies their own contact', () => {
@@ -148,11 +177,65 @@ describe('ages', () => {
       member({ id: 4, dob: '2012-01-01', guardianMemberId: 99 })
     ]
     expect(guardianOf(members[2], members)?.id).toBe(1)
-    expect(guardianContactText(members[2], members)).toBe('Ann Lee, ann@x.org, 0770')
+    // A link and free text both entered are both kept: nothing typed at the desk is lost.
+    expect(guardianContactText(members[2], members)).toBe('Ann Lee, ann@x.org, 0770, Ask for Ann')
     expect(guardianOf(members[3], members)).toBeNull()
     expect(guardianContactText(members[3], members)).toBe('Dad 0771')
     expect(guardianOf(members[4], members)).toBeNull()
     expect(guardianContactText(members[4], members)).toBeUndefined()
+  })
+
+  test('guardianContactText falls back to free text for a deleted or opted-out guardian', () => {
+    const liveGuardian = member({
+      id: 1,
+      firstName: 'Ann',
+      lastName: 'Lee',
+      email: 'ann@x.org',
+      marketing: false
+    })
+    const deletedGuardian = member({
+      id: 2,
+      firstName: 'Bea',
+      lastName: 'Kay',
+      email: 'bea@x.org',
+      deleted: true
+    })
+    const juniorOfLive = member({
+      id: 3,
+      dob: '2012-01-01',
+      guardianMemberId: 1,
+      guardianContact: 'Or call the house'
+    })
+    const juniorOfDeleted = member({ id: 4, dob: '2012-01-01', guardianMemberId: 2 })
+    const members = [liveGuardian, deletedGuardian, juniorOfLive, juniorOfDeleted]
+
+    // A plain export still uses the live guardian's own contact.
+    expect(guardianContactText(juniorOfLive, members)).toBe('Ann Lee, ann@x.org, Or call the house')
+    // A marketing-only export drops a linked guardian who opted out; it does not fall back to
+    // the free text, since that text was never checked for consent to send.
+    expect(guardianContactText(juniorOfLive, members, { marketingOnly: true })).toBeUndefined()
+    // A plain export still falls back to free text for a deleted guardian's link.
+    expect(guardianContactText(juniorOfDeleted, members)).toBeUndefined()
+  })
+
+  test('a marketing export only drops the free text when a link exists; no link still falls back', () => {
+    const optedOut = member({ id: 1, firstName: 'Ann', lastName: 'Lee', marketing: false })
+    const linked = member({
+      id: 2,
+      dob: '2012-01-01',
+      guardianMemberId: 1,
+      guardianContact: 'Mum, mum@example.org'
+    })
+    const unlinked = member({
+      id: 3,
+      dob: '2012-01-01',
+      guardianContact: 'Dad, dad@example.org'
+    })
+    const members = [optedOut, linked, unlinked]
+    expect(guardianContactText(linked, members, { marketingOnly: true })).toBeUndefined()
+    expect(guardianContactText(unlinked, members, { marketingOnly: true })).toBe(
+      'Dad, dad@example.org'
+    )
   })
 })
 

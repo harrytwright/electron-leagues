@@ -212,12 +212,22 @@ export function isUnder18(member: Pick<Member, 'dob'>, on: Date): boolean {
   return member.dob !== undefined && ageOn(member.dob, on) < 18
 }
 
-/** Sync-created records arrive with a name and ids only; this is what the desk still has to collect. */
-export function needsDetails(member: Member, on: Date): boolean {
+/**
+ * Sync-created records arrive with a name and ids only; this is what the desk still has to
+ * collect. A junior counts as having details once there is free-text guardian contact, or the
+ * linked guardian is a live adult who themselves has an email or phone; a dangling link, a
+ * deleted guardian or a guardian who is themselves a junior does not count. A guardian merged
+ * away still counts, since `guardianOf` follows the merge to the survivor.
+ */
+export function needsDetails(member: Member, on: Date, members: readonly Member[]): boolean {
   if (member.mergedInto !== undefined || member.deleted) return false
   if (member.dob === undefined) return true
-  if (isUnder18(member, on)) return !member.guardianContact && member.guardianMemberId === undefined
-  return !member.email && !member.phone
+  if (!isUnder18(member, on)) return !member.email && !member.phone
+  if (member.guardianContact) return false
+  const guardian = guardianOf(member, members)
+  if (!guardian || guardian.deleted) return true
+  if (isUnder18(guardian, on)) return true
+  return !guardian.email && !guardian.phone
 }
 
 /** The member linked as this junior's guardian, followed through merges; null when none or gone. */
@@ -230,21 +240,34 @@ export function guardianOf(
     : resolveMember(members, member.guardianMemberId)
 }
 
+export interface GuardianContactOptions {
+  /** Only a linked guardian who has opted in stands for the junior; otherwise fall back to free text. */
+  marketingOnly?: boolean
+}
+
 /**
- * How to reach a junior's guardian: the linked member's name and their own contact
- * when there is a link, otherwise whatever was typed.
+ * How to reach a junior's guardian: the linked member's name and their own contact when the
+ * link is live and, for a marketing export, they have opted in; free text typed at the desk is
+ * appended after it when there is also a link, and used alone when there is no link at all. A
+ * marketing export never falls back to the free text for a junior who does have a link: a
+ * guardian who is gone, deleted or has not opted in yields nothing for that column rather than
+ * exporting contact details the free text was never checked for consent to send.
  */
 export function guardianContactText(
   member: Member,
-  members: readonly Member[]
+  members: readonly Member[],
+  options: GuardianContactOptions = {}
 ): string | undefined {
   const guardian = guardianOf(member, members)
-  if (guardian) {
+  const usable = guardian && !guardian.deleted && (!options.marketingOnly || guardian.marketing)
+  if (usable && guardian) {
     const parts = [memberDisplayName(guardian), guardian.email, guardian.phone].filter(
       (part): part is string => Boolean(part)
     )
-    return parts.join(', ')
+    if (member.guardianContact) parts.push(member.guardianContact)
+    return parts.length ? parts.join(', ') : undefined
   }
+  if (options.marketingOnly && member.guardianMemberId !== undefined) return undefined
   return member.guardianContact
 }
 

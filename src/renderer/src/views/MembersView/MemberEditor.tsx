@@ -126,9 +126,19 @@ export function MemberEditor({
     try {
       const outcome = await operation.run(memberInputFromDraft(draft, member))
       if (!active.current) {
+        // Leaving the page before this save lands means the workspace never sees `onSaved`,
+        // so a pending guardian link never gets made either; a refreshed list alone is not
+        // the whole story, and this is a partial failure either way, never a green toast.
+        const unlinkedNote = guardianFor
+          ? ` The page was left before ${memberDisplayName(guardianFor)} could be linked as their guardian.`
+          : ''
         if (outcome.status === 'refresh-failed') {
           onBackgroundError(
-            `Saved ${attemptedName} in ${pathTail(root)}, but the members list could not be refreshed: ${outcome.refreshError}`
+            `Saved ${attemptedName} in ${pathTail(root)}, but the members list could not be refreshed: ${outcome.refreshError}${unlinkedNote}`
+          )
+        } else if (guardianFor) {
+          onBackgroundError(
+            `Saved ${attemptedName} in ${pathTail(root)}, but did not link them as ${memberDisplayName(guardianFor)}’s guardian: the page was left before the link could be made`
           )
         } else {
           onBackgroundSuccess(`Saved ${attemptedName} in ${pathTail(root)}`)
@@ -284,7 +294,12 @@ export function MemberEditor({
           <MemberForm
             ref={firstNameRef}
             draft={draft}
-            guardians={guardianCandidates(snapshot.members, member?.id)}
+            guardians={guardianCandidates(
+              snapshot.members,
+              member?.id,
+              new Date(),
+              opening.guardianMemberId
+            )}
             nextId={snapshot.nextId}
             errorId={errorId}
             invalidNames={error?.invalidNames ?? undefined}

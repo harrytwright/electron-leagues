@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import {
   applyAgeRules,
+  isUnder18,
   memberDisplayName,
   memberInputSchema,
   normaliseName,
@@ -46,12 +47,12 @@ export interface MemberMergeSource {
 }
 
 export interface MemberMergeAlternative {
-  value: string | boolean | undefined
+  value: string | number | boolean | undefined
   sources: MemberMergeSource[]
 }
 
 export interface MemberMergeFieldPreview {
-  field: keyof Omit<MemberMergeResult, 'aliases' | 'mbdIds' | 'guardianMemberId'>
+  field: keyof Omit<MemberMergeResult, 'aliases' | 'mbdIds'>
   alternatives: MemberMergeAlternative[]
 }
 
@@ -89,9 +90,31 @@ export interface RosterMergePlan {
 }
 
 /**
- * Which roster entries belong to the selected records and which one survives:
- * main's own entry first, then an old number that resolves to main, then the
- * earliest selected record. The preview and the write share this rule.
+ * Which of several roster entries resolving towards `mainId` survives: `mainId`'s own
+ * current number first, then any entry that already resolves to `mainId` (an old number
+ * merged into it), then the earliest by `sourceOrder`. A live merge orders candidates by the
+ * selection the desk made, so the second rule can favour an old number over one chosen later.
+ * A repair rebuilding groups from the master alone has no such order to replay: every
+ * candidate's `sourceId` already equals the target, so the second rule matches whichever is
+ * first and repair reduces to "the target's own current number, else the earliest entry",
+ * which need not be the entry a merge's own preview would have kept.
+ */
+export function keepRosterCandidate(
+  candidates: readonly RosterMergeCandidate[],
+  mainId: number
+): RosterMergeCandidate {
+  const keep =
+    candidates.find((candidate) => candidate.memberId === mainId) ??
+    candidates.find((candidate) => candidate.sourceId === mainId) ??
+    candidates.reduce((earliest, candidate) =>
+      candidate.sourceOrder < earliest.sourceOrder ? candidate : earliest
+    )
+  return keep
+}
+
+/**
+ * Which roster entries belong to the selected records and which one survives.
+ * The preview and the write share this rule.
  */
 export function planRosterMerge(
   players: readonly Player[],
@@ -109,12 +132,7 @@ export function planRosterMerge(
       : [{ index, memberId: player.memberId, sourceId: resolved.id, sourceOrder }]
   })
   if (candidates.length === 0) return { candidates, keep: null, unchanged: true }
-  const keep =
-    candidates.find((candidate) => candidate.memberId === mainId) ??
-    candidates.find((candidate) => candidate.sourceId === mainId) ??
-    candidates.reduce((earliest, candidate) =>
-      candidate.sourceOrder < earliest.sourceOrder ? candidate : earliest
-    )
+  const keep = keepRosterCandidate(candidates, mainId)
   const unchanged = candidates.length === 1 && keep.sourceId === mainId
   return { candidates, keep, unchanged }
 }
@@ -134,6 +152,7 @@ const scalarFields = [
   'email',
   'phone',
   'guardianContact',
+  'guardianMemberId',
   'marketing',
   'cardIssued',
   'notes'
@@ -157,25 +176,51 @@ function sourceFor(member: Member): MemberMergeSource {
   return { id: member.id, label: `${memberDisplayName(member)} (${member.id})` }
 }
 
-function normaliseScalar<K extends FillableMemberField>(value: Member[K]): Member[K] {
-  if (value === undefined) return value
-  // SAFETY: every fillable member field is schema-validated as a string.
-  return value.trim() as Member[K]
+function normaliseScalar<K extends FillableMemberField>(field: K, value: Member[K]): Member[K] {
+  // `guardianMemberId` is the one fillable field that is a number, not free text to trim.
+  if (field === 'guardianMemberId' || value === undefined) return value
+  // SAFETY: the field check above rules out `guardianMemberId`, so every other fillable
+  // field is schema-validated as a string; generics just can't carry that correlation.
+  return (value as string).trim() as Member[K]
+}
+
+/**
+ * A guardian link only defaults in from another source when it resolves, through merges, to a
+ * live adult whose number is not itself duplicated: the same standard `saveMember` holds a
+ * changed link to. Main's own link is not checked here; it is kept as the default whatever its
+ * state, since main's stored link is never re-validated either.
+ */
+function usableGuardianDefault(
+  guardianId: number,
+  allMembers: readonly Member[],
+  today: Date
+): boolean {
+  const guardian = resolveMember(allMembers, guardianId)
+  if (!guardian || guardian.deleted || isUnder18(guardian, today)) return false
+  return allMembers.filter((candidate) => candidate.id === guardian.id).length === 1
 }
 
 function defaultScalar<K extends FillableMemberField>(
   sources: readonly Member[],
   main: Member,
-  field: K
+  field: K,
+  allMembers: readonly Member[],
+  today: Date
 ): Member[K] {
-  const mainValue = normaliseScalar(main[field])
+  const mainValue = normaliseScalar(field, main[field])
   const isBlank = (value: Member[K]): boolean => value === undefined || value === ''
   if (!isBlank(mainValue)) return mainValue
   const alternatives = new Set(
     sources
       .filter((source) => source.id !== main.id)
-      .map((source) => normaliseScalar(source[field]))
+      .map((source) => normaliseScalar(field, source[field]))
       .filter((value) => !isBlank(value))
+      .filter(
+        (value) =>
+          field !== 'guardianMemberId' ||
+          // SAFETY: the field check above means this alternative is `Member['guardianMemberId']`.
+          usableGuardianDefault(value as number, allMembers, today)
+      )
   )
   return alternatives.size === 1 ? [...alternatives][0] : mainValue
 }
@@ -191,6 +236,7 @@ function alternativeValue(
   field: MemberMergeFieldPreview['field']
 ): MemberMergeAlternative['value'] {
   if (field === 'marketing') return source.marketing
+  if (field === 'guardianMemberId') return source.guardianMemberId
   const trimmed = source[field]?.trim()
   return trimmed || undefined
 }
@@ -210,32 +256,32 @@ function alternativesFor(
   return [...grouped.values()]
 }
 
-function defaultResult(sources: readonly Member[], main: Member): MemberMergeResult {
+function defaultResult(
+  sources: readonly Member[],
+  main: Member,
+  allMembers: readonly Member[],
+  today: Date
+): MemberMergeResult {
   const result: MemberMergeResult = {
-    firstName: defaultScalar(sources, main, 'firstName'),
-    lastName: defaultScalar(sources, main, 'lastName'),
+    firstName: defaultScalar(sources, main, 'firstName', allMembers, today),
+    lastName: defaultScalar(sources, main, 'lastName', allMembers, today),
     mbdIds: cleanValues(sources.flatMap((source) => source.mbdIds)),
     aliases: cleanValues(sources.flatMap((source) => source.aliases)),
     marketing: main.marketing
   }
-  const dob = defaultScalar(sources, main, 'dob')
-  const gender = defaultScalar(sources, main, 'gender')
-  const email = defaultScalar(sources, main, 'email')
-  const phone = defaultScalar(sources, main, 'phone')
-  const guardianContact = defaultScalar(sources, main, 'guardianContact')
+  const dob = defaultScalar(sources, main, 'dob', allMembers, today)
+  const gender = defaultScalar(sources, main, 'gender', allMembers, today)
+  const email = defaultScalar(sources, main, 'email', allMembers, today)
+  const phone = defaultScalar(sources, main, 'phone', allMembers, today)
+  const guardianContact = defaultScalar(sources, main, 'guardianContact', allMembers, today)
+  const guardianMemberId = defaultScalar(sources, main, 'guardianMemberId', allMembers, today)
   if (dob !== undefined) result.dob = dob
   if (gender !== undefined) result.gender = gender
   if (email !== undefined) result.email = email
   if (phone !== undefined) result.phone = phone
   if (guardianContact !== undefined) result.guardianContact = guardianContact
+  if (guardianMemberId !== undefined) result.guardianMemberId = guardianMemberId
   if (main.cardIssued !== undefined) result.cardIssued = main.cardIssued
-  const guardianLinks = new Set(
-    sources.flatMap((source) =>
-      source.guardianMemberId === undefined ? [] : [source.guardianMemberId]
-    )
-  )
-  if (main.guardianMemberId !== undefined) result.guardianMemberId = main.guardianMemberId
-  else if (guardianLinks.size === 1) result.guardianMemberId = [...guardianLinks][0]
   const notes = defaultNotes(sources, main)
   if (notes !== undefined) result.notes = notes
   return withOriginalNames(result, sources)
@@ -307,7 +353,8 @@ export function buildMemberMergePreview(
   sources: readonly Member[],
   mainId: number,
   rosters: readonly RosterSeason[] = [],
-  allMembers: readonly Member[] = sources
+  allMembers: readonly Member[] = sources,
+  today = new Date()
 ): MemberMergePreview {
   if (sources.length < 2) throw new Error('Choose at least two members')
   if (new Set(sources.map((source) => source.id)).size !== sources.length) {
@@ -317,7 +364,7 @@ export function buildMemberMergePreview(
   if (!main) throw new Error('The main member must be one of the selected members')
   return {
     sources: sources.map(sourceFor),
-    result: defaultResult(sources, main),
+    result: defaultResult(sources, main, allMembers, today),
     fields: scalarFields.map((field) => ({ field, alternatives: alternativesFor(sources, field) })),
     rosterDifferences: rosterDifferences(sources, mainId, rosters, allMembers)
   }

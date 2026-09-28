@@ -305,3 +305,38 @@ sixteen items, applied in the commits that follow `78aa233`:
   marked with `aria-current` and the divider has `aria-controls`, a value text and Home and End.
 - Rows are memoised, memberships are indexed once per snapshot and the pair merge channel, the
   old dialog and the unused column width store are gone.
+
+### Second cold review: guardian links and pane-lifecycle fixes
+
+A later review, alongside the shared/main work adding a junior's linked guardian, found further
+renderer-side issues, fixed as follows:
+
+- The discard prompt captures the members revision alongside its closure. If a watcher refresh
+  lands while the prompt is open, the prompt closes without acting instead of letting Discard
+  reopen a pane seeded from a now-stale record but stamped with the fresh revision; the desk's
+  own draft stays open, untouched, to retry against the new list.
+- A dropped bowler export is ignored while a pane write is pending, the same as every other
+  path that would otherwise replace the pane.
+- Linking a junior's new guardian refreshes the members query first when the guardian's own
+  save had a failed refresh, so the link is not sent against a stale revision; a background
+  save whose editor was already left reports the unmade link through the error channel, whether
+  or not the refresh behind it also failed, since a guardian saved but not linked is a partial
+  failure and never a green toast; and the link write holds the workspace busy on its own flag,
+  separate from the panes', so one settling can never clear the other's hold.
+- The guardian picker (`guardianCandidates`) excludes juniors and duplicated numbers as well as
+  deleted and merged records, but always keeps the record the member is actually linked to
+  visible, however it is flagged, so a stale link can be seen and cleared, and stays offered
+  after another guardian is picked instead of disappearing until Cancel; an adult only ever
+  sees that link as a read-only row with a Remove control, never the picker itself.
+- `sameMemberDraft` compares aliases and MBD IDs as order-insensitive sets rather than joining
+  them, so reordering is not a change. Linking a guardian now builds the write straight from the
+  junior's record instead of round-tripping it through the comma-separated aliases text field,
+  so an alias containing a comma survives.
+- The merge pane shows the linked guardian as its own field row, with alternatives resolved to
+  a member's number and name, and its summary names whichever selected record the chosen link
+  came from instead of always crediting the main record.
+- The merge pane's dirty check compares the resulting record against the default result instead
+  of whether any choice was recorded, so picking an alternative equal to the default, or typing
+  a field back to its original value, no longer prompts a discard on the way out.
+- The discard dialog's wording now only follows a changed subject while it is open, so Discard
+  leading straight into another pane no longer flips the closing dialog's title mid-fade.

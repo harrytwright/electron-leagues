@@ -1,6 +1,7 @@
 import {
   formatMemberNumber,
   GENDERS,
+  isUnder18,
   memberDisplayName,
   type Gender,
   type Member,
@@ -89,6 +90,14 @@ export function memberInputFromDraft(draft: MemberDraft, member: Member | null):
   return input
 }
 
+/** True regardless of order, so reordering a list alone is not a change. */
+function sameValues(a: readonly string[], b: readonly string[]): boolean {
+  if (a.length !== b.length) return false
+  const sortedA = [...a].sort()
+  const sortedB = [...b].sort()
+  return sortedA.every((value, index) => value === sortedB[index])
+}
+
 /** True when saving either draft would write the same record, so whitespace alone is no change. */
 export function sameMemberDraft(a: MemberDraft, b: MemberDraft): boolean {
   const left = memberInputFromDraft(a, null)
@@ -104,16 +113,41 @@ export function sameMemberDraft(a: MemberDraft, b: MemberDraft): boolean {
     left.guardianMemberId === right.guardianMemberId &&
     left.marketing === right.marketing &&
     left.notes === right.notes &&
-    left.mbdIds.join(',') === right.mbdIds.join(',') &&
-    left.aliases.join(',') === right.aliases.join(',')
+    sameValues(left.mbdIds, right.mbdIds) &&
+    sameValues(left.aliases, right.aliases)
   )
 }
 
-/** Live records other than the one being edited, in list order, for the guardian picker. */
-export function guardianCandidates(members: readonly Member[], selfId?: number): Member[] {
-  return members.filter(
-    (member) => !member.deleted && member.mergedInto === undefined && member.id !== selfId
-  )
+/**
+ * Live, adult, uniquely numbered records other than the one being edited, for the guardian
+ * picker; whichever record `linkedId` names is always included too, however it is flagged,
+ * so a stale link stays visible and can be seen or cleared. A `linkedId` that is itself
+ * duplicated only contributes its first holder, so the Combobox never lists two items
+ * carrying the same value.
+ */
+export function guardianCandidates(
+  members: readonly Member[],
+  selfId: number | undefined,
+  today: Date,
+  linkedId?: number | null
+): Member[] {
+  const counts = new Map<number, number>()
+  for (const member of members) counts.set(member.id, (counts.get(member.id) ?? 0) + 1)
+  let linkedIncluded = false
+  return members.filter((member) => {
+    if (member.id === selfId) return false
+    if (member.id === linkedId) {
+      if (linkedIncluded) return false
+      linkedIncluded = true
+      return true
+    }
+    return (
+      !member.deleted &&
+      member.mergedInto === undefined &&
+      counts.get(member.id) === 1 &&
+      !isUnder18(member, today)
+    )
+  })
 }
 
 const EMAIL_IN_TEXT = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/

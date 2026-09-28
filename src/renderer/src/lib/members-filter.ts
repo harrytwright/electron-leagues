@@ -86,7 +86,7 @@ export function buildMemberRows(snapshot: MembersSnapshot, today: Date): MemberR
       number: formatMemberNumber(member.id, snapshot.nextId),
       name: memberDisplayName(member),
       memberships: memberships.filter((membership) => membership.memberId === member.id),
-      needsDetails: needsDetails(member, today)
+      needsDetails: needsDetails(member, today, snapshot.members)
     }))
 }
 

@@ -207,6 +207,63 @@ describe('mergeMemberGroup', () => {
     }
   })
 
+  test('refuses a survivor whose guardian link is invalid, junior, duplicated or a merged source', async () => {
+    await writeMaster([
+      member(1),
+      member(2),
+      member(3, { firstName: 'Junior', dob: '2015-01-01' }),
+      member(4, { firstName: 'Gone', deleted: true }),
+      member(5, { firstName: 'Holder one' }),
+      member(5, { firstName: 'Holder two' }),
+      member(6, { firstName: 'Unrelated Adult' })
+    ])
+    const invalidLinks = [3, 4, 5, 99, 2]
+    for (const guardianMemberId of invalidLinks) {
+      const request = await mergeRequest([1, 2], 1)
+      request.result.guardianMemberId = guardianMemberId
+      await expect(mergeMemberGroup(root, request)).rejects.toThrow(
+        /adult|another member|duplicated/
+      )
+    }
+
+    // A link to a live, unrelated adult goes through and lands on the survivor.
+    const validRequest = await mergeRequest([1, 2], 1)
+    validRequest.result.guardianMemberId = 6
+    const survivor = await mergeMemberGroup(root, validRequest)
+    expect(survivor.guardianMemberId).toBe(6)
+  })
+
+  test('keeps the link main already carried even when that guardian is deleted', async () => {
+    await writeMaster([
+      member(1, { dob: '2015-01-01', guardianMemberId: 4 }),
+      member(2),
+      member(4, { firstName: 'Gone', deleted: true })
+    ])
+    const request = await mergeRequest([1, 2], 1)
+    expect(request.result.guardianMemberId).toBe(4)
+    const survivor = await mergeMemberGroup(root, request)
+    expect(survivor.guardianMemberId).toBe(4)
+  })
+
+  test('clears main’s stored guardian link when the reviewed result chooses none', async () => {
+    await writeMaster([
+      member(1, { dob: '2015-01-01', guardianMemberId: 3 }),
+      member(2, { dob: '2015-01-01' }),
+      member(3, { firstName: 'Guardian' })
+    ])
+    const request = await mergeRequest([1, 2], 1)
+    expect(request.result.guardianMemberId).toBe(3)
+    request.result.guardianMemberId = undefined
+
+    const survivor = await mergeMemberGroup(root, request)
+
+    expect(survivor.guardianMemberId).toBeUndefined()
+    const master = membersFileSchema.parse(
+      JSON.parse(await readFile(join(root, 'members.json'), 'utf8'))
+    )
+    expect(master.members.find((candidate) => candidate.id === 1)?.guardianMemberId).toBeUndefined()
+  })
+
   test('rejects an invalid live roster before modifying the master', async () => {
     await writeMaster([member(1), member(2)])
     await writeJson(join(root, 'monday/Pairs/2026-27/meta.json'), {
@@ -321,6 +378,48 @@ describe('repairRosterPlayers', () => {
     ]
     expect(repairRosterPlayers(players, members)).toEqual(players)
   })
+
+  test('keeps main’s own entry when present, else the earliest, one entry per member', () => {
+    // Repair has no record of a stopped merge's selection order, so this need not be the
+    // entry that merge's own preview would have kept (see the JSDoc above the function).
+    const withDirect = [
+      { memberId: 7, teamId: 'oldest' },
+      { memberId: 6, teamId: 'old' },
+      { memberId: 1, teamId: 'direct' }
+    ]
+    expect(repairRosterPlayers(withDirect, members)).toEqual([{ memberId: 1, teamId: 'direct' }])
+
+    const withoutDirect = [
+      { memberId: 7, teamId: 'oldest' },
+      { memberId: 6, teamId: 'old' }
+    ]
+    expect(repairRosterPlayers(withoutDirect, members)).toEqual([{ memberId: 1, teamId: 'oldest' }])
+  })
+
+  test('leaves two entries that share the exact same stored number untouched', () => {
+    // A raw duplicate is not the "absorbed number" case repair fixes: detection never
+    // flags it, so collapsing it would quietly delete a second bowler's row.
+    const direct = [
+      { memberId: 2, teamId: 'a' },
+      { memberId: 2, teamId: 'b' }
+    ]
+    expect(repairRosterPlayers(direct, members)).toEqual(direct)
+    const absorbed = [
+      { memberId: 6, teamId: 'a' },
+      { memberId: 6, teamId: 'b' }
+    ]
+    expect(repairRosterPlayers(absorbed, members)).toEqual(absorbed)
+  })
+
+  test('leaves an absorbed entry alone rather than rewriting it into a third raw copy', () => {
+    const raw5s = [member(1), member(5), member(7, { mergedInto: 5 })]
+    const players = [
+      { memberId: 5, teamId: 'a' },
+      { memberId: 5, teamId: 'b' },
+      { memberId: 7, teamId: 'c' }
+    ]
+    expect(repairRosterPlayers(players, raw5s)).toEqual(players)
+  })
 })
 
 describe('repairRosters', () => {
@@ -360,6 +459,51 @@ describe('repairRosters', () => {
     expect(await readFile(archivePath, 'utf8')).toBe(archiveBefore)
     const snapshot = await buildMembersSnapshot(root, await scanLeaguesRoot(root))
     expect(snapshot.problems).toEqual([])
+  })
+
+  test('does not refuse a roster over an unrelated duplicated number', async () => {
+    await writeMaster([
+      member(1),
+      member(2),
+      member(6, { mergedInto: 1 }),
+      member(7, { firstName: 'Holder one' }),
+      member(7, { firstName: 'Holder two' })
+    ])
+    const rosterPath = join(root, 'monday/Pairs/2026-27/meta.json')
+    await writeJson(
+      rosterPath,
+      season({
+        players: [
+          { memberId: 6, teamId: null },
+          { memberId: 7, teamId: null }
+        ]
+      })
+    )
+    const revision = await fileRevision(join(root, 'members.json'))
+
+    // Repair only rewrites the `6` entry; the duplicated `7` is not one it would touch.
+    await expect(repairRosters(root, revision)).resolves.toBe(1)
+    expect(JSON.parse(await readFile(rosterPath, 'utf8')).players).toEqual([
+      { memberId: 1, teamId: null },
+      { memberId: 7, teamId: null }
+    ])
+  })
+
+  test('refuses to rewrite a roster whose repair would touch a duplicated number', async () => {
+    await writeMaster([
+      member(1),
+      member(6, { mergedInto: 1 }),
+      member(6, { firstName: 'Second holder' })
+    ])
+    const rosterPath = join(root, 'monday/Pairs/2026-27/meta.json')
+    await writeJson(rosterPath, season({ players: [{ memberId: 6, teamId: null }] }))
+    const before = await readFile(rosterPath, 'utf8')
+    const revision = await fileRevision(join(root, 'members.json'))
+
+    await expect(repairRosters(root, revision)).rejects.toThrow(
+      'Member number 6 is duplicated and listed in Pairs/2026-27'
+    )
+    expect(await readFile(rosterPath, 'utf8')).toBe(before)
   })
 })
 

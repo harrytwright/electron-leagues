@@ -277,6 +277,85 @@ it('shows a linked guardian on a junior’s profile and opens their record', asy
   expect(screen.getByRole('article', { name: 'Ann Lee profile' })).toBeInTheDocument()
 })
 
+it('shows a soft-deleted linked guardian as removed rather than live', async () => {
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(
+      makeSnapshot({
+        nextId: 3,
+        members: [
+          makeMember({
+            id: 1,
+            firstName: 'Ann',
+            lastName: 'Lee',
+            phone: '07700 900000',
+            deleted: true
+          }),
+          makeMember({
+            id: 2,
+            firstName: 'Kid',
+            lastName: 'Lee',
+            dob: '2015-01-01',
+            email: undefined,
+            guardianMemberId: 1
+          })
+        ]
+      })
+    )
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: /Kid Lee, member/ }))
+  const profile = screen.getByRole('article', { name: 'Kid Lee profile' })
+  expect(profile).toHaveTextContent('Ann Lee (removed)')
+  expect(profile).toHaveTextContent('No longer on the list')
+  expect(profile).not.toHaveTextContent('07700 900000')
+  await user.click(within(profile).getByRole('button', { name: 'Ann Lee (removed)' }))
+  expect(screen.getByRole('article', { name: 'Ann Lee profile' })).toBeInTheDocument()
+})
+
+it('keeps the editor’s stale guardian option selectable after picking someone else', async () => {
+  const dob = `${new Date().getFullYear() - 10}-01-01`
+  const goneGuardian = makeMember({ id: 1, firstName: 'Ann', lastName: 'Lee', deleted: true })
+  const otherGuardian = makeMember({ id: 3, firstName: 'Meg', lastName: 'Lee' })
+  const junior = makeMember({
+    id: 2,
+    firstName: 'Kid',
+    lastName: 'Lee',
+    dob,
+    email: undefined,
+    guardianMemberId: 1
+  })
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(
+      makeSnapshot({
+        revision: 'rev-2',
+        nextId: 4,
+        members: [goneGuardian, otherGuardian, junior]
+      })
+    )
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: /Kid Lee, member/ }))
+  await user.click(within(screen.getByRole('article')).getByRole('button', { name: 'Edit…' }))
+  const picker = screen.getByRole('combobox', { name: 'Linked guardian' })
+  expect(picker).toHaveValue('000001 Ann Lee (removed)')
+  await user.click(picker)
+  await user.click(await screen.findByRole('option', { name: '000003 Meg Lee' }))
+  expect(picker).toHaveValue('000003 Meg Lee')
+
+  // The stale option follows the record's own stored link, not whichever guardian is
+  // picked next, so it stays available without cancelling the whole edit.
+  await user.click(picker)
+  expect(
+    await screen.findByRole('option', { name: '000001 Ann Lee (removed)' })
+  ).toBeInTheDocument()
+})
+
 it('adds a guardian as a member from the junior’s contact text and links them', async () => {
   const junior = makeMember({
     id: 2,
@@ -343,6 +422,285 @@ it('adds a guardian as a member from the junior’s contact text and links them'
   const profile = await screen.findByRole('article', { name: 'Kid Lee profile' })
   expect(profile).toHaveTextContent('Linked guardian')
   expect(within(profile).getByRole('button', { name: 'Meg Lee' })).toBeInTheDocument()
+})
+
+it('links a guardian without splitting an alias that contains a comma', async () => {
+  const junior = makeMember({
+    id: 2,
+    firstName: 'Kid',
+    lastName: 'Lee',
+    dob: '2015-01-01',
+    email: undefined,
+    aliases: ['Lee, Jr'],
+    guardianContact: 'Mum, mum@example.org, 07700 900123'
+  })
+  const guardian = makeMember({ id: 3, firstName: 'Meg', lastName: 'Lee' })
+  const initial = makeSnapshot({ revision: 'rev-2', nextId: 3, members: [junior] })
+  const withGuardian = makeSnapshot({ revision: 'rev-3', nextId: 4, members: [junior, guardian] })
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValueOnce(initial).mockResolvedValue(withGuardian),
+    saveMember: vi
+      .fn<RendererApi['saveMember']>()
+      .mockResolvedValueOnce(guardian)
+      .mockResolvedValueOnce({ ...junior, guardianMemberId: 3 })
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: /Kid Lee, member/ }))
+  await user.click(screen.getByRole('button', { name: 'Add guardian as a member…' }))
+  const form = screen.getByRole('form', { name: 'New member: guardian of Kid Lee' })
+  await user.type(within(form).getByLabelText(/first name/i), 'Meg')
+  await user.type(within(form).getByLabelText(/last name/i), 'Lee')
+  await user.click(screen.getByRole('button', { name: 'Add member' }))
+
+  // The link is built straight from the junior's record, not round-tripped through the
+  // comma-separated aliases text field, so "Lee, Jr" survives as one alias.
+  await waitFor(() => expect(api.saveMember).toHaveBeenCalledTimes(2))
+  expect(api.saveMember).toHaveBeenNthCalledWith(
+    2,
+    expect.objectContaining({ id: 2, aliases: ['Lee, Jr'], guardianMemberId: 3 }),
+    'rev-3'
+  )
+  // The free text the guardian was seeded from is already on their own notes; keeping it
+  // here too would repeat their contact details in a plain CSV export.
+  expect(vi.mocked(api.saveMember).mock.calls[1][0]).not.toHaveProperty('guardianContact')
+})
+
+it('refreshes before linking a guardian whose own save refresh had failed', async () => {
+  const junior = makeMember({
+    id: 2,
+    firstName: 'Kid',
+    lastName: 'Lee',
+    dob: '2015-01-01',
+    email: undefined,
+    guardianContact: 'Mum, mum@example.org, 07700 900123'
+  })
+  const guardian = makeMember({
+    id: 3,
+    firstName: 'Meg',
+    lastName: 'Lee',
+    dob: undefined,
+    email: 'mum@example.org',
+    phone: '07700 900123'
+  })
+  const initial = makeSnapshot({ revision: 'rev-2', nextId: 3, members: [junior] })
+  const withGuardian = makeSnapshot({ revision: 'rev-3', nextId: 4, members: [junior, guardian] })
+  const linked = makeSnapshot({
+    revision: 'rev-4',
+    nextId: 4,
+    members: [{ ...junior, guardianMemberId: 3 }, guardian]
+  })
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi
+      .fn<RendererApi['membersSnapshot']>()
+      .mockResolvedValueOnce(initial)
+      .mockRejectedValueOnce(new Error('Scan failed'))
+      .mockResolvedValueOnce(withGuardian)
+      .mockResolvedValue(linked),
+    saveMember: vi
+      .fn<RendererApi['saveMember']>()
+      .mockResolvedValueOnce(guardian)
+      .mockResolvedValueOnce({ ...junior, guardianMemberId: 3 })
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: /Kid Lee, member/ }))
+  await user.click(screen.getByRole('button', { name: 'Add guardian as a member…' }))
+  const form = screen.getByRole('form', { name: 'New member: guardian of Kid Lee' })
+  await user.type(within(form).getByLabelText(/first name/i), 'Meg')
+  await user.type(within(form).getByLabelText(/last name/i), 'Lee')
+  await user.click(screen.getByRole('button', { name: 'Add member' }))
+
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Saved Meg Lee, but the list could not be refreshed'
+  )
+  await user.click(screen.getByRole('button', { name: 'Close' }))
+
+  // The cache is still stale from the failed refresh; linking must refresh again itself
+  // rather than read that stale revision, or main refuses the link as out of date.
+  await waitFor(() => expect(api.saveMember).toHaveBeenCalledTimes(2))
+  expect(api.saveMember).toHaveBeenNthCalledWith(
+    2,
+    expect.objectContaining({ id: 2, firstName: 'Kid', guardianMemberId: 3 }),
+    'rev-3'
+  )
+  const profile = await screen.findByRole('article', { name: 'Kid Lee profile' })
+  expect(profile).toHaveTextContent('Linked guardian')
+})
+
+it('holds the workspace busy while a guardian link is being saved', async () => {
+  const junior = makeMember({
+    id: 2,
+    firstName: 'Kid',
+    lastName: 'Lee',
+    dob: '2015-01-01',
+    email: undefined,
+    guardianContact: 'Mum, mum@example.org, 07700 900123'
+  })
+  const guardian = makeMember({
+    id: 3,
+    firstName: 'Meg',
+    lastName: 'Lee',
+    dob: undefined,
+    email: 'mum@example.org',
+    phone: '07700 900123'
+  })
+  const initial = makeSnapshot({ revision: 'rev-2', nextId: 3, members: [junior] })
+  const refresh = deferred<ReturnType<typeof makeSnapshot>>()
+  const link = deferred<typeof junior>()
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi
+      .fn<RendererApi['membersSnapshot']>()
+      .mockResolvedValueOnce(initial)
+      // The guardian's own save refresh fails, so the guardian is still missing from the
+      // cache when linking starts and it must refresh again itself before it can write.
+      .mockRejectedValueOnce(new Error('Scan failed'))
+      .mockImplementationOnce(() => refresh.promise),
+    saveMember: vi
+      .fn<RendererApi['saveMember']>()
+      .mockResolvedValueOnce(guardian)
+      .mockImplementationOnce(() => link.promise)
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: /Kid Lee, member/ }))
+  await user.click(screen.getByRole('button', { name: 'Add guardian as a member…' }))
+  const form = screen.getByRole('form', { name: 'New member: guardian of Kid Lee' })
+  await user.type(within(form).getByLabelText(/first name/i), 'Meg')
+  await user.type(within(form).getByLabelText(/last name/i), 'Lee')
+  await user.click(screen.getByRole('button', { name: 'Add member' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    'Saved Meg Lee, but the list could not be refreshed'
+  )
+  await user.click(screen.getByRole('button', { name: 'Close' }))
+
+  // The link's own pre-flight refresh is now in flight, before it has even tried to write:
+  // the hold must cover that window too, not only the write that follows it.
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'New member…' })).toHaveAttribute(
+      'aria-disabled',
+      'true'
+    )
+  )
+  expect(api.saveMember).toHaveBeenCalledOnce()
+
+  await act(async () =>
+    refresh.resolve(makeSnapshot({ revision: 'rev-3', nextId: 4, members: [junior, guardian] }))
+  )
+  await waitFor(() => expect(api.saveMember).toHaveBeenCalledTimes(2))
+  // The write itself has started; the hold must not drop between the two steps.
+  expect(screen.getByRole('button', { name: 'New member…' })).toHaveAttribute(
+    'aria-disabled',
+    'true'
+  )
+
+  await act(async () => link.resolve({ ...junior, guardianMemberId: 3 }))
+  await waitFor(() =>
+    expect(screen.getByRole('button', { name: 'New member…' })).not.toHaveAttribute(
+      'aria-disabled',
+      'true'
+    )
+  )
+})
+
+it('mentions a guardian link left unsaved when the page is left before the guardian saves', async () => {
+  const junior = makeMember({
+    id: 2,
+    firstName: 'Kid',
+    lastName: 'Lee',
+    dob: '2015-01-01',
+    email: undefined,
+    guardianContact: 'Mum, mum@example.org, 07700 900123'
+  })
+  const initial = makeSnapshot({ revision: 'rev-2', nextId: 3, members: [junior] })
+  const withGuardian = makeSnapshot({
+    revision: 'rev-3',
+    nextId: 4,
+    members: [junior, makeMember({ id: 3, firstName: 'Meg', lastName: 'Lee' })]
+  })
+  const save = deferred<ReturnType<typeof makeMember>>()
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi
+      .fn<RendererApi['membersSnapshot']>()
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(withGuardian),
+    saveMember: vi.fn(() => save.promise)
+  })
+  const user = userEvent.setup()
+  const view = renderWithProviders(<MembersView tree={makeTree()} />)
+
+  await user.click(await screen.findByRole('button', { name: /Kid Lee, member/ }))
+  await user.click(screen.getByRole('button', { name: 'Add guardian as a member…' }))
+  const form = screen.getByRole('form', { name: 'New member: guardian of Kid Lee' })
+  await user.type(within(form).getByLabelText(/first name/i), 'Meg')
+  await user.type(within(form).getByLabelText(/last name/i), 'Lee')
+  await user.click(screen.getByRole('button', { name: 'Add member' }))
+  await waitFor(() => expect(api.saveMember).toHaveBeenCalledOnce())
+  view.rerender(<p>Another page</p>)
+  await act(async () => save.resolve(makeMember({ id: 3, firstName: 'Meg', lastName: 'Lee' })))
+
+  // A guardian saved but not linked is a partial failure, not a success: it must go
+  // through the error channel, not a green success toast.
+  const toast = await screen.findByRole('dialog')
+  expect(toast).toHaveTextContent(/did not link them as Kid Lee’s guardian/)
+  expect(toast.className).toMatch(/kumo-danger/)
+  expect(api.saveMember).toHaveBeenCalledOnce()
+})
+
+it('mentions a guardian link left unsaved when the page is left and the refresh then fails', async () => {
+  const junior = makeMember({
+    id: 2,
+    firstName: 'Kid',
+    lastName: 'Lee',
+    dob: '2015-01-01',
+    email: undefined,
+    guardianContact: 'Mum, mum@example.org, 07700 900123'
+  })
+  const initial = makeSnapshot({ revision: 'rev-2', nextId: 3, members: [junior] })
+  const save = deferred<ReturnType<typeof makeMember>>()
+  const refresh = deferred<ReturnType<typeof makeSnapshot>>()
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi
+      .fn<RendererApi['membersSnapshot']>()
+      .mockResolvedValueOnce(initial)
+      .mockImplementationOnce(() => refresh.promise),
+    saveMember: vi.fn(() => save.promise)
+  })
+  const user = userEvent.setup()
+  const view = renderWithProviders(<MembersView tree={makeTree()} />)
+
+  await user.click(await screen.findByRole('button', { name: /Kid Lee, member/ }))
+  await user.click(screen.getByRole('button', { name: 'Add guardian as a member…' }))
+  const form = screen.getByRole('form', { name: 'New member: guardian of Kid Lee' })
+  await user.type(within(form).getByLabelText(/first name/i), 'Meg')
+  await user.type(within(form).getByLabelText(/last name/i), 'Lee')
+  await user.click(screen.getByRole('button', { name: 'Add member' }))
+  await waitFor(() => expect(api.saveMember).toHaveBeenCalledOnce())
+
+  // The guardian's own save resolves while the editor is still mounted, so its refresh
+  // starts as a genuine refetch; only once that refresh is under way does the desk leave,
+  // and only then does the refresh itself fail.
+  await act(async () => save.resolve(makeMember({ id: 3, firstName: 'Meg', lastName: 'Lee' })))
+  view.rerender(<p>Another page</p>)
+  await act(async () => refresh.reject(new Error('Scan failed')))
+
+  // Both the refresh failure and the unmade link are true; the toast must not report
+  // this as a plain refresh problem and stay silent about the guardian.
+  const toast = await screen.findByRole('dialog')
+  expect(toast).toHaveTextContent(
+    'Saved Meg Lee in /root, but the members list could not be refreshed: Scan failed'
+  )
+  expect(toast).toHaveTextContent('before Kid Lee could be linked as their guardian')
+  expect(toast.className).toMatch(/kumo-danger/)
+  expect(api.saveMember).toHaveBeenCalledOnce()
 })
 
 it('opens an archived Windows roster link on the Players tab', async () => {
@@ -543,6 +901,37 @@ it('asks before a row click discards an edited record', async () => {
   await discardDraft(user, 'Discard changes to Ann Lee?')
   expect(screen.getByRole('article', { name: 'Bob Kay profile' })).toBeInTheDocument()
   expect(screen.queryByRole('form')).not.toBeInTheDocument()
+})
+
+it('closes the discard prompt without acting when a refresh lands while it is open', async () => {
+  const initial = twoMembersSnapshot()
+  const queryClient = createQueryClient()
+  installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(initial)
+  })
+  const user = userEvent.setup()
+  renderWithProviders(<MembersView tree={makeTree()} />, { queryClient })
+
+  await user.click(await screen.findByRole('button', { name: /Ann Lee, member/ }))
+  await user.click(within(screen.getByRole('article')).getByRole('button', { name: 'Edit…' }))
+  await user.type(screen.getByLabelText(/first name/i), 'ie')
+  await user.click(screen.getByRole('button', { name: /Bob Kay, member/ }))
+  await screen.findByRole('dialog', { name: 'Discard changes to Ann Lee?' })
+
+  // A watcher refresh lands while the prompt is open: Discard would have opened Bob's
+  // editor stamped with this new revision but seeded from the record as it stood before,
+  // silently overwriting whatever changed him. Closing the prompt instead keeps Ann's
+  // draft open, untouched, for the desk to retry against the fresh list.
+  act(() => {
+    queryClient.setQueryData(membersQueryKey('/root'), { ...initial, revision: 'rev-3' })
+  })
+
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog', { name: /Discard/ })).not.toBeInTheDocument()
+  )
+  expect(screen.getByRole('form', { name: 'Edit Ann Lee' })).toBeInTheDocument()
+  expect(screen.getByLabelText(/first name/i)).toHaveValue('Annie')
 })
 
 it('asks before New member… replaces a dirty form and keeps editing on Escape', async () => {
@@ -908,6 +1297,67 @@ it('merges an ordered selection in the pane and keeps manual results across sour
   )
 })
 
+it('shows the linked guardian row in a merge and honestly names its source', async () => {
+  const guardianA = makeMember({ id: 10, firstName: 'Gran', lastName: 'Lee' })
+  const guardianB = makeMember({ id: 11, firstName: 'Pop', lastName: 'Lee' })
+  const initial = makeSnapshot({
+    revision: 'rev-3',
+    nextId: 12,
+    members: [
+      guardianA,
+      guardianB,
+      makeMember({
+        id: 1,
+        firstName: 'Ann',
+        lastName: 'Lee',
+        dob: '2015-01-01',
+        email: undefined,
+        guardianMemberId: 10
+      }),
+      makeMember({
+        id: 2,
+        firstName: 'Annie',
+        lastName: 'Lee',
+        dob: '2015-01-01',
+        email: undefined,
+        guardianMemberId: 11
+      })
+    ]
+  })
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(initial)
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await openRowMenu(user, 'Ann Lee')
+  await user.click(screen.getByRole('menuitem', { name: 'Merge with…' }))
+  await user.click(screen.getByRole('checkbox', { name: /Merge Annie Lee/ }))
+
+  const guardianSources = screen.getByLabelText('Linked guardian source values')
+  expect(
+    within(guardianSources).getByRole('button', { name: /000010 Gran Lee/ })
+  ).toBeInTheDocument()
+  expect(
+    within(guardianSources).getByRole('button', { name: /000011 Pop Lee/ })
+  ).toBeInTheDocument()
+  expect(
+    screen.getByText('Linked guardian: Gran Lee (000010), from Ann Lee (1).')
+  ).toBeInTheDocument()
+
+  await user.click(within(guardianSources).getByRole('button', { name: /000011 Pop Lee/ }))
+  expect(
+    screen.getByText('Linked guardian: Pop Lee (000011), from Annie Lee (2).')
+  ).toBeInTheDocument()
+
+  await user.click(screen.getByRole('button', { name: 'Merge members' }))
+  await waitFor(() => expect(api.mergeMemberGroup).toHaveBeenCalledOnce())
+  expect(api.mergeMemberGroup).toHaveBeenCalledWith(
+    expect.objectContaining({ result: expect.objectContaining({ guardianMemberId: 11 }) })
+  )
+})
+
 const TWENTY_CLICKS_TIMEOUT = 20_000
 
 it(
@@ -1053,7 +1503,6 @@ it('asks before Cancel discards a merge whose selection changed', async () => {
   await openRowMenu(user, 'Bob Kay')
   await user.click(screen.getByRole('menuitem', { name: 'Merge with…' }))
   await user.click(screen.getByRole('checkbox', { name: /Merge Ann Lee/ }))
-  expect(screen.queryByRole('dialog', { name: /Discard/ })).not.toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Cancel' }))
 
   const prompt = await screen.findByRole('dialog', { name: 'Discard the merge?' })
@@ -1090,7 +1539,7 @@ it('holds Cancel while a merge is being written', async () => {
   await user.click(screen.getByRole('checkbox', { name: /Merge Ann Lee/ }))
   await user.click(screen.getByRole('button', { name: 'Merge members' }))
 
-  expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled())
   expect(screen.getByRole('button', { name: 'Merging…' })).toBeDisabled()
   await act(async () => merge.resolve(saved))
   expect(await screen.findByRole('article', { name: 'Robert Kay profile' })).toBeInTheDocument()
@@ -1163,6 +1612,10 @@ it('holds the rows and toolbar while a member is being written', async () => {
   expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
   await user.click(screen.getByRole('button', { name: /Bob Kay, member/ }))
   expect(screen.getByRole('form', { name: 'New member' })).toBeInTheDocument()
+  // The form is dirty (Cy Dee typed above), so without the busy hold this click would
+  // have opened the discard prompt instead of doing nothing.
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(screen.queryByRole('button', { name: 'Keep editing' })).not.toBeInTheDocument()
   await openRowMenu(user, 'Bob Kay')
   expect(screen.getByRole('menuitem', { name: 'Edit…' })).toHaveAttribute('aria-disabled', 'true')
   expect(screen.getByRole('menuitem', { name: 'Merge with…' })).toHaveAttribute(
@@ -1349,6 +1802,8 @@ it('names a roster still listing an absorbed number and tidies it on request', a
   expect(problems).toHaveTextContent(
     'monday/Pairs/2026-27 lists member 6 under a number that was merged into member 1'
   )
+  // A second machine can see this banner before OneDrive has actually synced the roster.
+  expect(problems).toHaveTextContent('wait until syncing has finished before tidying up')
   await user.click(within(problems).getByRole('button', { name: 'Tidy up rosters' }))
 
   expect(await screen.findByText('Tidied 1 roster')).toBeInTheDocument()
@@ -1508,6 +1963,36 @@ it('starts an MBD sync from the toolbar picker or a dropped export', async () =>
     await screen.findByRole('dialog', { name: /Sync from the Master Bowler Database/ })
   ).toBeInTheDocument()
   await waitFor(() => expect(api.previewImport).toHaveBeenLastCalledWith('bowlers.csv'))
+})
+
+it('ignores a dropped export while a pane write is pending', async () => {
+  const save = deferred<ReturnType<typeof makeMember>>()
+  const api = installMockApi({
+    getRoot: vi.fn().mockResolvedValue('/root'),
+    membersSnapshot: vi.fn().mockResolvedValue(twoMembersSnapshot()),
+    saveMember: vi.fn(() => save.promise)
+  })
+  const user = userEvent.setup()
+  renderMembers()
+
+  await user.click(await screen.findByRole('button', { name: 'New member…' }))
+  await user.type(screen.getByLabelText(/first name/i), 'Cy')
+  await user.type(screen.getByLabelText(/last name/i), 'Dee')
+  await user.click(screen.getByRole('button', { name: 'Add member' }))
+
+  const zone = screen.getByRole('table', { name: 'Members' }).closest('[data-import-drop-target]')
+  if (!zone) throw new Error('No drop target around the members table')
+  // Dropping a file while the save is pending would otherwise show "Discard the new
+  // member?" with copy that says nothing was saved, which is false, and Discard would
+  // unmount the editor mid-write.
+  fireEvent.drop(zone, {
+    dataTransfer: { files: [new File(['x'], 'bowlers.csv')], types: ['Files'] }
+  })
+
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(api.previewImport).not.toHaveBeenCalled()
+  expect(screen.getByRole('form', { name: 'New member' })).toBeInTheDocument()
+  await act(async () => save.resolve(makeMember({ id: 3, firstName: 'Cy', lastName: 'Dee' })))
 })
 
 it('offers a development-only reset that empties every roster and the list', async () => {

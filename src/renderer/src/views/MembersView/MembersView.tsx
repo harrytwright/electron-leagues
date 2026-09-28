@@ -137,26 +137,41 @@ function MembersTable({
   const [syncPath, setSyncPath] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [paneBusy, setPaneBusy] = useState(false)
+  // A guardian link write holds the workspace on its own, separately from a form or merge
+  // pane's own hold, so the two can never clear each other's while both are in flight.
+  const [linkBusy, setLinkBusy] = useState(false)
+  const busy = paneBusy || linkBusy
   const [paneDirty, setPaneDirty] = useState(false)
-  const [departure, setDeparture] = useState<(() => void) | null>(null)
+  const [departure, setDeparture] = useState<{
+    proceed: () => void
+    revision: string
+  } | null>(null)
   const paneInstance = useRef(0)
   const [table, setTable] = useState<MembersTablePreference>(loadMembersTable)
   const [compact, setCompact] = useState(false)
   const tableRoot = useRef<HTMLDivElement>(null)
+  // A watcher refresh mid-prompt would let Discard reopen a pane seeded from a record that is
+  // no longer current, saving it against the fresh revision the editor stamps; closing the
+  // prompt instead keeps the desk's own draft open, untouched, to retry against the new list.
+  if (departure !== null && departure.revision !== snapshot.revision) {
+    setDeparture(null)
+  }
   const leavePane = (proceed: () => void): void => {
-    if (paneDirty) setDeparture(() => proceed)
+    if (paneDirty) setDeparture({ proceed, revision: snapshot.revision })
     else proceed()
   }
   const discardDraft = (): void => {
+    const proceed = departure?.proceed
     setDeparture(null)
-    departure?.()
+    proceed?.()
   }
-  const drop = useImportDrop((path) =>
+  const drop = useImportDrop((path) => {
+    if (busy) return
     leavePane(() => {
       setAction(null)
       setSyncPath(path)
     })
-  )
+  })
   const filterRef = useRef<HTMLInputElement>(null)
   const coordinator = useQueryRefresh()
   const { add } = useKumoToastManager()
@@ -333,7 +348,7 @@ function MembersTable({
               <DropdownMenu.Trigger render={<Toolbar.Button>More actions</Toolbar.Button>} />
               <DropdownMenu.Content align="end">
                 <DropdownMenu.Item
-                  disabled={paneBusy}
+                  disabled={busy}
                   onClick={() =>
                     leavePane(() => {
                       setAction(null)
@@ -348,7 +363,7 @@ function MembersTable({
                   {`Print ${plural(listed.length, 'card')} (${CARDS_PARKED})`}
                 </DropdownMenu.Item>
                 <DropdownMenu.Item
-                  disabled={listed.length === 0 || paneBusy}
+                  disabled={listed.length === 0 || busy}
                   onClick={() =>
                     leavePane(() => {
                       setAction(null)
@@ -363,7 +378,7 @@ function MembersTable({
                     <DropdownMenu.Separator />
                     <DropdownMenu.Item
                       variant="danger"
-                      disabled={paneBusy}
+                      disabled={busy}
                       onClick={() => leavePane(() => setAction({ kind: 'reset' }))}
                     >
                       Delete all members…
@@ -375,7 +390,7 @@ function MembersTable({
             <Toolbar.Button
               type="button"
               icon={<UserPlusIcon aria-hidden size={14} />}
-              disabled={paneBusy}
+              disabled={busy}
               onClick={() => leavePane(() => startPaneAction('new'))}
             >
               New member…
@@ -438,6 +453,12 @@ function MembersTable({
                 <li key={index}>{describeProblem(problem)}</li>
               ))}
             </ul>
+            {absorbedNumbers ? (
+              <Text variant="secondary" size="sm">
+                On a folder shared through OneDrive, wait until syncing has finished before tidying
+                up: the members list can arrive before the rosters that go with it.
+              </Text>
+            ) : null}
           </div>
           {absorbedNumbers ? (
             <Button
@@ -445,7 +466,7 @@ function MembersTable({
               size="sm"
               className="ml-auto shrink-0"
               loading={repair.pending}
-              disabled={repair.pending || paneBusy}
+              disabled={repair.pending || busy}
               onClick={() => void repairRosters()}
             >
               {repair.pending ? 'Tidying…' : 'Tidy up rosters'}
@@ -461,7 +482,7 @@ function MembersTable({
         duplicatedIds={duplicatedIds}
         renumbering={renumber.pending}
         compact={compact}
-        paneBusy={paneBusy}
+        paneBusy={busy}
         sort={table.sort}
         onSort={sortBy}
         onAction={(kind, member) => {
@@ -482,6 +503,7 @@ function MembersTable({
         onPaneActionChange={setPaneAction}
         onPaneActionUpdate={updatePaneAction}
         onPaneBusyChange={setPaneBusy}
+        onLinkBusyChange={setLinkBusy}
         onPaneDirtyChange={setPaneDirty}
         onLeavePane={leavePane}
         onBackgroundError={(message) => add({ title: message, variant: 'error' })}

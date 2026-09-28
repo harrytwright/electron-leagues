@@ -20,10 +20,13 @@ export type WorkbookCell =
   | { kind: 'text'; text: string }
   | { kind: 'number'; value: number }
   | { kind: 'date'; serial: number }
+  | { kind: 'omitted' }
 
 export const text = (value: string): WorkbookCell => ({ kind: 'text', text: value })
 export const number = (value: number): WorkbookCell => ({ kind: 'number', value })
 export const date = (serial: number): WorkbookCell => ({ kind: 'date', serial })
+/** A cell the MBD leaves out of a row entirely, with no `<c>` element written for it. */
+export const omitted = (): WorkbookCell => ({ kind: 'omitted' })
 
 const FIRST_NAMES_MEN = [
   'Adam',
@@ -462,8 +465,8 @@ export function syntheticMbdExport(options: SyntheticMbdExportOptions): Syntheti
     const byLeague = (order.get(a.row.league) ?? 0) - (order.get(b.row.league) ?? 0)
     if (byLeague !== 0) return byLeague
     return (
-      a.row.lastName.localeCompare(b.row.lastName) ||
-      a.row.firstName.localeCompare(b.row.firstName) ||
+      a.row.lastName.localeCompare(b.row.lastName, 'en') ||
+      a.row.firstName.localeCompare(b.row.firstName, 'en') ||
       a.row.mbdId - b.row.mbdId
     )
   })
@@ -494,18 +497,19 @@ export function syntheticMbdExport(options: SyntheticMbdExportOptions): Syntheti
   }
 }
 
-/**
- * The same export after the MBD has been tidied: `count` bowlers spelt a little
- * differently under the same id, chosen by the seed, in every league that lists them.
- * Placeholders and quirk rows are left alone so their line numbers still mean what
- * the original's do.
- */
+/** A tidied export alongside the lines it changed. */
 export interface RespeltMbdExport {
   export: SyntheticMbdExport
   /** The first row of each bowler whose name changed. */
   lines: number[]
 }
 
+/**
+ * The same export after the MBD has been tidied: `count` bowlers spelt a little
+ * differently under the same id, chosen by the seed, in every league that lists them.
+ * Placeholders and quirk rows are left alone so their line numbers still mean what
+ * the original's do.
+ */
 export function respeltMbdExport(
   source: SyntheticMbdExport,
   seed: number,
@@ -593,6 +597,8 @@ export function workbookFrom(columns: readonly string[], rows: readonly Workbook
         return `<c r="${reference}" s="1"><v>${value.value}</v></c>`
       case 'date':
         return `<c r="${reference}" s="2"><v>${value.serial}</v></c>`
+      case 'omitted':
+        return ''
     }
   }
   const line = (values: readonly WorkbookCell[], row: number): string =>

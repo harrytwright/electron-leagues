@@ -2,9 +2,11 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
 import {
   buildMergedMember,
+  keepRosterCandidate,
   memberGroupMergeRequestSchema,
   planRosterMerge,
-  type MemberGroupMergeRequest
+  type MemberGroupMergeRequest,
+  type RosterMergeCandidate
 } from '../../shared/member-merge'
 import {
   membersFileSchema,
@@ -17,7 +19,13 @@ import {
 } from '../../shared/members'
 import { assertAppJsonWritable, readAppJson, serialiseAppJson } from './app-json'
 import { toUserFacing, UserFacingError } from './fs-errors'
-import { fileRevision, membersFilePath, seasonFilePath, STALE_MESSAGE } from './members'
+import {
+  assertGuardianLink,
+  fileRevision,
+  membersFilePath,
+  seasonFilePath,
+  STALE_MESSAGE
+} from './members'
 import { withRootLock } from './root-lock'
 import { scanLeaguesRoot } from './scanner'
 import { WEEKDAYS } from '../../shared/weekday'
@@ -225,6 +233,22 @@ export async function mergeMemberGroup(
     } catch (error) {
       throw new UserFacingError(toUserFacing(error).message)
     }
+    const mainLink = sources.find((source) => source.id === request.mainId)?.guardianMemberId
+    // A link main already carried is kept as stored, as `saveMember` keeps an unchanged
+    // one, so a junior whose guardian was soft-deleted can still be merged. Every merged
+    // source counts as the survivor itself, so a link to any of them would be a self-link
+    // once the merge lands.
+    if (survivor.guardianMemberId !== undefined && survivor.guardianMemberId !== mainLink) {
+      survivor = {
+        ...survivor,
+        guardianMemberId: assertGuardianLink(
+          masterRead.value.members,
+          survivor.guardianMemberId,
+          request.sourceIds,
+          today
+        )
+      }
+    }
     const seasons = await readLiveSeasons(root)
     refuseDuplicatedRosterEntries(masterRead.value, seasons, request)
     const nextMaster: MembersFile = {
@@ -265,43 +289,101 @@ export async function mergeMemberGroup(
   })
 }
 
+interface RepairGroup {
+  /** The id every candidate below resolves to. */
+  targetId: number
+  candidates: RosterMergeCandidate[]
+}
+
 /**
- * Point live roster entries at the record their number now resolves to, keeping
- * one entry per member. This is the tidy-up for a merge that stopped after the
- * master list was written, or for a roster edited by hand.
+ * The absorption groups a repair would actually rewrite: roster entries that already resolve
+ * to a shared target, grouped by that target, kept only where rewriting would change
+ * something. A raw duplicate within the roster is left out of every group, since which holder
+ * it names cannot be told apart. A target already written raw more than once in the roster is
+ * left out too, so an absorbed entry is never rewritten into a third copy of an existing pair.
+ * Shared between the write and the duplicated-number refusal, so they never disagree about
+ * which entries repair touches.
+ */
+function repairGroups(players: readonly Player[], members: readonly Member[]): RepairGroup[] {
+  const rawIdCounts = new Map<number, number>()
+  for (const player of players) {
+    rawIdCounts.set(player.memberId, (rawIdCounts.get(player.memberId) ?? 0) + 1)
+  }
+  const groups = new Map<number, RosterMergeCandidate[]>()
+  players.forEach((player, index) => {
+    if (rawIdCounts.get(player.memberId) !== 1) return
+    const resolved = resolveMember(members, player.memberId)
+    if (!resolved || (rawIdCounts.get(resolved.id) ?? 0) > 1) return
+    const candidates = groups.get(resolved.id) ?? []
+    candidates.push({ index, memberId: player.memberId, sourceId: resolved.id, sourceOrder: index })
+    groups.set(resolved.id, candidates)
+  })
+  return [...groups.entries()]
+    .filter(
+      ([targetId, candidates]) => candidates.length > 1 || candidates[0].memberId !== targetId
+    )
+    .map(([targetId, candidates]) => ({ targetId, candidates }))
+}
+
+/**
+ * Point live roster entries at the record their number now resolves to, keeping one entry per
+ * member (`keepRosterCandidate`): the target's own current number when it is on the roster,
+ * otherwise the earliest entry. That need not be the entry a merge's own preview would have
+ * kept, since a repair has no record of the selection order a stopped merge used. This is the
+ * tidy-up for a merge that stopped after the master list was written, or for a roster edited
+ * by hand. Two entries that already share the exact same stored number are a different, raw
+ * duplicate that detection never flags; they, and any absorbed entry that would rewrite onto
+ * that same duplicated number, are left exactly as they are, not collapsed, so a genuine
+ * second bowler is never quietly deleted under an ambiguous, duplicated number.
  */
 export function repairRosterPlayers(
   players: readonly Player[],
   members: readonly Member[]
 ): Player[] {
-  const keptIndexByMember = new Map<number, number>()
-  for (const [index, player] of players.entries()) {
-    const resolved = resolveMember(members, player.memberId)
-    if (!resolved) continue
-    const kept = keptIndexByMember.get(resolved.id)
-    if (
-      kept === undefined ||
-      (players[kept].memberId !== resolved.id && player.memberId === resolved.id)
-    ) {
-      keptIndexByMember.set(resolved.id, index)
+  const groups = repairGroups(players, members)
+  const removedIndexes = new Set<number>()
+  const repairedByIndex = new Map<number, Player>()
+  for (const group of groups) {
+    const keep = keepRosterCandidate(group.candidates, group.targetId)
+    for (const candidate of group.candidates) {
+      if (candidate.index !== keep.index) removedIndexes.add(candidate.index)
+    }
+    const original = players[keep.index]
+    const secretaryId =
+      original.leagueSecretaryId ??
+      group.candidates
+        .map((candidate) => players[candidate.index].leagueSecretaryId)
+        .find((id) => id !== undefined)
+    const repaired: Player = { ...original, memberId: keep.sourceId }
+    if (secretaryId !== undefined) repaired.leagueSecretaryId = secretaryId
+    repairedByIndex.set(keep.index, repaired)
+  }
+  return players.flatMap((player, index) => {
+    if (removedIndexes.has(index)) return []
+    return [repairedByIndex.get(index) ?? player]
+  })
+}
+
+/**
+ * A duplicated number cannot say which holder it means, so a repair that would rewrite or
+ * remove an entry under one, or rewrite an entry onto one, is refused until the numbers are
+ * put right; an unrelated duplicated entry elsewhere on the same roster is left alone.
+ */
+function refuseDuplicatedRepairEntries(
+  season: ReadSeason,
+  members: readonly Member[],
+  counts: ReadonlyMap<number, number>
+): void {
+  for (const group of repairGroups(season.file.players, members)) {
+    const touchedIds = new Set([group.targetId, ...group.candidates.map((c) => c.memberId)])
+    for (const id of touchedIds) {
+      if ((counts.get(id) ?? 0) <= 1) continue
+      const seasonDir = dirname(season.path)
+      throw new UserFacingError(
+        `Member number ${id} is duplicated and listed in ${basename(dirname(seasonDir))}/${basename(seasonDir)}, so it must be resolved before repairing`
+      )
     }
   }
-  const keptIndexes = new Set(keptIndexByMember.values())
-  return players.flatMap((player, index) => {
-    const resolved = resolveMember(members, player.memberId)
-    if (!resolved) return [player]
-    if (!keptIndexes.has(index)) return []
-    const repaired: Player = { ...player, memberId: resolved.id }
-    const secretaryId =
-      repaired.leagueSecretaryId ??
-      players.find(
-        (candidate) =>
-          resolveMember(members, candidate.memberId)?.id === resolved.id &&
-          candidate.leagueSecretaryId !== undefined
-      )?.leagueSecretaryId
-    if (secretaryId !== undefined) repaired.leagueSecretaryId = secretaryId
-    return [repaired]
-  })
 }
 
 /** Rewrite every live roster that lists an absorbed number; returns how many were changed. */
@@ -320,16 +402,20 @@ export async function repairRosters(
     if ((await fileRevision(masterPath)) !== expectedRevision) {
       throw new UserFacingError(STALE_MESSAGE)
     }
+    const counts = new Map<number, number>()
+    for (const member of masterRead.value.members) {
+      counts.set(member.id, (counts.get(member.id) ?? 0) + 1)
+    }
     const files: PreparedMemberMergeFile[] = []
     for (const season of await readLiveSeasons(root)) {
       const players = repairRosterPlayers(season.file.players, masterRead.value.members)
-      if (JSON.stringify(players) !== JSON.stringify(season.file.players)) {
-        files.push({
-          path: season.path,
-          original: season.raw,
-          next: serialiseAppJson({ ...season.file, players })
-        })
-      }
+      if (JSON.stringify(players) === JSON.stringify(season.file.players)) continue
+      refuseDuplicatedRepairEntries(season, masterRead.value.members, counts)
+      files.push({
+        path: season.path,
+        original: season.raw,
+        next: serialiseAppJson({ ...season.file, players })
+      })
     }
     await commitPreparedMemberMerge(files, io)
     return files.length

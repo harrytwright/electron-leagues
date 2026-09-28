@@ -78,7 +78,61 @@ test('a junior with a linked guardian carries that member’s name and contact',
     today: new Date(2026, 8, 18),
     members: [guardian, junior]
   })
+  // The guardian's own contact comes first; the free text typed at the desk is kept too.
   expect(csv.split('\r\n')[1]).toBe(
-    '000008,Kid,Lee,2015-01-01,,,,"Ann Lee, ann@example.org, 07700 900000",,,yes,,'
+    '000008,Kid,Lee,2015-01-01,,,,"Ann Lee, ann@example.org, 07700 900000, Collects on Tuesdays",,,yes,,'
   )
+})
+
+test('a marketing export drops an opted-out or deleted guardian’s contact, not just the free text', () => {
+  const optedOut = member({
+    id: 7,
+    firstName: 'Ann',
+    lastName: 'Lee',
+    email: 'ann@example.org',
+    marketing: false
+  })
+  const deleted = member({
+    id: 9,
+    firstName: 'Cal',
+    lastName: 'Lee',
+    email: 'cal@example.org',
+    deleted: true
+  })
+  const juniorOfOptedOut = member({
+    id: 8,
+    firstName: 'Kid',
+    lastName: 'Lee',
+    dob: '2015-01-01',
+    guardianMemberId: 7,
+    // Free text seeded from the same guardian at link time; a marketing export must not
+    // leak it as a fallback once the link itself is found unusable for that export.
+    guardianContact: 'Ask at the desk'
+  })
+  const juniorOfDeleted = member({
+    id: 10,
+    firstName: 'Sam',
+    lastName: 'Lee',
+    dob: '2015-01-01',
+    guardianMemberId: 9
+  })
+  const juniorWithNoLink = member({
+    id: 11,
+    firstName: 'Max',
+    lastName: 'Lee',
+    dob: '2015-01-01',
+    guardianContact: 'Gran, gran@example.org'
+  })
+  const csv = membersCsv([juniorOfOptedOut, juniorOfDeleted, juniorWithNoLink], {
+    nextId: 12,
+    today: new Date(2026, 8, 18),
+    members: [optedOut, deleted, juniorOfOptedOut, juniorOfDeleted, juniorWithNoLink],
+    marketingOnly: true
+  })
+  const lines = csv.split('\r\n')
+  // A linked guardian who is not usable for marketing yields nothing, not the free text.
+  expect(lines[1]).toBe('000008,Kid,Lee,2015-01-01,,,,,,,yes,,')
+  expect(lines[2]).toBe('000010,Sam,Lee,2015-01-01,,,,,,,yes,,')
+  // A junior with no link at all still falls back to free text.
+  expect(lines[3]).toBe('000011,Max,Lee,2015-01-01,,,,"Gran, gran@example.org",,,yes,,')
 })

@@ -80,9 +80,14 @@ describe('buildMemberMergePreview', () => {
         1
       ).result.guardianMemberId
     ).toBe(7)
+    const adult = member(8)
     expect(
-      buildMemberMergePreview([member(1), member(2, { guardianMemberId: 8 })], 1).result
-        .guardianMemberId
+      buildMemberMergePreview(
+        [member(1), member(2, { guardianMemberId: 8 })],
+        1,
+        [],
+        [member(1), member(2, { guardianMemberId: 8 }), adult]
+      ).result.guardianMemberId
     ).toBe(8)
     expect(
       buildMemberMergePreview(
@@ -90,6 +95,85 @@ describe('buildMemberMergePreview', () => {
         1
       ).result.guardianMemberId
     ).toBeUndefined()
+  })
+
+  test('does not default to a non-main guardian link the merge would refuse', () => {
+    const on = new Date(2026, 8, 18)
+    const deletedGuardian = member(8, { deleted: true })
+    const juniorGuardian = member(9, { dob: '2015-01-01' })
+    const holderOne = member(10, { firstName: 'Holder one' })
+    const holderTwo = member(10, { firstName: 'Holder two' })
+
+    expect(
+      buildMemberMergePreview(
+        [member(1), member(2, { guardianMemberId: 8 })],
+        1,
+        [],
+        [member(1), member(2, { guardianMemberId: 8 }), deletedGuardian],
+        on
+      ).result.guardianMemberId
+    ).toBeUndefined()
+
+    expect(
+      buildMemberMergePreview(
+        [member(1), member(2, { guardianMemberId: 9 })],
+        1,
+        [],
+        [member(1), member(2, { guardianMemberId: 9 }), juniorGuardian],
+        on
+      ).result.guardianMemberId
+    ).toBeUndefined()
+
+    expect(
+      buildMemberMergePreview(
+        [member(1), member(2, { guardianMemberId: 10 })],
+        1,
+        [],
+        [member(1), member(2, { guardianMemberId: 10 }), holderOne, holderTwo],
+        on
+      ).result.guardianMemberId
+    ).toBeUndefined()
+
+    // Still offered as an alternative, so the pane can show and label it.
+    const preview = buildMemberMergePreview(
+      [member(1), member(2, { guardianMemberId: 8 })],
+      1,
+      [],
+      [member(1), member(2, { guardianMemberId: 8 }), deletedGuardian],
+      on
+    )
+    expect(preview.fields.find(({ field }) => field === 'guardianMemberId')?.alternatives).toEqual([
+      { value: undefined, sources: [expect.objectContaining({ id: 1 })] },
+      { value: 8, sources: [expect.objectContaining({ id: 2 })] }
+    ])
+  })
+
+  test('keeps main’s own guardian link as the default whatever its state', () => {
+    const on = new Date(2026, 8, 18)
+    const deletedGuardian = member(8, { deleted: true })
+    const preview = buildMemberMergePreview(
+      [member(1, { guardianMemberId: 8 }), member(2)],
+      1,
+      [],
+      [member(1, { guardianMemberId: 8 }), member(2), deletedGuardian],
+      on
+    )
+    expect(preview.result.guardianMemberId).toBe(8)
+  })
+
+  test('presents a guardian link conflict as alternatives instead of dropping it', () => {
+    const sources = [
+      member(1),
+      member(2, { guardianMemberId: 8 }),
+      member(3, { guardianMemberId: 9 })
+    ]
+    const preview = buildMemberMergePreview(sources, 1)
+    expect(preview.result.guardianMemberId).toBeUndefined()
+    expect(preview.fields.find(({ field }) => field === 'guardianMemberId')?.alternatives).toEqual([
+      { value: undefined, sources: [expect.objectContaining({ id: 1 })] },
+      { value: 8, sources: [expect.objectContaining({ id: 2 })] },
+      { value: 9, sources: [expect.objectContaining({ id: 3 })] }
+    ])
   })
 
   test('treats optional whitespace as blank and keeps card metadata from main', () => {
@@ -340,6 +424,13 @@ describe('buildMergedMember', () => {
     expect(
       buildMergedMember(sources, request(sources, 1, { ...preview, firstName: 'Jon' })).aliases
     ).toEqual(['John Bowler'])
+  })
+
+  test('carries a chosen guardian link through to the merged member', () => {
+    const sources = [member(1, { guardianMemberId: 8 }), member(2, { guardianMemberId: 9 })]
+    const preview = buildMemberMergePreview(sources, 1)
+    const chosen = { ...preview.result, guardianMemberId: 9 }
+    expect(buildMergedMember(sources, request(sources, 1, chosen)).guardianMemberId).toBe(9)
   })
 
   test('restores source identifiers and aliases when a reviewed result omits them', () => {

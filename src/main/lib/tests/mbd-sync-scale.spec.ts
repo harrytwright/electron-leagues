@@ -127,7 +127,7 @@ async function syncFresh(source: SyntheticMbdExport, name: string): Promise<stri
   return path
 }
 
-describe('a synthetic MBD export', () => {
+describe('a synthetic MBD export', { timeout: 30_000 }, () => {
   const source = syntheticMbdExport({ seed: SEED, bowlers: BOWLERS, leagues: LEAGUES })
 
   test('is the same file for the same seed, and grows without changing what came before', () => {
@@ -288,7 +288,7 @@ describe('a synthetic MBD export', () => {
     expect(summary.matched).toBe(
       planned.plan.rows.filter(({ match }) => match.kind === 'known').length
     )
-    expect(summary.aliased).toBeGreaterThanOrEqual(respeltKnown.length)
+    expect(summary.aliased).toBe(respeltKnown.length)
     expect(summary.log.filter((entry) => entry.action === 'renamed')).toHaveLength(keepExport.size)
     expect(summary.failed).toEqual([])
 
@@ -303,21 +303,17 @@ describe('a synthetic MBD export', () => {
       return {
         line,
         name: holder?.firstName,
+        wanted: wanted?.firstName,
         keepsOtherSpelling: holder?.aliases.includes(
           `${otherSpelling?.firstName} ${otherSpelling?.lastName}`
-        ),
-        wanted: wanted?.firstName
+        )
       }
     })
-    expect(outcome).toEqual(
-      respeltKnown.map((line) => ({
-        line,
-        name: outcome.find((entry) => entry.line === line)?.wanted,
-        keepsOtherSpelling: true,
-        wanted: outcome.find((entry) => entry.line === line)?.wanted
-      }))
-    )
     expect(outcome.map((entry) => entry.wanted)).not.toContain(undefined)
+    for (const entry of outcome) {
+      expect(entry.name).toBe(entry.wanted)
+      expect(entry.keepsOtherSpelling).toBe(true)
+    }
   })
 
   test('fills one league of a season from the dump once the list is synced', async () => {

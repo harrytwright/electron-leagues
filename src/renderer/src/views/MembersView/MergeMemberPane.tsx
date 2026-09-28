@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Checkbox, Collapsible, Input, Select, Text, Textarea } from '@cloudflare/kumo'
 import { CheckIcon } from '@phosphor-icons/react/dist/csr/Check'
+import { z } from 'zod'
 import {
   buildMemberMergePreview,
   memberMergeResultSchema,
@@ -8,7 +9,8 @@ import {
   type MemberMergeFieldPreview,
   type MemberMergePreview,
   type MemberMergeResult,
-  type MemberMergeRosterAssignment
+  type MemberMergeRosterAssignment,
+  type MemberMergeSource
 } from '@shared/member-merge'
 import {
   applyAgeRules,
@@ -18,6 +20,7 @@ import {
   isSingles,
   isUnder18,
   memberDisplayName,
+  resolveMember,
   type Member,
   type MembersSnapshot,
   type RosterSeason
@@ -31,11 +34,14 @@ import { pathTail } from '@renderer/lib/path-basename'
 import { membersQueryKey } from '@renderer/queries/members'
 
 type Field = MemberMergeFieldPreview['field']
-type MergeValue = string | boolean | undefined
+/** Every field but the guardian link, which picks a member id rather than editing text. */
+type ScalarField = Exclude<Field, 'guardianMemberId'>
+type MergeValue = string | number | boolean | undefined
 type Choice =
   | { kind: 'default' }
   | { kind: 'source'; value: MergeValue }
   | { kind: 'manual'; value: string | boolean }
+type GuardianChoice = { kind: 'default' } | { kind: 'source'; value: number | undefined }
 
 type SaveState =
   | { kind: 'editing'; error: string | null }
@@ -68,6 +74,7 @@ const FIELD_LABELS: Record<Field, string> = {
   email: 'Email',
   phone: 'Phone',
   guardianContact: 'Parent or guardian contact',
+  guardianMemberId: 'Linked guardian',
   marketing: 'Marketing',
   cardIssued: 'Card issued',
   notes: 'Notes'
@@ -102,7 +109,8 @@ function displayValue(field: Field, value: MergeValue): string {
 }
 
 function textValue(value: MergeValue): string {
-  return value === true || value === false ? '' : (value ?? '')
+  if (value === true || value === false || value === undefined) return ''
+  return String(value)
 }
 
 function optionalText(value: MergeValue): string | undefined {
@@ -111,10 +119,10 @@ function optionalText(value: MergeValue): string | undefined {
 }
 
 function selectedValue(
-  field: Field,
+  field: ScalarField,
   preview: MemberMergePreview,
   choice: Choice | undefined
-): string | boolean | undefined {
+): MergeValue {
   const fallback = preview.result[field]
   if (!choice || choice.kind === 'default') return fallback
   if (choice.kind === 'manual') return choice.value
@@ -125,7 +133,7 @@ function selectedValue(
 }
 
 function sourceChoiceMissing(
-  field: Field,
+  field: ScalarField,
   preview: MemberMergePreview,
   choice: Choice | undefined
 ): boolean {
@@ -137,7 +145,8 @@ function sourceChoiceMissing(
 
 function resultFrom(
   preview: MemberMergePreview,
-  choices: Partial<Record<Field, Choice>>,
+  choices: Partial<Record<ScalarField, Choice>>,
+  guardianChoice: GuardianChoice,
   sources: readonly Member[]
 ): MemberMergeResult {
   const gender = optionalText(selectedValue('gender', preview, choices.gender))
@@ -152,11 +161,101 @@ function resultFrom(
     guardianContact: optionalText(
       selectedValue('guardianContact', preview, choices.guardianContact)
     ),
+    guardianMemberId: guardianEffectiveValue(preview, guardianChoice),
     marketing: Boolean(selectedValue('marketing', preview, choices.marketing)),
     cardIssued: optionalText(selectedValue('cardIssued', preview, choices.cardIssued)),
     notes: optionalText(selectedValue('notes', preview, choices.notes))
   }
   return withOriginalNames(result, sources)
+}
+
+/** True when two merge results would write the same record, field by field. */
+function sameMergeResult(a: MemberMergeResult, b: MemberMergeResult): boolean {
+  return (
+    a.firstName === b.firstName &&
+    a.lastName === b.lastName &&
+    a.dob === b.dob &&
+    a.gender === b.gender &&
+    a.email === b.email &&
+    a.phone === b.phone &&
+    a.guardianContact === b.guardianContact &&
+    a.guardianMemberId === b.guardianMemberId &&
+    a.marketing === b.marketing &&
+    a.cardIssued === b.cardIssued &&
+    a.notes === b.notes &&
+    a.mbdIds.length === b.mbdIds.length &&
+    a.mbdIds.every((value, index) => value === b.mbdIds[index]) &&
+    a.aliases.length === b.aliases.length &&
+    a.aliases.every((value, index) => value === b.aliases[index])
+  )
+}
+
+interface GuardianAlternative {
+  value: number | undefined
+  sources: MemberMergeSource[]
+}
+
+const guardianValueSchema = z.number().int().positive().optional()
+
+/**
+ * The guardian field's alternatives, parsed once at this boundary into their real shape
+ * (a member id or none) so nothing downstream needs to re-examine the shared, wider
+ * `string | number | boolean | undefined` type every other merge field's value can take.
+ */
+function guardianAlternatives(preview: MemberMergePreview): GuardianAlternative[] {
+  const field = preview.fields.find((candidate) => candidate.field === 'guardianMemberId')
+  return (field?.alternatives ?? []).map((alternative) => ({
+    value: guardianValueSchema.parse(alternative.value),
+    sources: alternative.sources
+  }))
+}
+
+/** The guardian result the merge would actually write: the chosen source, falling back to the
+ * default once the record it came from is no longer among the alternatives (deselected). */
+function guardianEffectiveValue(
+  preview: MemberMergePreview,
+  choice: GuardianChoice
+): number | undefined {
+  if (choice.kind !== 'source') return preview.result.guardianMemberId
+  const known = guardianAlternatives(preview).some(
+    (alternative) => alternative.value === choice.value
+  )
+  return known ? choice.value : preview.result.guardianMemberId
+}
+
+/** True once the chosen source record has dropped out of the merge, so the result has quietly
+ * fallen back to the default; mirrors `sourceChoiceMissing` for the scalar fields. */
+function guardianChoiceMissing(preview: MemberMergePreview, choice: GuardianChoice): boolean {
+  if (choice.kind !== 'source') return false
+  return !guardianAlternatives(preview).some((alternative) => alternative.value === choice.value)
+}
+
+/**
+ * The guardian picker's label for one alternative: the member's number and name, flagged when
+ * the merge would refuse it (deleted, under 18, a duplicated number) or the link has followed a
+ * merge to a survivor, or "None".
+ */
+function guardianAlternativeLabel(
+  value: number | undefined,
+  members: readonly Member[],
+  nextId: number
+): string {
+  if (value === undefined) return 'None'
+  const number = formatMemberNumber(value, nextId)
+  const holders = members.filter((candidate) => candidate.id === value)
+  if (holders.length > 1) return `Member ${number} (duplicated number)`
+  const guardian = holders[0]
+  if (!guardian) return `Member ${number} (no longer on the list)`
+  const name = `${number} ${memberDisplayName(guardian)}`
+  if (guardian.deleted) return `${name} (removed)`
+  if (guardian.mergedInto !== undefined) {
+    const survivor = resolveMember(members, guardian.id)
+    return survivor
+      ? `Member ${number} (merged into ${formatMemberNumber(survivor.id, nextId)} ${memberDisplayName(survivor)})`
+      : `Member ${number} (no longer on the list)`
+  }
+  if (isUnder18(guardian, new Date())) return `${name} (under 18)`
+  return name
 }
 
 function SourceAlternatives({
@@ -167,7 +266,7 @@ function SourceAlternatives({
   onChoose,
   onUseDefault
 }: {
-  field: Field
+  field: ScalarField
   preview: MemberMergePreview
   choice: Choice | undefined
   disabled: boolean
@@ -274,7 +373,7 @@ function MergeField({
   onChange,
   onUseDefault
 }: {
-  field: Exclude<Field, 'notes'>
+  field: Exclude<ScalarField, 'notes'>
   preview: MemberMergePreview
   choice: Choice | undefined
   disabled: boolean
@@ -333,6 +432,94 @@ function MergeField({
         onUseDefault={onUseDefault}
       />
       {control}
+    </section>
+  )
+}
+
+/** The guardian link's own field row: alternatives are member ids, not free text. */
+function GuardianField({
+  preview,
+  choice,
+  members,
+  nextId,
+  disabled,
+  onChoose,
+  onUseDefault
+}: {
+  preview: MemberMergePreview
+  choice: GuardianChoice
+  members: readonly Member[]
+  nextId: number
+  disabled: boolean
+  onChoose: (choice: GuardianChoice) => void
+  onUseDefault: () => void
+}): React.JSX.Element {
+  const alternatives = guardianAlternatives(preview)
+  const effective = guardianEffectiveValue(preview, choice)
+  const missing = guardianChoiceMissing(preview, choice)
+  return (
+    <section className="grid gap-2 border-t border-kumo-line pt-3 first:border-t-0 first:pt-0">
+      <Text as="h3" variant="heading">
+        {FIELD_LABELS.guardianMemberId}
+      </Text>
+      {missing ? (
+        <Text variant="secondary" size="sm" role="status">
+          The chosen source record was removed. The result now uses the default value.
+        </Text>
+      ) : null}
+      {choice.kind === 'source' ? (
+        <div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={disabled}
+            onClick={onUseDefault}
+          >
+            Use default
+          </Button>
+        </div>
+      ) : null}
+      {alternatives.length <= 1 ? (
+        <Text variant="secondary" size="sm">
+          All selected records: {guardianAlternativeLabel(alternatives[0]?.value, members, nextId)}
+        </Text>
+      ) : (
+        <div
+          className="grid gap-1.5"
+          role="group"
+          aria-label={`${FIELD_LABELS.guardianMemberId} source values`}
+        >
+          {alternatives.map((alternative, index) => {
+            const selected = effective === alternative.value && !missing
+            return (
+              <button
+                key={`${JSON.stringify(alternative.value)}-${index}`}
+                type="button"
+                disabled={disabled}
+                aria-pressed={selected}
+                className="flex items-start justify-between gap-3 rounded-md px-3 py-2 text-left ring ring-kumo-line hover:bg-kumo-tint disabled:opacity-60 aria-pressed:ring-kumo-brand"
+                onClick={() => onChoose({ kind: 'source', value: alternative.value })}
+              >
+                <span className="grid min-w-0 gap-0.5">
+                  <span className="font-medium">
+                    {guardianAlternativeLabel(alternative.value, members, nextId)}
+                  </span>
+                  <span className="text-sm text-kumo-subtle">
+                    {alternative.sources.map((source) => source.label).join(', ')}
+                  </span>
+                </span>
+                {selected ? (
+                  <span className="flex h-lh shrink-0 items-center text-kumo-brand">
+                    <CheckIcon aria-hidden size={14} weight="bold" />
+                    <span className="sr-only">Selected</span>
+                  </span>
+                ) : null}
+              </button>
+            )
+          })}
+        </div>
+      )}
     </section>
   )
 }
@@ -415,7 +602,8 @@ export function MergeMemberPane({
   onBackgroundError,
   onBackgroundSuccess
 }: Props): React.JSX.Element {
-  const [choices, setChoices] = useState<Partial<Record<Field, Choice>>>({})
+  const [choices, setChoices] = useState<Partial<Record<ScalarField, Choice>>>({})
+  const [guardianChoice, setGuardianChoice] = useState<GuardianChoice>({ kind: 'default' })
   const [saveState, setSaveState] = useState<SaveState>({ kind: 'editing', error: null })
   const [openingSelection] = useState(() => ({ selectedIds, mainId }))
   const active = useRef(true)
@@ -435,13 +623,20 @@ export function MergeMemberPane({
   )
   const stale = snapshot.revision !== openingSnapshot.revision
   const result = useMemo(
-    () => (preview ? resultFrom(preview, choices, sources) : null),
-    [choices, preview, sources]
+    () => (preview ? resultFrom(preview, choices, guardianChoice, sources) : null),
+    [choices, guardianChoice, preview, sources]
   )
   const reviewedResult = result ? applyAgeRules(result, new Date()) : null
   const parsed = reviewedResult ? memberMergeResultSchema.safeParse(reviewedResult) : null
   const junior = reviewedResult ? isUnder18(reviewedResult, new Date()) : false
   const linkedGuardian = result ? guardianOf(result, openingSnapshot.members) : null
+  const guardianField = preview?.fields.find((candidate) => candidate.field === 'guardianMemberId')
+  const guardianSourceLabel = guardianField?.alternatives
+    .find((alternative) => alternative.value === result?.guardianMemberId)
+    ?.sources.map((source) => source.label)
+    .join(', ')
+  const guardianLinked =
+    guardianField?.alternatives.some((alternative) => alternative.value !== undefined) ?? false
   const guardianRecorded =
     preview?.fields
       .find((candidate) => candidate.field === 'guardianContact')
@@ -466,13 +661,15 @@ export function MergeMemberPane({
     return () => onBusyChange(false)
   }, [onBusyChange, operation.pending])
 
-  // A stale merge can only be cancelled, so leaving it needs no confirmation.
+  // A stale merge can only be cancelled, so leaving it needs no confirmation. A choice that
+  // lands back on the default result (the same value picked, or typed back to it) is not a
+  // change either, so the result itself is compared rather than whether any choice was made.
   const dirty =
     saveState.kind !== 'written' &&
     !stale &&
-    (Object.keys(choices).length > 0 ||
-      mainId !== openingSelection.mainId ||
-      !sameSelection(selectedIds, openingSelection.selectedIds))
+    (mainId !== openingSelection.mainId ||
+      !sameSelection(selectedIds, openingSelection.selectedIds) ||
+      (preview !== null && result !== null && !sameMergeResult(result, preview.result)))
   useEffect(() => {
     onDirtyChange(dirty)
     return () => onDirtyChange(false)
@@ -484,19 +681,31 @@ export function MergeMemberPane({
     alertRef.current?.focus()
   }, [saveState])
 
-  const change = (field: Field, choice: Choice): void => {
+  const change = (field: ScalarField, choice: Choice): void => {
     if (frozen) return
     setChoices((current) => ({ ...current, [field]: choice }))
     setSaveState({ kind: 'editing', error: null })
   }
 
-  const resetField = (field: Field): void => {
+  const resetField = (field: ScalarField): void => {
     if (frozen) return
     setChoices((current) => {
       const next = { ...current }
       delete next[field]
       return next
     })
+    setSaveState({ kind: 'editing', error: null })
+  }
+
+  const changeGuardian = (choice: GuardianChoice): void => {
+    if (frozen) return
+    setGuardianChoice(choice)
+    setSaveState({ kind: 'editing', error: null })
+  }
+
+  const resetGuardian = (): void => {
+    if (frozen) return
+    setGuardianChoice({ kind: 'default' })
     setSaveState({ kind: 'editing', error: null })
   }
 
@@ -762,12 +971,25 @@ export function MergeMemberPane({
                     />
                   </>
                 )}
-                {linkedGuardian ? (
-                  <Text variant="secondary" size="sm">
-                    Linked guardian: {memberDisplayName(linkedGuardian)} (
-                    {formatMemberNumber(linkedGuardian.id, openingSnapshot.nextId)}), kept from the
-                    main record.
-                  </Text>
+                {junior || guardianLinked ? (
+                  <>
+                    <GuardianField
+                      preview={preview}
+                      choice={guardianChoice}
+                      members={openingSnapshot.members}
+                      nextId={openingSnapshot.nextId}
+                      disabled={disabled}
+                      onChoose={changeGuardian}
+                      onUseDefault={resetGuardian}
+                    />
+                    {linkedGuardian ? (
+                      <Text variant="secondary" size="sm">
+                        Linked guardian: {memberDisplayName(linkedGuardian)} (
+                        {formatMemberNumber(linkedGuardian.id, openingSnapshot.nextId)}), from{' '}
+                        {guardianSourceLabel ?? 'the merged records'}.
+                      </Text>
+                    ) : null}
+                  </>
                 ) : null}
                 {junior || guardianRecorded ? (
                   <>

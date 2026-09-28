@@ -5,6 +5,7 @@ import {
   disabledMembersSnapshot,
   emptyMembersFile,
   findRosterProblems,
+  isUnder18,
   MEMBERS_FILE,
   membersFileSchema,
   mintNumber,
@@ -188,6 +189,36 @@ function liveMember(file: MembersFile, id: number): Member {
   return member
 }
 
+/**
+ * A junior's guardian link may only point at another live, adult, unambiguous member: not
+ * missing, not deleted or merged away, not under 18 today, not one of `selfIds` (the record
+ * being saved, or every source of a merge, since after that merge any of them is the record
+ * itself) and not a number shared by more than one entry, which would bind to whichever of
+ * them happens to be found first. Returns the id to store, following merges.
+ */
+export function assertGuardianLink(
+  members: readonly Member[],
+  guardianId: number,
+  selfIds: readonly number[],
+  today: Date
+): number {
+  const guardian = resolveMember(members, guardianId)
+  if (!guardian || guardian.deleted || selfIds.includes(guardian.id)) {
+    throw new UserFacingError('The linked guardian must be another member on the list')
+  }
+  // Resolved first, so an old number merged into a duplicated survivor is still caught: the
+  // count is taken on the resolved id, which is the one that would actually be stored.
+  if (members.filter((member) => member.id === guardian.id).length > 1) {
+    throw new UserFacingError(
+      `Member number ${guardian.id} is duplicated and must be resolved before it can be linked as a guardian`
+    )
+  }
+  if (isUnder18(guardian, today)) {
+    throw new UserFacingError('The linked guardian must be an adult')
+  }
+  return guardian.id
+}
+
 /** Create a member, minting the next number, or update one that already exists. */
 export async function saveMember(
   root: string,
@@ -199,11 +230,20 @@ export async function saveMember(
     const file = await readMasterForWrite(root, expected)
     const { id, ...details } = input
     if (details.guardianMemberId !== undefined) {
-      const guardian = resolveMember(file.members, details.guardianMemberId)
-      if (!guardian || guardian.deleted || guardian.id === id) {
-        throw new UserFacingError('The linked guardian must be another member on the list')
+      // An unchanged link is left exactly as stored: re-validating it would lock out a
+      // junior whose linked guardian was soft-deleted, which `deleteMember` does on purpose.
+      const storedLink =
+        id === undefined
+          ? undefined
+          : file.members.find((candidate) => candidate.id === id)?.guardianMemberId
+      if (storedLink !== details.guardianMemberId) {
+        details.guardianMemberId = assertGuardianLink(
+          file.members,
+          details.guardianMemberId,
+          id === undefined ? [] : [id],
+          today
+        )
       }
-      details.guardianMemberId = guardian.id
     }
     const ruled = applyAgeRules(details, today)
     let saved: Member
@@ -229,8 +269,10 @@ export async function saveMember(
       }
       file.members[file.members.indexOf(existing)] = saved
     }
-    await writeMaster(root, file)
+    // Touched before the master is written, so a crash in between still leaves the roster
+    // marked stale rather than quietly caching a sheet that shows the old name.
     if (renamed) await touchLiveRostersWith(root, saved.id)
+    await writeMaster(root, file)
     return saved
   })
 }
@@ -274,16 +316,24 @@ export type DeleteOutcome = 'hard' | 'soft'
 export async function deleteMember(
   root: string,
   id: number,
-  expected: FileRevision
+  expected: FileRevision,
+  today = new Date()
 ): Promise<DeleteOutcome> {
   return withRootLock(root, async () => {
     const file = await readMasterForWrite(root, expected)
     const member = liveMember(file, id)
-    // A record merged into this one still resolves here from old rosters, and a junior
-    // whose guardian this is still needs the contact, so both count too.
-    let referenced = file.members.some(
-      (candidate) => candidate.mergedInto === id || candidate.guardianMemberId === id
-    )
+    // A record merged into this one still resolves here from old rosters, and a live junior
+    // still under 18 today whose guardian this is still needs the contact, so both count too.
+    // A merged or deleted record, or one with no date of birth or who is now an adult, no
+    // longer holds this guardian, so it does not count either way: the guardian can be
+    // removed and that link left dangling. The picker, `needsDetails`, the CSV export and an
+    // unchanged save all tolerate a link that no longer resolves to anyone.
+    let referenced = file.members.some((candidate) => {
+      if (candidate.mergedInto === id) return true
+      if (candidate.guardianMemberId !== id) return false
+      if (candidate.deleted || candidate.mergedInto !== undefined) return false
+      return isUnder18(candidate, today)
+    })
     for (const location of seasonLocations(root, await scanLeaguesRoot(root))) {
       if (referenced) break
       const season = await readSeasonFile(location.path)

@@ -30,6 +30,8 @@ export interface MembersCsvOptions {
   today: Date
   /** Every member on file, so a linked guardian's contact can be looked up; defaults to the rows. */
   members?: readonly Member[]
+  /** A marketing-only export only uses a linked guardian's contact when they have opted in. */
+  marketingOnly?: boolean
 }
 
 /**
@@ -50,7 +52,11 @@ export function membersCsv(members: readonly Member[], options: MembersCsvOption
       member.gender ?? '',
       junior ? '' : (member.email ?? ''),
       junior ? '' : (member.phone ?? ''),
-      junior ? (guardianContactText(member, options.members ?? members) ?? '') : '',
+      junior
+        ? (guardianContactText(member, options.members ?? members, {
+            marketingOnly: options.marketingOnly
+          }) ?? '')
+        : '',
       member.mbdIds.join('; '),
       member.aliases.join('; '),
       member.marketing ? 'yes' : 'no',

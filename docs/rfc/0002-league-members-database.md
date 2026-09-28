@@ -396,8 +396,9 @@ not, so one bad row never discards a batch. The snapshot is small (hundreds of m
 seasons) so one object over IPC replaces queries; the renderer groups and filters in memory,
 which is why the CSV export takes the ids in table order rather than a filter. Analytics:
 `members_enabled`, `member_created`, `members_merged`, `member_deleted`, `members_renumbered`,
-`season_roster_saved`, `mbd_synced { rows, created, merged }`, `players_imported { rows, added }`,
-`signin_generated`, `signin_opened`, `cards_printed { count }`, `members_exported { count }`.
+`rosters_repaired { count }`, `season_roster_saved`, `mbd_synced { rows, created, merged }`,
+`players_imported { rows, added }`, `signin_generated`, `signin_opened`,
+`cards_printed { count }`, `members_exported { count }`.
 
 ### Phased delivery
 
@@ -422,13 +423,19 @@ which is why the CSV export takes the ids in table order rather than a filter. A
    `mergeMemberGroup` call that prepares every roster and the master list first and restores
    the files it touched if a write fails. The master list is written first, so a merge that
    stops part way still reads correctly and shows as an `absorbed-number` problem that
-   `repairRosters` clears. The pair `mergeMembers` channel, which had no rollback, went with the
-   dialog that called it. A junior's guardian can be a linked member (`guardianMemberId`) as
-   well as, or instead of, free text: the profile, the CSV export and the needs-details check
-   read the linked record's own contact, a linked guardian is soft-deleted rather than removed
-   and `saveMember` refuses a link to anyone but another live member. A junior's profile offers
-   _Add guardian as a member…_, which seeds a new adult record from the contact text and links
-   it on save; a guardian is never created without the desk asking for it.
+   `repairRosters` clears; the repair keeps a target's own current number when it is on the
+   roster, otherwise its earliest entry, which need not be the entry a stopped merge's preview
+   had named, since the repair has no record of the selection order that merge used. The pair
+   `mergeMembers` channel, which had no rollback, went with the dialog that called it. A
+   junior's guardian can be a linked member (`guardianMemberId`) as well as, or instead of,
+   free text: the profile and the CSV export read the linked record's
+   own contact when it is live, the needs-details check only counts that link once it resolves
+   to a live adult with an email or phone, a linked guardian is soft-deleted rather than removed
+   and `saveMember` refuses a changed link to anyone but another live adult whose number is not
+   itself duplicated, while an unchanged link is left alone even once its guardian has been
+   soft-deleted. A junior's profile offers _Add guardian as a member…_, which seeds a new adult
+   record from the contact text and links it on save; a guardian is never created without the
+   desk asking for it.
 3. **Sign-in sheet.** HTML layout, `printToPDF`, virtual row, regenerate-on-save and stale-on-
    open, `Superseded` badge on the docx. Tests: generated text contains teams in `teamNo`
    order and the Subs block; archive never generates. As built, the sheet is stamped with the

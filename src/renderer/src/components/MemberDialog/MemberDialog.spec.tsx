@@ -112,6 +112,176 @@ it('links a junior to another member as their guardian', async () => {
   )
 })
 
+it('shows a stale guardian link and keeps its id when reselected', async () => {
+  const api = installMockApi()
+  const dob = `${new Date().getFullYear() - 10}-01-01`
+  const guardian = makeMember({ id: 1, firstName: 'Ann', lastName: 'Lee', deleted: true })
+  const junior = makeMember({
+    id: 2,
+    firstName: 'Kid',
+    lastName: 'Lee',
+    dob,
+    email: undefined,
+    guardianMemberId: 1
+  })
+  renderDialog({
+    member: junior,
+    snapshot: makeSnapshot({ revision: 'rev-7', nextId: 3, members: [guardian, junior] })
+  })
+  const user = userEvent.setup()
+
+  const picker = screen.getByRole('combobox', { name: 'Linked guardian' })
+  expect(picker).toHaveValue('000001 Ann Lee (removed)')
+  await user.click(picker)
+  await user.click(await screen.findByRole('option', { name: '000001 Ann Lee (removed)' }))
+  expect(picker).toHaveValue('000001 Ann Lee (removed)')
+
+  await user.click(screen.getByRole('button', { name: 'Save member' }))
+  await waitFor(() => expect(api.saveMember).toHaveBeenCalledOnce())
+  expect(api.saveMember).toHaveBeenCalledWith(
+    expect.objectContaining({ guardianMemberId: 1 }),
+    'rev-7'
+  )
+})
+
+it('shows a guardian link whose record is gone entirely, with a way to clear it', async () => {
+  const api = installMockApi()
+  const dob = `${new Date().getFullYear() - 10}-01-01`
+  const junior = makeMember({
+    id: 2,
+    firstName: 'Kid',
+    lastName: 'Lee',
+    dob,
+    email: undefined,
+    guardianMemberId: 9
+  })
+  renderDialog({
+    member: junior,
+    snapshot: makeSnapshot({ revision: 'rev-7', nextId: 3, members: [junior] })
+  })
+  const user = userEvent.setup()
+
+  expect(screen.getByText('Member 000009 (no longer on the list)')).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Remove the linked guardian' }))
+  await user.click(screen.getByRole('button', { name: 'Save member' }))
+
+  await waitFor(() => expect(api.saveMember).toHaveBeenCalledOnce())
+  expect(vi.mocked(api.saveMember).mock.calls[0][0]).not.toHaveProperty('guardianMemberId')
+})
+
+it('shows a live adult guardian link as a read-only row, never a picker', async () => {
+  const api = installMockApi()
+  const guardian = makeMember({ id: 1, firstName: 'Ann', lastName: 'Lee' })
+  const agedOut = makeMember({
+    id: 2,
+    firstName: 'Grown',
+    lastName: 'Up',
+    dob: '1990-01-01',
+    guardianMemberId: 1
+  })
+  renderDialog({
+    member: agedOut,
+    snapshot: makeSnapshot({ revision: 'rev-7', nextId: 3, members: [guardian, agedOut] })
+  })
+  const user = userEvent.setup()
+
+  expect(screen.queryByRole('combobox', { name: 'Linked guardian' })).not.toBeInTheDocument()
+  expect(screen.getByText('000001 Ann Lee')).toBeInTheDocument()
+  expect(screen.getByLabelText(/email/i)).toBeInTheDocument()
+  await user.click(screen.getByRole('button', { name: 'Remove the linked guardian' }))
+  await user.click(screen.getByRole('button', { name: 'Save member' }))
+
+  await waitFor(() => expect(api.saveMember).toHaveBeenCalledOnce())
+  expect(vi.mocked(api.saveMember).mock.calls[0][0]).not.toHaveProperty('guardianMemberId')
+})
+
+it('keeps a stale guardian link selectable after a junior is given a different one', async () => {
+  const goneGuardian = makeMember({ id: 1, firstName: 'Ann', lastName: 'Lee', deleted: true })
+  const otherGuardian = makeMember({ id: 3, firstName: 'Meg', lastName: 'Lee' })
+  const dob = `${new Date().getFullYear() - 10}-01-01`
+  const junior = makeMember({
+    id: 2,
+    firstName: 'Kid',
+    lastName: 'Lee',
+    dob,
+    email: undefined,
+    guardianMemberId: 1
+  })
+  installMockApi()
+  renderDialog({
+    member: junior,
+    snapshot: makeSnapshot({
+      revision: 'rev-7',
+      nextId: 4,
+      members: [goneGuardian, otherGuardian, junior]
+    })
+  })
+  const user = userEvent.setup()
+
+  const picker = screen.getByRole('combobox', { name: 'Linked guardian' })
+  expect(picker).toHaveValue('000001 Ann Lee (removed)')
+  await user.click(picker)
+  await user.click(await screen.findByRole('option', { name: '000003 Meg Lee' }))
+  expect(picker).toHaveValue('000003 Meg Lee')
+
+  // The stale option follows the record's own stored link, not whatever is picked next,
+  // so the desk can still get back to it without cancelling the whole form.
+  await user.click(picker)
+  expect(
+    await screen.findByRole('option', { name: '000001 Ann Lee (removed)' })
+  ).toBeInTheDocument()
+})
+
+it('labels a link to a merged-away number by its survivor, not as removed', () => {
+  installMockApi()
+  const dob = `${new Date().getFullYear() - 10}-01-01`
+  const old = makeMember({ id: 1, firstName: 'Old', lastName: 'Gran', mergedInto: 5 })
+  const survivor = makeMember({ id: 5, firstName: 'Gran', lastName: 'Lee' })
+  const junior = makeMember({
+    id: 2,
+    firstName: 'Kid',
+    lastName: 'Lee',
+    dob,
+    email: undefined,
+    guardianMemberId: 1
+  })
+  renderDialog({
+    member: junior,
+    snapshot: makeSnapshot({ revision: 'rev-7', nextId: 6, members: [old, survivor, junior] })
+  })
+
+  expect(screen.getByRole('combobox', { name: 'Linked guardian' })).toHaveValue(
+    '000001 Old Gran (merged into 000005 Gran Lee)'
+  )
+})
+
+it('excludes juniors and duplicated numbers from the guardian picker', async () => {
+  installMockApi()
+  const dob = `${new Date().getFullYear() - 10}-01-01`
+  renderDialog({
+    snapshot: makeSnapshot({
+      revision: 'rev-7',
+      nextId: 6,
+      members: [
+        makeMember({ id: 1, firstName: 'Ann', lastName: 'Lee' }),
+        makeMember({ id: 2, firstName: 'Young', lastName: 'Kid', dob }),
+        makeMember({ id: 3, firstName: 'Dup', lastName: 'One' }),
+        makeMember({ id: 3, firstName: 'Dup', lastName: 'Two' })
+      ]
+    })
+  })
+  const user = userEvent.setup()
+
+  await user.type(screen.getByLabelText(/first name/i), 'New')
+  await user.type(screen.getByLabelText(/last name/i), 'Junior')
+  await user.type(screen.getByLabelText('Date of birth'), dob)
+  await user.click(screen.getByRole('combobox', { name: 'Linked guardian' }))
+
+  expect(await screen.findByRole('option', { name: '000001 Ann Lee' })).toBeInTheDocument()
+  expect(screen.queryByRole('option', { name: /Young Kid/ })).not.toBeInTheDocument()
+  expect(screen.queryByRole('option', { name: /Dup/ })).not.toBeInTheDocument()
+})
+
 it('edits an existing member from their current details and keeps their number', async () => {
   const api = installMockApi()
   const member = makeMember({

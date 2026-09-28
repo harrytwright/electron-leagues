@@ -4,7 +4,7 @@ import { CaretRightIcon, DotsThreeIcon, UserCircleIcon } from '@phosphor-icons/r
 import { CheckCircleIcon } from '@phosphor-icons/react/dist/csr/CheckCircle'
 import { MinusCircleIcon } from '@phosphor-icons/react/dist/csr/MinusCircle'
 import { WarningCircleIcon } from '@phosphor-icons/react/dist/csr/WarningCircle'
-import type { Member, Membership, MembersSnapshot } from '@shared/members'
+import type { Member, MemberInput, Membership, MembersSnapshot } from '@shared/members'
 import type { LeaguesTree } from '@shared/tree'
 import {
   deriveMemberships,
@@ -15,7 +15,7 @@ import {
   needsDetails
 } from '@shared/members'
 import { useQueryClient } from '@tanstack/react-query'
-import { memberDraftFrom, memberInputFromDraft } from '@renderer/components/MemberForm'
+import { useQueryRefresh } from '@renderer/hooks/use-query-refresh'
 import { useWriteOperation } from '@renderer/hooks/use-write-operation'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
 import { membersQueryKey } from '@renderer/queries/members'
@@ -221,6 +221,7 @@ function MemberProfile({
   const memberStatus = status(row)
   const hasDuplicateNumber = duplicatedIds.has(member.id)
   const guardian = guardianOf(member, members)
+  const guardianRemoved = guardian?.deleted ?? false
   const junior = member.dob !== undefined && isUnder18(member, new Date())
   const canAddGuardian =
     junior && !guardian && Boolean(member.guardianContact) && !member.deleted && !hasDuplicateNumber
@@ -315,14 +316,17 @@ function MemberProfile({
                 <span className="grid gap-0.5">
                   <button
                     type="button"
-                    className="text-left font-medium underline-offset-2 hover:underline"
+                    className="text-left font-medium underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-kumo-focus"
                     onClick={() => onOpenMember(guardian)}
                   >
                     {memberDisplayName(guardian)}
+                    {guardianRemoved ? ' (removed)' : ''}
                   </button>
                   <span className="text-kumo-subtle">
-                    {[guardian.email, guardian.phone].filter(Boolean).join(', ') ||
-                      'No contact on their record'}
+                    {guardianRemoved
+                      ? 'No longer on the list'
+                      : [guardian.email, guardian.phone].filter(Boolean).join(', ') ||
+                        'No contact on their record'}
                   </span>
                 </span>
               }
@@ -384,6 +388,8 @@ interface Props {
   onAction: (kind: ProfileAction, member: Member) => void
   onKeepNumber: (member: Member) => void
   onPaneBusyChange: (busy: boolean) => void
+  /** The guardian link write has its own hold, separate from a form or merge's own. */
+  onLinkBusyChange: (busy: boolean) => void
   onPaneDirtyChange: (dirty: boolean) => void
   /** Runs `proceed` at once, or after the desk agrees to discard an unsaved pane. */
   onLeavePane: (proceed: () => void) => void
@@ -578,6 +584,7 @@ export function MembersWorkspace({
   onPaneActionChange,
   onPaneActionUpdate,
   onPaneBusyChange,
+  onLinkBusyChange,
   onPaneDirtyChange,
   onLeavePane,
   onBackgroundError,
@@ -594,33 +601,52 @@ export function MembersWorkspace({
   // The link write starts after a save's own refresh, so it reads the list as the cache holds
   // it then rather than as this render saw it.
   const queryClient = useQueryClient()
+  const coordinator = useQueryRefresh()
   const cachedSnapshot = (): MembersSnapshot =>
     queryClient.getQueryData<MembersSnapshot | null>(membersQueryKey(tree.root)) ?? snapshot
   const link = useWriteOperation({
     label: () => 'Linking the guardian',
-    write: (input: ReturnType<typeof memberInputFromDraft>) =>
-      window.api.saveMember(input, cachedSnapshot().revision),
+    write: (input: MemberInput) => window.api.saveMember(input, cachedSnapshot().revision),
     refreshQueryKey: membersQueryKey
   })
   const linkGuardian = async (junior: Member, guardian: Member): Promise<void> => {
-    const current =
-      cachedSnapshot().members.find(
-        (candidate) => candidate.id === junior.id && candidate.mergedInto === undefined
-      ) ?? junior
-    const input = memberInputFromDraft(memberDraftFrom(current), current)
-    input.guardianMemberId = guardian.id
+    // Held from before the pre-flight refresh, not just the write that follows it, so a
+    // save landing in an editor opened in the meantime never has its own hold cleared by
+    // this one settling first.
+    onLinkBusyChange(true)
     try {
-      const outcome = await link.run(input)
-      setSelectedIdentity(memberIdentity(outcome.result, false))
-      if (outcome.status === 'refresh-failed') {
+      // The guardian's own save usually refreshes the cache before this runs; but if that
+      // refresh failed and the desk closed the editor anyway, the cache still lacks the new
+      // guardian and its revision is stale. Refreshing again first means the revision read
+      // below is current, rather than one main refuses as out of date.
+      if (!cachedSnapshot().members.some((candidate) => candidate.id === guardian.id)) {
+        await coordinator.refresh({ queryKey: membersQueryKey(tree.root) })
+      }
+      const current =
+        cachedSnapshot().members.find(
+          (candidate) => candidate.id === junior.id && candidate.mergedInto === undefined
+        ) ?? junior
+      // The junior no longer needs the free text the new guardian was seeded from: it is
+      // already copied into the guardian's own notes, and keeping it here would repeat
+      // their contact details in the plain CSV export regardless of the guardian's own
+      // marketing choice.
+      const input: MemberInput = { ...current, guardianMemberId: guardian.id }
+      delete input.guardianContact
+      try {
+        const outcome = await link.run(input)
+        setSelectedIdentity(memberIdentity(outcome.result, false))
+        if (outcome.status === 'refresh-failed') {
+          onBackgroundError(
+            `Linked ${memberDisplayName(guardian)} as ${memberDisplayName(junior)}’s guardian, but the members list could not be refreshed: ${outcome.refreshError}`
+          )
+        }
+      } catch (caught) {
         onBackgroundError(
-          `Linked ${memberDisplayName(guardian)} as ${memberDisplayName(junior)}’s guardian, but the members list could not be refreshed: ${outcome.refreshError}`
+          `Added ${memberDisplayName(guardian)}, but could not link them as ${memberDisplayName(junior)}’s guardian: ${ipcErrorMessage(caught)}`
         )
       }
-    } catch (caught) {
-      onBackgroundError(
-        `Added ${memberDisplayName(guardian)}, but could not link them as ${memberDisplayName(junior)}’s guardian: ${ipcErrorMessage(caught)}`
-      )
+    } finally {
+      onLinkBusyChange(false)
     }
   }
   const membershipsById = useMemo(() => {
@@ -652,9 +678,9 @@ export function MembersWorkspace({
       memberships: (membershipsById.get(member.id) ?? []).filter(
         (membership) => !membership.archived
       ),
-      needsDetails: needsDetails(member, new Date())
+      needsDetails: needsDetails(member, new Date(), snapshot.members)
     }
-  }, [membershipsById, savedProfile, snapshot.nextId, snapshot.revision])
+  }, [membershipsById, savedProfile, snapshot.members, snapshot.nextId, snapshot.revision])
   const selected = useMemo(() => {
     if (!selectedIdentity) return null
     if (savedRow && savedRow.member.id === selectedIdentity.id) return savedRow

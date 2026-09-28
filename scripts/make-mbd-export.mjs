@@ -5,16 +5,26 @@
 import { writeFileSync } from 'node:fs'
 import { mbdExportWorkbook, syntheticMbdExport } from '../src/main/lib/tests/fixtures/mbd-export.ts'
 
-const [out, bowlers = '500', seed = '1', leagues = '6'] = process.argv.slice(2)
+const USAGE = 'usage: npm run make:mbd-export -- <out.xlsx> [bowlers] [seed] [leagues]'
+
+function positiveInteger(name, value) {
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    console.error(`${USAGE}\n${name} must be a positive integer, got "${value}"`)
+    process.exit(1)
+  }
+  return parsed
+}
+
+const [out, bowlersArg = '500', seedArg = '1', leaguesArg = '6'] = process.argv.slice(2)
 if (!out) {
-  console.error('usage: npm run make:mbd-export -- <out.xlsx> [bowlers] [seed] [leagues]')
+  console.error(USAGE)
   process.exit(1)
 }
-const source = syntheticMbdExport({
-  seed: Number(seed),
-  bowlers: Number(bowlers),
-  leagues: Number(leagues)
-})
+const bowlers = positiveInteger('bowlers', bowlersArg)
+const seed = positiveInteger('seed', seedArg)
+const leagues = positiveInteger('leagues', leaguesArg)
+const source = syntheticMbdExport({ seed, bowlers, leagues })
 writeFileSync(out, mbdExportWorkbook(source))
 const { placeholders, respelt, doubled, repeated } = source.quirks
 console.log(

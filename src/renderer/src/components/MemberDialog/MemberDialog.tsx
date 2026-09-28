@@ -112,7 +112,12 @@ export function MemberDialog({
         <MemberForm
           ref={firstNameRef}
           draft={draft}
-          guardians={guardianCandidates(snapshot.members, member?.id)}
+          guardians={guardianCandidates(
+            snapshot.members,
+            member?.id,
+            new Date(),
+            member?.guardianMemberId ?? null
+          )}
           nextId={snapshot.nextId}
           errorId={errorId}
           invalidNames={invalidNames ?? undefined}

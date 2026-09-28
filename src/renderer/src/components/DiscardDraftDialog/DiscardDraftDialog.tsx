@@ -40,9 +40,11 @@ export function DiscardDraftDialog({
   onOpenChange,
   onDiscard
 }: Props): React.JSX.Element {
-  // The wording is kept through the closing fade, when the pane it named has already gone.
+  // The wording is kept through the closing fade, when the pane it named has already gone;
+  // it only follows `subject` while the dialog is open, never mid-fade to whatever pane
+  // Discard opened next.
   const [shown, setShown] = useState(subject)
-  if (subject && !sameSubject(subject, shown)) setShown(subject)
+  if (open && subject && !sameSubject(subject, shown)) setShown(subject)
   const { title, description } = wording(shown)
 
   return (

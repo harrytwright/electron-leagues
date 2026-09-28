@@ -304,6 +304,119 @@ describe('saveMember', () => {
     expect(unlinked.guardianMemberId).toBeUndefined()
   })
 
+  test('keeps an unchanged guardian link after the guardian is soft-deleted, but refuses a new one', async () => {
+    await enableMembers(root)
+    let snapshot = await snapshotOf()
+    const guardian = await saveMember(root, input({ firstName: 'Guardian' }), snapshot.revision)
+    snapshot = await snapshotOf()
+    const otherGuardian = await saveMember(
+      root,
+      input({ firstName: 'Other Guardian' }),
+      snapshot.revision
+    )
+    snapshot = await snapshotOf()
+    const junior = await saveMember(
+      root,
+      input({ firstName: 'Kid', dob: '2015-01-01', guardianMemberId: guardian.id }),
+      snapshot.revision
+    )
+    snapshot = await snapshotOf()
+    // A second junior keeps the other guardian referenced, so both end up soft-deleted.
+    await saveMember(
+      root,
+      input({ firstName: 'Other Kid', dob: '2015-01-01', guardianMemberId: otherGuardian.id }),
+      snapshot.revision
+    )
+
+    snapshot = await snapshotOf()
+    expect(await deleteMember(root, guardian.id, snapshot.revision)).toBe('soft')
+    snapshot = await snapshotOf()
+    expect(await deleteMember(root, otherGuardian.id, snapshot.revision)).toBe('soft')
+
+    // The link did not change, so the resave goes through despite the guardian being deleted.
+    snapshot = await snapshotOf()
+    const resaved = await saveMember(
+      root,
+      {
+        ...input({ dob: '2015-01-01', guardianMemberId: guardian.id }),
+        id: junior.id,
+        firstName: 'Kid Renamed'
+      },
+      snapshot.revision
+    )
+    expect(resaved).toMatchObject({ firstName: 'Kid Renamed', guardianMemberId: guardian.id })
+
+    // A new link to a (different) deleted member is still refused.
+    snapshot = await snapshotOf()
+    await expect(
+      saveMember(
+        root,
+        { ...input({ dob: '2015-01-01', guardianMemberId: otherGuardian.id }), id: junior.id },
+        snapshot.revision
+      )
+    ).rejects.toThrow('The linked guardian must be another member on the list')
+  })
+
+  test('refuses a guardian who is under 18 today', async () => {
+    await enableMembers(root)
+    const snapshot = await snapshotOf()
+    const juniorGuardian = await saveMember(
+      root,
+      input({ firstName: 'Junior Guardian', dob: '2015-01-01' }),
+      snapshot.revision
+    )
+    const next = await snapshotOf()
+    await expect(
+      saveMember(
+        root,
+        input({ firstName: 'Kid', dob: '2015-01-01', guardianMemberId: juniorGuardian.id }),
+        next.revision
+      )
+    ).rejects.toThrow('The linked guardian must be an adult')
+  })
+
+  test('refuses a guardian whose member number is duplicated', async () => {
+    await enableMembers(root)
+    const snapshot = await snapshotOf()
+    const adult = await saveMember(root, input({ firstName: 'Adult' }), snapshot.revision)
+    const master = JSON.parse(await readFile(join(root, 'members.json'), 'utf8'))
+    master.members.push({ ...master.members[0], firstName: 'Second holder' })
+    await writeFile(join(root, 'members.json'), JSON.stringify(master))
+    const next = await snapshotOf()
+    await expect(
+      saveMember(
+        root,
+        input({ firstName: 'Kid', dob: '2015-01-01', guardianMemberId: adult.id }),
+        next.revision
+      )
+    ).rejects.toThrow('duplicated')
+  })
+
+  test('refuses a guardian link to an old number merged into a now-duplicated survivor', async () => {
+    await enableMembers(root)
+    let snapshot = await snapshotOf()
+    const survivor = await saveMember(root, input({ firstName: 'Main adult' }), snapshot.revision)
+    snapshot = await snapshotOf()
+    const oldAdult = await saveMember(root, input({ firstName: 'Old adult' }), snapshot.revision)
+    await mergeInto(survivor.id, oldAdult.id)
+    const master = JSON.parse(await readFile(join(root, 'members.json'), 'utf8'))
+    const survivorRecord = master.members.find(
+      (candidate: { id: number }) => candidate.id === survivor.id
+    )
+    master.members.push({ ...survivorRecord, firstName: 'Second holder' })
+    await writeFile(join(root, 'members.json'), JSON.stringify(master))
+    const next = await snapshotOf()
+
+    // `oldAdult.id` resolves through the merge to `survivor.id`, which is now duplicated.
+    await expect(
+      saveMember(
+        root,
+        input({ firstName: 'Kid', dob: '2015-01-01', guardianMemberId: oldAdult.id }),
+        next.revision
+      )
+    ).rejects.toThrow('duplicated')
+  })
+
   test('refuses to edit a merged, deleted or unknown member', async () => {
     await enableMembers(root)
     let snapshot = await snapshotOf()
@@ -398,6 +511,78 @@ describe('deleteMember', () => {
       expect.objectContaining({ id: 1, deleted: true }),
       expect.objectContaining({ id: 2, guardianMemberId: 1 })
     ])
+  })
+
+  test('a guardian linked only from an adult record is hard-deleted', async () => {
+    await enableMembers(root)
+    let snapshot = await snapshotOf()
+    const guardian = await saveMember(root, input({ firstName: 'Guardian' }), snapshot.revision)
+    snapshot = await snapshotOf()
+    // An adult holding an old guardian link no longer needs it; it should not keep the
+    // linked record around.
+    await saveMember(
+      root,
+      input({ firstName: 'Grown Up', dob: '1990-01-01', guardianMemberId: guardian.id }),
+      snapshot.revision
+    )
+    snapshot = await snapshotOf()
+    expect(await deleteMember(root, guardian.id, snapshot.revision)).toBe('hard')
+  })
+
+  test('a guardian linked only from a merged-away junior is hard-deleted', async () => {
+    await enableMembers(root)
+    let snapshot = await snapshotOf()
+    const guardian = await saveMember(root, input({ firstName: 'Guardian' }), snapshot.revision)
+    // A merged-away record's own link no longer holds the guardian: the survivor it
+    // resolves to carries no link of its own, so nothing still needs this guardian.
+    const master = JSON.parse(await readFile(join(root, 'members.json'), 'utf8'))
+    master.members.push(
+      {
+        id: 2,
+        firstName: 'Kid',
+        lastName: 'Lee',
+        dob: '2015-01-01',
+        guardianMemberId: guardian.id,
+        mbdIds: [],
+        aliases: [],
+        marketing: true,
+        mergedInto: 3
+      },
+      {
+        id: 3,
+        firstName: 'Kid Survivor',
+        lastName: 'Lee',
+        mbdIds: [],
+        aliases: [],
+        marketing: true
+      }
+    )
+    master.nextId = 4
+    await writeFile(join(root, 'members.json'), JSON.stringify(master))
+    snapshot = await snapshotOf()
+    expect(await deleteMember(root, guardian.id, snapshot.revision)).toBe('hard')
+  })
+
+  test('a guardian linked only from a deleted junior is hard-deleted', async () => {
+    await enableMembers(root)
+    let snapshot = await snapshotOf()
+    const guardian = await saveMember(root, input({ firstName: 'Guardian' }), snapshot.revision)
+    const master = JSON.parse(await readFile(join(root, 'members.json'), 'utf8'))
+    master.members.push({
+      id: 2,
+      firstName: 'Kid',
+      lastName: 'Lee',
+      dob: '2015-01-01',
+      guardianMemberId: guardian.id,
+      mbdIds: [],
+      aliases: [],
+      marketing: true,
+      deleted: true
+    })
+    master.nextId = 3
+    await writeFile(join(root, 'members.json'), JSON.stringify(master))
+    snapshot = await snapshotOf()
+    expect(await deleteMember(root, guardian.id, snapshot.revision)).toBe('hard')
   })
 
   test('a merge survivor referenced only through the merged number is still soft-deleted', async () => {

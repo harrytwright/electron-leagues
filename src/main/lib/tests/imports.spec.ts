@@ -15,7 +15,14 @@ import {
   type MappingMemory
 } from '../imports'
 import { enableMembers, STALE_MESSAGE, writeSeasonFile } from '../members'
-import { date, MBD_EXPORT_COLUMNS, number, text, workbookFrom } from './fixtures/mbd-export'
+import {
+  date,
+  MBD_EXPORT_COLUMNS,
+  number,
+  omitted,
+  text,
+  workbookFrom
+} from './fixtures/mbd-export'
 
 let root: string
 let outside: string
@@ -23,7 +30,8 @@ let outside: string
 /**
  * A small workbook shaped like the MBD's own export: numbers with a thousands format,
  * a date-formatted birthdate column and shared strings, including one with an
- * ampersand, a blank surname cell and one bowler in two leagues.
+ * ampersand, a blank surname cell, a middle name cell the MBD leaves out of the row
+ * entirely and one bowler in two leagues.
  */
 function mbdWorkbook(): Buffer {
   return workbookFrom(MBD_EXPORT_COLUMNS, [
@@ -31,7 +39,7 @@ function mbdWorkbook(): Buffer {
       text('Monday Pairs'),
       number(155),
       text('Sam'),
-      text(''),
+      omitted(),
       text('Ash & Co'),
       date(1),
       text('W')
