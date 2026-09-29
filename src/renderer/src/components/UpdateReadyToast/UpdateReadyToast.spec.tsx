@@ -135,3 +135,18 @@ it('disables Restart now while a file operation runs and re-enables it afterward
   await user.click(screen.getByRole('button', { name: 'Finish operation' }))
   expect(await screen.findByRole('button', { name: 'Restart now' })).toBeEnabled()
 })
+
+it('reports when a file operation starts and finishes', async () => {
+  const api = installMockApi()
+  renderToast()
+  await act(async () => {})
+  expect(api.fileOperationRunningChanged).toHaveBeenLastCalledWith(false)
+  const user = userEvent.setup()
+
+  await user.click(screen.getByRole('button', { name: 'Start operation' }))
+  expect(api.fileOperationRunningChanged).toHaveBeenLastCalledWith(true)
+
+  await user.click(screen.getByRole('button', { name: 'Finish operation' }))
+  expect(api.fileOperationRunningChanged).toHaveBeenLastCalledWith(false)
+  expect(api.fileOperationRunningChanged).toHaveBeenCalledTimes(3)
+})

@@ -182,6 +182,21 @@ describe('buildAppMenuTemplate', () => {
     expect(item.click !== undefined).toBe(enabled)
   })
 
+  it('disables the restart item while a file operation is running', () => {
+    const item = updateItem(
+      build('win32', {
+        update: {
+          phase: { kind: 'ready', version: '0.2.4' },
+          fileOperationRunning: true,
+          onCheck: vi.fn(),
+          onInstall: vi.fn()
+        }
+      })
+    )
+    expect(item.label).toBe('Restart to update')
+    expect(item.enabled).toBe(false)
+  })
+
   it('checks when idle and installs when ready', () => {
     const onCheck = vi.fn()
     const onInstall = vi.fn()

@@ -7,6 +7,7 @@ import { stat, writeFile } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import icon from '../../resources/icon.png?asset'
 import { updateDiagnosticsMenu } from './lib/diagnostics-menu'
+import { createQuitFlush, createUpdateInstaller } from './lib/update-install'
 import { createAppUpdates, updateCheckMessage } from './lib/app-updates'
 import { createHelpWindowController, helpJumpListTasks, type HelpSurface } from './lib/help-window'
 import {
@@ -134,22 +135,36 @@ function bundledTemplatesDir(): string {
 let mainWindow: BrowserWindow | null = null
 let rootWatcher: RootWatcher | null = null
 let menuUpdatePhaseKind: AppUpdatePhase['kind'] | null = null
-let installRequested = false
-let installingAfterFlush = false
+let menuFileOperationRunning = false
+let fileOperationRunning = false
 const appUpdates = createAppUpdates(
   app.getVersion(),
   (status) => {
     mainWindow?.webContents.send('app:update-changed', status)
-    if (status.update.kind !== 'ready') installRequested = false
+    updateInstaller.phaseChanged()
     if (menuUpdatePhaseKind !== null && status.update.kind !== menuUpdatePhaseKind) {
       installApplicationMenu()
     }
   },
   (error) => {
     console.warn('Could not update the app:', error)
-    if (installingAfterFlush) void quitAfterFailedInstall()
+    updateInstaller.updaterFailed()
   }
 )
+const quitFlush = createQuitFlush(() =>
+  Promise.allSettled([
+    rootWatcher?.close(),
+    shutdownAnalytics(),
+    clearCardSheets(app.getPath('temp'))
+  ]).then(() => undefined)
+)
+const updateInstaller = createUpdateInstaller({
+  isReady: () => appUpdates.getStatus().update.kind === 'ready',
+  isFileOperationRunning: () => fileOperationRunning,
+  flushBeforeQuit: quitFlush.flush,
+  install: () => appUpdates.install(),
+  onInstallFailed: () => void quitAfterFailedInstall()
+})
 const updatesSupported = app.isPackaged && (process.platform !== 'linux' || !!process.env.APPIMAGE)
 const helpWindows = createHelpWindowController((initial) => createHelpWindow(initial))
 
@@ -233,7 +248,13 @@ function diagnosticsMenuItem(): Electron.MenuItem | undefined {
 
 function registerIpc(): void {
   register('getAppUpdateStatus', () => appUpdates.getStatus())
-  register('installAppUpdate', () => installUpdate())
+  register('installAppUpdate', async () => {
+    await updateInstaller.request()
+  })
+  ipcMain.on('operations:running-changed', (event, running) => {
+    if (event.sender !== mainWindow?.webContents || (running !== true && running !== false)) return
+    setFileOperationRunning(running)
+  })
   ipcMain.on('diagnostics:changed', (event, enabled) => {
     updateDiagnosticsMenu(
       event.sender,
@@ -775,7 +796,13 @@ function createWindow(): void {
 
   nativeTheme.on('updated', onThemeUpdated)
   const createdWindow = mainWindow
+  const { webContents } = createdWindow
+  webContents.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument) setFileOperationRunning(false)
+  })
+  webContents.on('render-process-gone', () => setFileOperationRunning(false))
   mainWindow.on('closed', () => {
+    if (mainWindow === createdWindow) setFileOperationRunning(false)
     nativeTheme.removeListener('updated', onThemeUpdated)
     if (mainWindow === createdWindow) mainWindow = null
     helpWindows.close()
@@ -825,18 +852,14 @@ async function checkForUpdatesFromMenu(): Promise<void> {
   else await dialog.showMessageBox(options)
 }
 
-async function installUpdate(): Promise<void> {
-  if (installRequested || appUpdates.getStatus().update.kind !== 'ready') return
-  installRequested = true
-  await flushBeforeQuit()
-  installingAfterFlush = true
-  if (!appUpdates.install()) void quitAfterFailedInstall()
+/** Only a change rebuilds the menu; a reload or crash reports false so it cannot block updates. */
+function setFileOperationRunning(running: boolean): void {
+  fileOperationRunning = running
+  if (menuFileOperationRunning !== running) installApplicationMenu()
 }
 
 /** The flush already stopped the watcher and analytics, so the app cannot carry on as normal. */
 async function quitAfterFailedInstall(): Promise<void> {
-  if (!installingAfterFlush) return
-  installingAfterFlush = false
   await dialog.showMessageBox({
     type: 'error',
     message: 'Could not install the update',
@@ -849,6 +872,7 @@ async function quitAfterFailedInstall(): Promise<void> {
 function installApplicationMenu(): void {
   const { update: phase } = appUpdates.getStatus()
   menuUpdatePhaseKind = phase.kind
+  menuFileOperationRunning = fileOperationRunning
   Menu.setApplicationMenu(
     Menu.buildFromTemplate(
       buildAppMenuTemplate({
@@ -865,8 +889,9 @@ function installApplicationMenu(): void {
         update: updatesSupported
           ? {
               phase,
+              fileOperationRunning,
               onCheck: () => void checkForUpdatesFromMenu(),
-              onInstall: () => void installUpdate()
+              onInstall: () => void updateInstaller.request()
             }
           : undefined,
         diagnosticsChecked: diagnosticsMenuItem()?.checked
@@ -910,22 +935,5 @@ app.on('window-all-closed', () => {
 
 // Defer the first quit so PostHog/Sentry finish flushing; both flushes
 // carry their own short timeouts, so this can't hang the app.
-let quitFlush: Promise<void> | null = null
-let flushedOnQuit = false
-function flushBeforeQuit(): Promise<void> {
-  quitFlush ??= Promise.allSettled([
-    rootWatcher?.close(),
-    shutdownAnalytics(),
-    clearCardSheets(app.getPath('temp'))
-  ]).then(() => {
-    flushedOnQuit = true
-  })
-  return quitFlush
-}
-
-// Installing flushes first and marks it done so the updater's own quit is not deferred again.
-app.on('before-quit', (event) => {
-  if (flushedOnQuit) return
-  event.preventDefault()
-  void flushBeforeQuit().then(() => app.quit())
-})
+// Installing flushes first, so the updater's own quit is not deferred again.
+app.on('before-quit', (event) => quitFlush.beforeQuit(event, () => app.quit()))

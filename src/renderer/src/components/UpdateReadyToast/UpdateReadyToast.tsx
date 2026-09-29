@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useKumoToastManager } from '@cloudflare/kumo'
 import { useAppUpdateStatus } from '@renderer/hooks/use-app-update-status'
 import { useOperationFeedback } from '@renderer/hooks/use-operation-feedback'
+import { useReportFileOperationRunning } from '@renderer/hooks/use-report-file-operation-running'
 
 type ToastManager = ReturnType<typeof useKumoToastManager>
 type ToastContent = Parameters<ToastManager['add']>[0]
@@ -43,6 +44,7 @@ export function UpdateReadyToast(): null {
   const status = useAppUpdateStatus()
   const { add, close, update } = useKumoToastManager()
   const { activity } = useOperationFeedback()
+  useReportFileOperationRunning()
   const toastedVersions = useRef(new Set<string>())
   const openToastId = useRef<string | null>(null)
   const readyVersion = status?.update.kind === 'ready' ? status.update.version : null

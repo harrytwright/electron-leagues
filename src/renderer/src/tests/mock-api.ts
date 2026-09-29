@@ -51,6 +51,7 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
       }
     }),
     diagnosticsChanged: vi.fn<RendererApi['diagnosticsChanged']>(),
+    fileOperationRunningChanged: vi.fn<RendererApi['fileOperationRunningChanged']>(),
     getRendererMetrics: vi.fn<RendererApi['getRendererMetrics']>(() => ({
       usedHeapKilobytes: 43008,
       cpuPercent: 1.2

@@ -23,6 +23,8 @@ export interface AppMenuOptions {
   /** Omitted where the build cannot update itself. */
   update?: {
     phase: AppUpdatePhase
+    /** Restarting would interrupt it, so the restart item is disabled. */
+    fileOperationRunning?: boolean
     onCheck: () => void
     onInstall: () => void
   }
@@ -31,6 +33,7 @@ export interface AppMenuOptions {
 
 function updateMenuItem({
   phase,
+  fileOperationRunning = false,
   onCheck,
   onInstall
 }: NonNullable<AppMenuOptions['update']>): MenuItemConstructorOptions {
@@ -42,7 +45,12 @@ function updateMenuItem({
     case 'downloading':
       return { id: CHECK_FOR_UPDATES_MENU_ID, label: 'Downloading update…', enabled: false }
     case 'ready':
-      return { id: CHECK_FOR_UPDATES_MENU_ID, label: 'Restart to update', click: () => onInstall() }
+      return {
+        id: CHECK_FOR_UPDATES_MENU_ID,
+        label: 'Restart to update',
+        enabled: !fileOperationRunning,
+        click: () => onInstall()
+      }
   }
 }
 

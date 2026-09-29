@@ -47,6 +47,9 @@ application menu is rebuilt when the phase kind changes, never on percent ticks.
 | `checking`    | Checking for updates… | no      |                     |
 | `downloading` | Downloading update…   | no      |                     |
 | `ready`       | Restart to update     | yes     | Installs the update |
+| `ready`, busy | Restart to update     | no      |                     |
+
+Busy means a file operation is running. The menu is rebuilt when that flag changes.
 
 Rebuilding reads the live diagnostics checkbox first, so its state survives. A manual check
 shares the scheduled check's in-flight promise and resolves once the result is known, never
@@ -67,12 +70,18 @@ full lock on the operation.
 ## Restart flow and `before-quit`
 
 The renderer calls `window.api.installAppUpdate()` (typed IPC `app:install-update`) and the
-menu item calls the same path. `installUpdate()` in `src/main/index.ts`:
+menu item calls the same path. The main process is the single guard. The renderer reports
+whether a file operation is running through `window.api.fileOperationRunningChanged()`
+(`operations:running-changed`, accepted only from the main window). The flag resets to
+false when the window navigates, closes or its renderer crashes, so it cannot block updates
+forever. The sequence lives in `src/main/lib/update-install.ts` so it is tested without
+Electron. `request()` in `createUpdateInstaller`:
 
-1. Does nothing unless the phase is `ready`, and ignores repeat requests until the phase
-   changes.
-2. Awaits `flushBeforeQuit()`: close the root watcher, shut down analytics and clear card
-   sheets. The promise is shared, so a concurrent quit waits for the same flush.
+1. Ignores repeat requests until the phase changes, does nothing unless the phase is
+   `ready` and does nothing while a file operation is running.
+2. Awaits the shared quit flush: close the root watcher, shut down analytics and clear card
+   sheets. `createQuitFlush` memoises it, so a concurrent ordinary quit waits for the same
+   single flush.
 3. The flush marks itself done. The `before-quit` handler then returns without calling
    `preventDefault`.
 4. Calls `autoUpdater.quitAndInstall()` through `AppUpdates.install()`, which refuses
@@ -85,8 +94,9 @@ flush had not run first, the deferred quit would leave the app running after the
 or Squirrel had started. Flushing first means the quit that follows goes straight through.
 
 If installing fails after the flush, the watcher and analytics are already shut down, so
-the app cannot carry on as normal. It shows an error dialog and quits; reopening the app
-retries the update.
+the app cannot carry on as normal. Either `install()` returning false or an updater error
+after the flush calls the failure handler exactly once. It shows an error dialog and quits;
+reopening the app retries the update.
 
 Releases include a macOS ZIP alongside the signed, notarised DMG because
 [the macOS updater requires the ZIP payload](https://www.electron.build/v26/docs/features/auto-update/).
