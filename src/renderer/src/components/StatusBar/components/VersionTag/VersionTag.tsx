@@ -1,32 +1,30 @@
-import { Badge, Tooltip } from '@cloudflare/kumo'
-import { CheckCircleIcon } from '@phosphor-icons/react'
+import { Text } from '@cloudflare/kumo'
 import { useAppUpdateStatus } from '@renderer/hooks/use-app-update-status'
+import { useDelayedFlag } from '@renderer/hooks/use-delayed-flag'
+
+/** Fast downloads finish before this, so showing progress sooner would only flicker. */
+export const DOWNLOAD_PROGRESS_DELAY_MS = 1000
 
 export function VersionTag(): React.JSX.Element | null {
   const status = useAppUpdateStatus()
+  const downloading = status?.update.kind === 'downloading' ? status.update : null
+  const showDownload = useDelayedFlag(downloading !== null, DOWNLOAD_PROGRESS_DELAY_MS)
   if (!status) return null
 
-  const description = status.readyVersion
-    ? `Current app version ${status.version}. Version ${status.readyVersion} is ready to install. Quit and reopen the app to apply the update.`
-    : `Current app version ${status.version}`
-
   return (
-    <Tooltip
-      content={description}
-      render={<span tabIndex={0} aria-label={description} className="shrink-0" />}
+    // The App owns the live region, so this group is labelled but never announces changes.
+    <span
+      role="group"
+      aria-label={`Current app version ${status.version}`}
+      className="flex shrink-0 items-center gap-4 whitespace-nowrap tabular-nums"
     >
-      <Badge
-        variant={status.readyVersion ? 'success' : 'secondary'}
-        className="shrink-0 text-sm whitespace-nowrap tabular-nums"
-      >
-        v{status.version}
-        {status.readyVersion ? (
-          <span className="inline-flex items-center gap-1 text-kumo-success">
-            <CheckCircleIcon aria-hidden size={14} />
-            Ready to install
-          </span>
-        ) : null}
-      </Badge>
-    </Tooltip>
+      {downloading && showDownload ? (
+        <Text variant="secondary">
+          Downloading v{downloading.version}…
+          {downloading.percent === null ? '' : ` ${downloading.percent}%`}
+        </Text>
+      ) : null}
+      <Text variant="secondary">v{status.version}</Text>
+    </span>
   )
 }

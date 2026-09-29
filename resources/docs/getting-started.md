@@ -45,4 +45,6 @@ The status bar shows the current path, any pending activity and the installed ap
 
 ## Updates
 
-Installed apps check for updates when they open and every few hours, and download them in the background. Once an update has downloaded, the version tag in the status bar reads **Ready to install**. Quit and reopen the app to apply it.
+Installed apps check for updates when they open and every few hours, and download them in the background. If a download takes more than a moment, the status bar shows its progress. When an update is ready a toast asks you to restart: choose **Restart now** to install it, or **Later** to keep working. The menu item then reads **Restart to update**, and the update also installs the next time you quit. Restarting waits while a file operation is running.
+
+To check straight away, choose **Check for updates…** from the app menu on macOS or the **Help** menu elsewhere.

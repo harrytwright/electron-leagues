@@ -14,6 +14,7 @@ import { MembersView } from '@renderer/views/MembersView'
 import { Sidebar } from '@renderer/components/Sidebar'
 import { StatusBar } from '@renderer/components/StatusBar'
 import { Toolbar } from '@renderer/components/Toolbar'
+import { UpdateReadyToast } from '@renderer/components/UpdateReadyToast'
 import { OperationFeedbackProvider } from '@renderer/providers/OperationFeedbackProvider'
 import { LocationOperationProvider } from '@renderer/providers/LocationOperationProvider'
 import { ipcErrorMessage } from '@renderer/lib/ipc-error'
@@ -152,6 +153,7 @@ function AppContent(): React.JSX.Element {
   return (
     <OperationFeedbackProvider locationKey={root.data ?? ''}>
       <LocationOperationProvider>
+        <UpdateReadyToast />
         <LocationContent root={root} />
       </LocationOperationProvider>
     </OperationFeedbackProvider>

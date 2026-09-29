@@ -41,6 +41,8 @@ const api = {
   },
   getRendererMetrics,
   diagnosticsChanged: (enabled: boolean): void => ipcRenderer.send('diagnostics:changed', enabled),
+  fileOperationRunningChanged: (running: boolean): void =>
+    ipcRenderer.send('operations:running-changed', running),
   pathForFile: (file: File): string => webUtils.getPathForFile(file),
   onTreeChanged: (listener: () => void): (() => void) => {
     const wrapped = (): void => listener()

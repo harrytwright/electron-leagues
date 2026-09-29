@@ -41,8 +41,9 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
   const api: RendererApi = {
     getAppUpdateStatus: vi.fn<RendererApi['getAppUpdateStatus']>().mockResolvedValue({
       version: '0.2.3',
-      readyVersion: null
+      update: { kind: 'idle' }
     }),
+    installAppUpdate: vi.fn<RendererApi['installAppUpdate']>().mockResolvedValue(undefined),
     onAppUpdateChanged: vi.fn<RendererApi['onAppUpdateChanged']>((listener) => {
       appUpdateListeners.push(listener)
       return () => {
@@ -50,6 +51,7 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
       }
     }),
     diagnosticsChanged: vi.fn<RendererApi['diagnosticsChanged']>(),
+    fileOperationRunningChanged: vi.fn<RendererApi['fileOperationRunningChanged']>(),
     getRendererMetrics: vi.fn<RendererApi['getRendererMetrics']>(() => ({
       usedHeapKilobytes: 43008,
       cpuPercent: 1.2
