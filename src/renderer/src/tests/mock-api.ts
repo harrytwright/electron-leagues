@@ -41,8 +41,9 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
   const api: RendererApi = {
     getAppUpdateStatus: vi.fn<RendererApi['getAppUpdateStatus']>().mockResolvedValue({
       version: '0.2.3',
-      readyVersion: null
+      update: { kind: 'idle' }
     }),
+    installAppUpdate: vi.fn<RendererApi['installAppUpdate']>().mockResolvedValue(undefined),
     onAppUpdateChanged: vi.fn<RendererApi['onAppUpdateChanged']>((listener) => {
       appUpdateListeners.push(listener)
       return () => {

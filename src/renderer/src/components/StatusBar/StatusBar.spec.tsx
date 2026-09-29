@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 import { renderWithProviders } from '../../tests/render-helpers'
 import { emitAppCommand, emitAppUpdateChanged, installMockApi } from '../../tests/mock-api'
+import type { AppUpdatePhase } from '@shared/app-update'
 import { StatusBar } from './index'
 import { useOperationFeedback } from '@renderer/hooks/use-operation-feedback'
 import { useAppCommands } from '@renderer/hooks/use-app-commands'
@@ -48,49 +49,117 @@ it('shows the installed version with diagnostics disabled and beside them when e
   renderStatus()
   const version = await screen.findByLabelText('Current app version 0.2.3')
   expect(version).toHaveTextContent('v0.2.3')
-  expect(screen.queryByText('Ready to install')).not.toBeInTheDocument()
 
   await enableDiagnostics(userEvent.setup())
   const metrics = await screen.findByText('Heap 42 MB')
   expect(version.compareDocumentPosition(metrics) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 })
 
-it('shows a downloaded update without replacing the installed version', async () => {
+async function emitUpdate(status: Parameters<typeof emitAppUpdateChanged>[0]): Promise<void> {
+  await act(async () => {
+    emitAppUpdateChanged(status)
+    // React Query notifies subscribers on a zero-delay timer, which fake timers hold back.
+    if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(0)
+  })
+}
+
+const ready = { kind: 'ready', version: '0.2.4' } as const
+const downloading = (percent: number | null): AppUpdatePhase => ({
+  kind: 'downloading',
+  version: '0.2.4',
+  percent
+})
+
+it('shows plain version text with no badge or ready label for a downloaded update', async () => {
   renderStatus()
   await screen.findByText('v0.2.3')
 
-  act(() => emitAppUpdateChanged({ version: '0.2.3', readyVersion: '0.2.4' }))
+  await emitUpdate({ version: '0.2.3', update: ready })
 
-  expect(await screen.findByText('Ready to install')).toBeVisible()
   expect(screen.getByText('v0.2.3')).toBeVisible()
-  const tag = screen.getByLabelText(/Version 0.2.4 is ready to install/)
-  await userEvent.setup().hover(tag)
-  expect(await screen.findByText(/Quit and reopen the app to apply the update\./)).toBeVisible()
+  expect(screen.queryByText(/Ready to install/)).not.toBeInTheDocument()
+  expect(screen.queryByText(/Downloading/)).not.toBeInTheDocument()
+})
+
+it('shows download progress only after a second of continuous downloading', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  renderStatus()
+  await screen.findByText('v0.2.3')
+
+  await emitUpdate({ version: '0.2.3', update: downloading(null) })
+  act(() => vi.advanceTimersByTime(999))
+  expect(screen.queryByText(/Downloading/)).not.toBeInTheDocument()
+
+  act(() => vi.advanceTimersByTime(1))
+  expect(screen.getByText('Downloading v0.2.4…')).toBeVisible()
+
+  await emitUpdate({ version: '0.2.3', update: downloading(42) })
+  expect(screen.getByText('Downloading v0.2.4… 42%')).toBeVisible()
+  expect(screen.getByText('v0.2.3')).toBeVisible()
+  expect(screen.queryByRole('status')).not.toBeInTheDocument()
+})
+
+it('never shows progress for a download that finishes within a second', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  renderStatus()
+  await screen.findByText('v0.2.3')
+
+  await emitUpdate({ version: '0.2.3', update: downloading(10) })
+  act(() => vi.advanceTimersByTime(600))
+  await emitUpdate({ version: '0.2.3', update: ready })
+  act(() => vi.advanceTimersByTime(2000))
+
+  expect(screen.queryByText(/Downloading/)).not.toBeInTheDocument()
+})
+
+it('restarts the delay for a later download', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
+  renderStatus()
+  await screen.findByText('v0.2.3')
+
+  await emitUpdate({ version: '0.2.3', update: downloading(10) })
+  act(() => vi.advanceTimersByTime(1000))
+  expect(screen.getByText(/Downloading/)).toBeVisible()
+  await emitUpdate({ version: '0.2.3', update: { kind: 'idle' } })
+  expect(screen.queryByText(/Downloading/)).not.toBeInTheDocument()
+
+  await emitUpdate({ version: '0.2.3', update: downloading(5) })
+  expect(screen.queryByText(/Downloading/)).not.toBeInTheDocument()
+  act(() => vi.advanceTimersByTime(1000))
+  expect(screen.getByText('Downloading v0.2.4… 5%')).toBeVisible()
 })
 
 it('does not let an older snapshot overwrite a downloaded update', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
   const snapshot =
     Promise.withResolvers<Awaited<ReturnType<typeof window.api.getAppUpdateStatus>>>()
   const api = installMockApi({ getAppUpdateStatus: vi.fn(() => snapshot.promise) })
   renderStatus()
   expect(api.getAppUpdateStatus).toHaveBeenCalledOnce()
 
-  act(() => emitAppUpdateChanged({ version: '0.2.3', readyVersion: '0.2.4' }))
-  expect(await screen.findByText('Ready to install')).toBeVisible()
-  await act(async () => snapshot.resolve({ version: '0.2.3', readyVersion: null }))
-  expect(screen.getByText('Ready to install')).toBeVisible()
+  await emitUpdate({ version: '0.2.3', update: downloading(3) })
+  act(() => vi.advanceTimersByTime(1000))
+  expect(await screen.findByText(/Downloading/)).toBeVisible()
+  await act(async () => snapshot.resolve({ version: '0.2.3', update: { kind: 'idle' } }))
+  expect(screen.getByText(/Downloading/)).toBeVisible()
 })
 
-it('restores a ready update from the main process after remounting', async () => {
+it('restores a downloading update from the main process after remounting', async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true })
   const api = installMockApi()
   const view = renderStatus()
   await screen.findByText('v0.2.3')
   view.unmount()
-  vi.mocked(api.getAppUpdateStatus).mockResolvedValue({ version: '0.2.3', readyVersion: '0.2.4' })
+  vi.mocked(api.getAppUpdateStatus).mockResolvedValue({
+    version: '0.2.3',
+    update: downloading(60)
+  })
 
   renderStatus()
+  await screen.findByText('v0.2.3')
+  act(() => vi.advanceTimersByTime(1000))
 
-  expect(await screen.findByText('Ready to install')).toBeVisible()
+  expect(screen.getByText('Downloading v0.2.4… 60%')).toBeVisible()
 })
 
 it('shows the last three POSIX segments while retaining the complete path title', () => {

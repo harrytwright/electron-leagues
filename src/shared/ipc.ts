@@ -60,6 +60,7 @@ export interface RosterPlanOutput {
 
 export interface InvokeOutputs {
   getAppUpdateStatus: AppUpdateStatus
+  installAppUpdate: void
   getAnalyticsConfig: { apiKey: string | null; distinctId: string }
   openPermissionSettings: void
   getRoot: string | null
@@ -118,6 +119,11 @@ export const invokeDefinitions = {
     channel: 'app:update-status',
     args: z.tuple([]),
     failureMessage: 'Invalid app update request'
+  },
+  installAppUpdate: {
+    channel: 'app:install-update',
+    args: z.tuple([]),
+    failureMessage: 'Invalid app update install request'
   },
   getAnalyticsConfig: {
     channel: 'analytics:config',

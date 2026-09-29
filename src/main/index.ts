@@ -7,7 +7,7 @@ import { stat, writeFile } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import icon from '../../resources/icon.png?asset'
 import { updateDiagnosticsMenu } from './lib/diagnostics-menu'
-import { createAppUpdates } from './lib/app-updates'
+import { createAppUpdates, updateCheckMessage } from './lib/app-updates'
 import { createHelpWindowController, helpJumpListTasks, type HelpSurface } from './lib/help-window'
 import {
   buildAppMenuTemplate,
@@ -30,6 +30,7 @@ import {
 import { isMissing, toUserFacing, UserFacingError } from './lib/fs-errors'
 import { registerInvokeHandler, type InvokeListener, type IpcErrorReporter } from './lib/ipc-handle'
 import type { AppCommand } from '../shared/app-command'
+import type { AppUpdatePhase } from '../shared/app-update'
 import { helpRequested, helpTargetToSearch, type HelpTarget } from '../shared/help'
 import { membersFileSchema } from '../shared/members'
 import { membersCsv } from '../shared/members-csv'
@@ -132,11 +133,24 @@ function bundledTemplatesDir(): string {
 
 let mainWindow: BrowserWindow | null = null
 let rootWatcher: RootWatcher | null = null
+let menuUpdatePhaseKind: AppUpdatePhase['kind'] | null = null
+let installRequested = false
+let installingAfterFlush = false
 const appUpdates = createAppUpdates(
   app.getVersion(),
-  (status) => mainWindow?.webContents.send('app:update-changed', status),
-  (error) => console.warn('Could not update the app:', error)
+  (status) => {
+    mainWindow?.webContents.send('app:update-changed', status)
+    if (status.update.kind !== 'ready') installRequested = false
+    if (menuUpdatePhaseKind !== null && status.update.kind !== menuUpdatePhaseKind) {
+      installApplicationMenu()
+    }
+  },
+  (error) => {
+    console.warn('Could not update the app:', error)
+    if (installingAfterFlush) void quitAfterFailedInstall()
+  }
 )
+const updatesSupported = app.isPackaged && (process.platform !== 'linux' || !!process.env.APPIMAGE)
 const helpWindows = createHelpWindowController((initial) => createHelpWindow(initial))
 
 function stopWatching(): void {
@@ -219,6 +233,7 @@ function diagnosticsMenuItem(): Electron.MenuItem | undefined {
 
 function registerIpc(): void {
   register('getAppUpdateStatus', () => appUpdates.getStatus())
+  register('installAppUpdate', () => installUpdate())
   ipcMain.on('diagnostics:changed', (event, enabled) => {
     updateDiagnosticsMenu(
       event.sender,
@@ -800,6 +815,66 @@ function commandWindow(command: AppCommand): BrowserWindow | null {
   return mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
 }
 
+/** Only outcomes with nothing further to watch get a dialog; the status bar and toast follow downloads. */
+async function checkForUpdatesFromMenu(): Promise<void> {
+  const outcome = await appUpdates.checkNow()
+  if (outcome.kind === 'downloading' || outcome.kind === 'ready') return
+  const { type, message, detail } = updateCheckMessage(outcome, app.getVersion())
+  const options = { type, message, detail, buttons: ['OK'] }
+  if (mainWindow && !mainWindow.isDestroyed()) await dialog.showMessageBox(mainWindow, options)
+  else await dialog.showMessageBox(options)
+}
+
+async function installUpdate(): Promise<void> {
+  if (installRequested || appUpdates.getStatus().update.kind !== 'ready') return
+  installRequested = true
+  await flushBeforeQuit()
+  installingAfterFlush = true
+  if (!appUpdates.install()) void quitAfterFailedInstall()
+}
+
+/** The flush already stopped the watcher and analytics, so the app cannot carry on as normal. */
+async function quitAfterFailedInstall(): Promise<void> {
+  if (!installingAfterFlush) return
+  installingAfterFlush = false
+  await dialog.showMessageBox({
+    type: 'error',
+    message: 'Could not install the update',
+    detail: 'GoBowling Leagues will now close. Reopen it to try again.',
+    buttons: ['OK']
+  })
+  app.quit()
+}
+
+function installApplicationMenu(): void {
+  const { update: phase } = appUpdates.getStatus()
+  menuUpdatePhaseKind = phase.kind
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      buildAppMenuTemplate({
+        platform: process.platform,
+        development: is.dev,
+        onCommand: (command) => {
+          commandWindow(command)?.webContents.send('app:command', {
+            command,
+            repeat: false,
+            composing: false
+          })
+        },
+        onHelp: () => helpWindows.open(null),
+        update: updatesSupported
+          ? {
+              phase,
+              onCheck: () => void checkForUpdatesFromMenu(),
+              onInstall: () => void installUpdate()
+            }
+          : undefined,
+        diagnosticsChecked: diagnosticsMenuItem()?.checked
+      })
+    )
+  )
+}
+
 if (primaryInstance) {
   app.on('second-instance', (_event, argv) => {
     focusMainWindow()
@@ -814,26 +889,11 @@ if (primaryInstance) {
 
     registerIpc()
     createWindow()
-    if (app.isPackaged && (process.platform !== 'linux' || process.env.APPIMAGE)) {
+    installApplicationMenu()
+    if (updatesSupported) {
       const stopUpdates = appUpdates.start(autoUpdater)
       app.once('will-quit', stopUpdates)
     }
-    Menu.setApplicationMenu(
-      Menu.buildFromTemplate(
-        buildAppMenuTemplate(
-          process.platform,
-          is.dev,
-          (command) => {
-            commandWindow(command)?.webContents.send('app:command', {
-              command,
-              repeat: false,
-              composing: false
-            })
-          },
-          () => helpWindows.open(null)
-        )
-      )
-    )
     if (helpRequested(process.argv)) helpWindows.open(null)
 
     app.on('activate', () => {
@@ -850,14 +910,22 @@ app.on('window-all-closed', () => {
 
 // Defer the first quit so PostHog/Sentry finish flushing; both flushes
 // carry their own short timeouts, so this can't hang the app.
+let quitFlush: Promise<void> | null = null
 let flushedOnQuit = false
-app.on('before-quit', (event) => {
-  if (flushedOnQuit) return
-  flushedOnQuit = true
-  event.preventDefault()
-  void Promise.allSettled([
+function flushBeforeQuit(): Promise<void> {
+  quitFlush ??= Promise.allSettled([
     rootWatcher?.close(),
     shutdownAnalytics(),
     clearCardSheets(app.getPath('temp'))
-  ]).then(() => app.quit())
+  ]).then(() => {
+    flushedOnQuit = true
+  })
+  return quitFlush
+}
+
+// Installing flushes first and marks it done so the updater's own quit is not deferred again.
+app.on('before-quit', (event) => {
+  if (flushedOnQuit) return
+  event.preventDefault()
+  void flushBeforeQuit().then(() => app.quit())
 })
