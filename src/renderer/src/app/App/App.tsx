@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { skipToken, useQuery } from '@tanstack/react-query'
 import { isPermissionDeniedMessage } from '@shared/fs-messages'
 import { AppProviders } from '@renderer/providers/AppProviders'
@@ -10,7 +10,6 @@ import { Button, Loader, Sidebar as KumoSidebar, Text } from '@cloudflare/kumo'
 import { FirstRun } from '@renderer/views/FirstRun'
 import { HomeView } from '@renderer/views/HomeView'
 import { LeagueView } from '@renderer/views/LeagueView'
-import { MembersView } from '@renderer/views/MembersView'
 import { Sidebar } from '@renderer/components/Sidebar'
 import { StatusBar } from '@renderer/components/StatusBar'
 import { Toolbar } from '@renderer/components/Toolbar'
@@ -34,6 +33,22 @@ import type {
   Props,
   ScanErrorProps
 } from './interface'
+
+const importMembersView = (): Promise<typeof import('@renderer/views/MembersView')> =>
+  import('@renderer/views/MembersView')
+
+const MembersView = lazy(() =>
+  importMembersView().then((module) => ({ default: module.MembersView }))
+)
+
+function PaneLoading(): React.JSX.Element {
+  return (
+    <div className="flex h-full items-center justify-center gap-2 bg-kumo-base">
+      <Loader />
+      <Text>Loading…</Text>
+    </div>
+  )
+}
 
 function AppCommandHandlers(): null {
   const locationOperation = useLocationOperation()
@@ -150,6 +165,9 @@ function ScanWarning({ message, onRetry, onChooseAnother }: ScanErrorProps): Rea
 
 function AppContent(): React.JSX.Element {
   const root = useQuery(rootQuery)
+  useEffect(() => {
+    importMembersView().catch(() => undefined)
+  }, [])
   return (
     <OperationFeedbackProvider locationKey={root.data ?? ''}>
       <LocationOperationProvider>
@@ -222,12 +240,7 @@ function LocationContent({ root }: LocationContentProps): React.JSX.Element {
 
   let content: React.JSX.Element | null = null
   if (root.isPending || (!root.isError && rootPath !== null && tree.isPending && !tree.data)) {
-    content = (
-      <div className="flex h-full items-center justify-center gap-2 bg-kumo-base">
-        <Loader />
-        <Text>Loading…</Text>
-      </div>
-    )
+    content = <PaneLoading />
   } else if (root.isError) {
     content = (
       <ScanError
@@ -308,7 +321,9 @@ function LocationContent({ root }: LocationContentProps): React.JSX.Element {
                   onRenamed={(day, folderName) => select({ kind: 'league', day, folderName })}
                 />
               ) : effectiveSelection.kind === 'members' ? (
-                <MembersView key={scanned.root} tree={scanned} />
+                <Suspense fallback={<PaneLoading />}>
+                  <MembersView key={scanned.root} tree={scanned} />
+                </Suspense>
               ) : (
                 <HomeView
                   key={scanned.root}

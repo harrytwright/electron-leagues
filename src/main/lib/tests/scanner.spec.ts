@@ -48,6 +48,22 @@ describe('scanLeaguesRoot', () => {
     ])
   })
 
+  test("returns every weekday's leagues under the right day", async () => {
+    await makeTree({
+      'monday/Mens Triples/2025-26/Rules.docx': 'x',
+      'monday/Ladies Pairs/2025-26/Rules.docx': 'x',
+      'wednesday/Mixed Fours/2025-26/Rules.docx': 'x',
+      'friday/Seniors/2025-26/Rules.docx': 'x'
+    })
+    const tree = await scanLeaguesRoot(root)
+    const names = (day: 'monday' | 'wednesday' | 'friday'): string[] =>
+      tree.days[day].map((league) => league.folderName).sort()
+    expect(names('monday')).toEqual(['Ladies Pairs', 'Mens Triples'])
+    expect(names('wednesday')).toEqual(['Mixed Fours'])
+    expect(names('friday')).toEqual(['Seniors'])
+    expect(tree.days.tuesday).toEqual([])
+  })
+
   test('hides the app-owned JSON files from every listing', async () => {
     await makeTree({
       'members.json': '{}',

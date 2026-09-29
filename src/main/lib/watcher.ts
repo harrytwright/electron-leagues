@@ -1,4 +1,5 @@
 import { watch, type ChokidarOptions } from 'chokidar'
+import { basename } from 'node:path'
 import { errorCode, isPermissionDenied } from './fs-errors'
 
 export type WatchMode = 'native' | 'polling'
@@ -23,8 +24,16 @@ export type RootWatcherOptions = {
   debounceMs?: number
 }
 
+/** Only names the browser already hides (dotfiles): .DS_Store and LibreOffice lock files. */
+const noisyFileName = /^\.~lock\.|^\.DS_Store$/i
+
+export function isWatchNoise(path: string): boolean {
+  return noisyFileName.test(basename(path))
+}
+
 const nativeOptions: ChokidarOptions = {
   ignoreInitial: true,
+  ignored: isWatchNoise,
   // Depth 6 reaches two levels below a season folder; edits deeper than that
   // won't auto-refresh until the user navigates.
   depth: 6

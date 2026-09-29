@@ -3,6 +3,7 @@ import type { ChokidarOptions } from 'chokidar'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import {
   createRootWatcher,
+  isWatchNoise,
   type RootWatcherOptions,
   type WatchFactory,
   type WatchSource
@@ -53,6 +54,22 @@ describe('createRootWatcher', () => {
   beforeEach(() => vi.useFakeTimers())
   afterEach(() => vi.useRealTimers())
 
+  test('ignores only names the browser hides, so listed files still refresh', () => {
+    for (const noise of ['.~lock.Scores.xlsx#', '.DS_Store']) {
+      expect(isWatchNoise(`/leagues/Monday/A/2025-26/${noise}`)).toBe(true)
+    }
+    for (const kept of [
+      '/leagues',
+      '/leagues/Monday/A/2025-26/Scores.xlsx',
+      '/leagues/Monday/A/2025-26/~$Scores.xlsx',
+      '/leagues/Monday/A/2025-26/Thumbs.db',
+      '/leagues/Monday/A/2025-26/desktop.ini',
+      '/leagues/Monday'
+    ]) {
+      expect(isWatchNoise(kept)).toBe(false)
+    }
+  })
+
   test('falls back to polling after a native permission error', async () => {
     const harness = createHarness()
     createRootWatcher('/leagues', {
@@ -70,6 +87,7 @@ describe('createRootWatcher', () => {
       root: '/leagues',
       options: {
         ignoreInitial: true,
+        ignored: expect.any(Function),
         depth: 6,
         usePolling: true,
         interval: 2000,
