@@ -3,7 +3,7 @@ title: Folder layout
 description: The fixed layout the app expects inside a leagues folder and what it makes of anything else.
 section: Basics
 order: 2
-status: draft
+status: verified
 updated: 2026-09-18
 version: 0.3.0
 ---

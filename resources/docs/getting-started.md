@@ -3,7 +3,7 @@ title: Getting started
 description: Open or create a leagues folder, switch between locations and learn what the app will never touch.
 section: Basics
 order: 1
-status: draft
+status: verified
 updated: 2026-09-17
 version: 0.2.3
 ---

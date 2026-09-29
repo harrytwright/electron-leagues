@@ -3,7 +3,7 @@ title: Templates and shared documents
 description: What lives in the templates and shared folders and how new seasons draw on them.
 section: Working with leagues
 order: 3
-status: draft
+status: verified
 updated: 2026-09-17
 version: 0.2.3
 ---

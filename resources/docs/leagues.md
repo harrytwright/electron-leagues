@@ -3,7 +3,7 @@ title: Leagues
 description: Create, rename, browse and delete leagues, and what the league view shows you.
 section: Working with leagues
 order: 1
-status: draft
+status: verified
 updated: 2026-09-17
 version: 0.2.3
 ---

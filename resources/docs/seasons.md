@@ -3,7 +3,7 @@ title: Seasons
 description: Season naming rules, live and archived seasons, the new season wizard and syncing with templates.
 section: Working with leagues
 order: 2
-status: draft
+status: verified
 updated: 2026-09-17
 version: 0.2.3
 ---

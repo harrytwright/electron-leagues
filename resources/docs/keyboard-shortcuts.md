@@ -3,7 +3,7 @@ title: Keyboard shortcuts
 description: Every shortcut the app responds to, with the key for your platform.
 section: Reference
 order: 1
-status: draft
+status: verified
 updated: 2026-09-17
 version: 0.2.3
 ---

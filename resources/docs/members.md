@@ -3,7 +3,7 @@ title: Members
 description: The members database, member numbers and cards, rosters and teams, syncing from the MBD and exporting.
 section: Working with leagues
 order: 4
-status: draft
+status: verified
 updated: 2026-09-18
 version: 0.3.0
 ---
