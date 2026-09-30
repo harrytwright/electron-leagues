@@ -83,6 +83,8 @@ The workflow needs six repository Actions secrets:
 | `APPLE_API_KEY_ID`  | Key ID for that key                        |
 | `APPLE_API_ISSUER`  | Issuer ID from App Store Connect           |
 
+`POSTHOG_KEY` is an optional seventh secret. When set, the build bakes it in as `MAIN_VITE_POSTHOG_KEY` so packaged apps report analytics; without it analytics stay off and **verify** does not fail.
+
 If a release fails after the tag exists, delete the tag, fix the problem and tag again:
 
 ```bash

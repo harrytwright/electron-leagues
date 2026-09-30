@@ -211,6 +211,7 @@ jobs:
       - name: Build
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          MAIN_VITE_POSTHOG_KEY: ${{ secrets.POSTHOG_KEY }}
         run: npm run build
 
       # No signing secrets here by design. CSC_LINK must stay unset: on macOS it
