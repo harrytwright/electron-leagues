@@ -108,10 +108,12 @@ export function LeagueView({
   const { add } = useKumoToastManager()
   const coordinator = useQueryRefresh()
   const zipOperation = useWriteOperation({
+    operation: 'zipArchive',
     label: (name: string) => `Zipping ${name}`,
     write: (name) => window.api.zipArchive(league.folderName, [name])
   })
   const syncTemplatesOperation = useWriteOperation({
+    operation: 'syncSeasonTemplates',
     label: () => 'Syncing templates',
     write: (seasonName: string) =>
       window.api.syncSeasonTemplates({
@@ -154,6 +156,7 @@ export function LeagueView({
     : null
   const liveRoster = rosterSeason && !rosterSeason.archived ? rosterSeason : null
   const signInSheet = useWriteOperation({
+    operation: 'openSignInSheet',
     label: () => 'Preparing the sign-in sheet',
     write: (seasonName: string) =>
       window.api.openSignInSheet({ day: league.day, leagueFolder: league.folderName, seasonName })

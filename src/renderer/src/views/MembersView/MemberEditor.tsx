@@ -75,6 +75,7 @@ export function MemberEditor({
   const errorId = useId()
   const coordinator = useQueryRefresh()
   const operation = useWriteOperation({
+    operation: 'saveMember',
     label: () => (member ? `Saving ${memberDisplayName(member)}` : 'Adding member'),
     write: (input: ReturnType<typeof memberInputFromDraft>) =>
       window.api.saveMember(input, revision),

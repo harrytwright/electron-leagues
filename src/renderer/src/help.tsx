@@ -9,7 +9,7 @@ import { helpTopics } from './lib/help/topics'
 import { watchSystemTheme } from './theme'
 
 watchSystemTheme()
-void initAnalytics()
+void initAnalytics('help')
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

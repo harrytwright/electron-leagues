@@ -26,6 +26,7 @@ export function useSeasonSave(season: RosterSeason): SeasonSave {
   const { add } = useKumoToastManager()
   const coordinator = useQueryRefresh()
   const operation = useWriteOperation({
+    operation: 'saveSeason',
     label: () => `Saving ${season.leagueName} ${season.season}`,
     write: (file: SeasonFile) =>
       window.api.saveSeason(

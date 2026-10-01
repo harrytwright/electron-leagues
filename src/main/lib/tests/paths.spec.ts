@@ -110,7 +110,7 @@ describe('assertInsideRoot', () => {
     }
 
     await expect(assertExistingPath()).rejects.toEqual(
-      new UserFacingError('That folder no longer exists')
+      new UserFacingError('That folder no longer exists', 'missing')
     )
   })
 

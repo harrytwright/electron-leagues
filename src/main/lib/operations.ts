@@ -1,5 +1,6 @@
 import { ZipArchive } from 'archiver'
 import { constants, createWriteStream } from 'node:fs'
+import { reportFailure, warnOnce, traceOperation } from '../../shared/telemetry'
 import {
   copyFile,
   cp,
@@ -245,11 +246,21 @@ async function isSameEntry(a: string, b: string): Promise<boolean> {
 async function readLeagueMetaInput(leaguePath: string): Promise<LeagueMetaInput | null> {
   return readFile(join(leaguePath, META_FILE), 'utf8')
     .then((raw) => parseLeagueMetaInput(JSON.parse(raw)))
-    .catch(() => null)
+    .catch((error) => {
+      if (isMissing(error)) return null
+      if (error instanceof SyntaxError) {
+        warnOnce(`meta:${leaguePath}`, 'League metadata needs healing', { reason: 'invalid-json' })
+        return null
+      }
+      throw toUserFacing(error)
+    })
 }
 
 async function archivedSeasonsOf(archivePath: string): Promise<string[]> {
-  const entries = await readdir(archivePath, { withFileTypes: true }).catch(() => [])
+  const entries = await readdir(archivePath, { withFileTypes: true }).catch((error) => {
+    if (isMissing(error)) return []
+    throw toUserFacing(error)
+  })
   return sortSeasonNames(entries.filter((e) => e.isDirectory()).map((e) => e.name))
 }
 
@@ -332,6 +343,8 @@ async function renameLeagueUnlocked(
   }
 
   const existing = await readLeagueMetaInput(fromPath)
+  const liveSeasons = await liveSeasonsOf(fromPath)
+  const archivedSeasons = await archivedSeasonsOf(fromArchive)
 
   if (folderChanges) {
     await moveFolder(fromPath, toPath).catch((err) => {
@@ -360,8 +373,8 @@ async function renameLeagueUnlocked(
     {
       folderName,
       day,
-      liveSeasons: await liveSeasonsOf(toPath),
-      archivedSeasons: await archivedSeasonsOf(toArchive)
+      liveSeasons,
+      archivedSeasons
     }
   )
   await writeLeagueMeta(toPath, meta).catch((err) => {
@@ -447,9 +460,11 @@ async function createSeasonUnlocked(
     throw new UserFacingError(`Season "${season.name}" already exists`)
   }
   await assertMetaWritable(leaguePath)
+  const existing = await readLeagueMetaInput(leaguePath)
 
   const before = await liveSeasonsOf(leaguePath)
   const archivePath = await resolveArchivePath(opts.root, opts.leagueFolder)
+  const archivedBefore = await archivedSeasonsOf(archivePath)
   const after = [...before, season].sort(compareSeasonNames)
   const oldest = opts.archiveOldest && after.length > 2 ? after[0] : null
   if (oldest) await assertArchiveSlotFree(join(archivePath, oldest.name))
@@ -474,11 +489,11 @@ async function createSeasonUnlocked(
     archived = oldest.name
   }
 
-  const meta = healMeta(await readLeagueMetaInput(leaguePath), {
+  const meta = healMeta(existing, {
     folderName: opts.leagueFolder,
     day: opts.day,
-    liveSeasons: await liveSeasonsOf(leaguePath),
-    archivedSeasons: await archivedSeasonsOf(archivePath)
+    liveSeasons: after.filter((entry) => entry.name !== archived),
+    archivedSeasons: archived ? sortSeasonNames([...archivedBefore, archived]) : archivedBefore
   })
   const created = meta.seasons.find((s) => s.name === season.name)
   if (created && !created.createdAt) created.createdAt = new Date().toISOString()
@@ -572,128 +587,150 @@ export async function zipArchivedSeasons(
   leagueFolder: string,
   seasonNames: string[]
 ): Promise<ZipArchiveResult> {
-  assertLeagueFolderName(leagueFolder)
-  const seasons = seasonNames.map((name) => {
-    const season = parseSeasonName(name)
-    if (!season || season.name !== name) throw new UserFacingError('Invalid season name')
-    return season
-  })
-  if (seasons.length === 0) return { zips: [], failed: [] }
-  const archiveDir = await resolveArchivePath(root, leagueFolder)
-  // Validate the entire batch first so a later invalid selection cannot leave earlier zip writes behind.
-  const plans = await Promise.all(
-    seasons.map(async (season) => {
-      const seasonDir = join(archiveDir, season.name)
-      if (!(await exists(seasonDir))) {
-        throw new UserFacingError(`"${season.name}" has no archive folder for ${leagueFolder}`)
-      }
-      await assertInsideRoot(root, seasonDir)
-      const zipPath = await assertInsideRoot(root, join(archiveDir, `${season.name}.zip`), {
-        allowMissingLeaf: true
-      })
-      return { season, seasonDir, zipPath }
+  return traceOperation('filesystem.zip', { attempted: seasonNames.length }, async (span) => {
+    assertLeagueFolderName(leagueFolder)
+    const seasons = seasonNames.map((name) => {
+      const season = parseSeasonName(name)
+      if (!season || season.name !== name) throw new UserFacingError('Invalid season name')
+      return season
     })
-  )
-  const zips: string[] = []
-  const failed: ZipArchiveResult['failed'] = []
-  let firstError: Error | undefined
-
-  for (const { season, seasonDir, zipPath } of plans) {
-    try {
-      await new Promise<void>((resolvePromise, reject) => {
-        const output = createWriteStream(zipPath)
-        const zip = new ZipArchive({ zlib: { level: 9 } })
-        let archiveFailed = false
-        let outputClosed = false
-        output.on('close', () => {
-          outputClosed = true
-          if (!archiveFailed) resolvePromise()
-        })
-        const fail = (err: Error): void => {
-          if (archiveFailed) return
-          archiveFailed = true
-          zip.destroy()
-          const cleanup = (): void => {
-            // A failed archive is never useful; ignore cleanup failure so the initiating error stays actionable.
-            void rm(zipPath, { force: true }).then(
-              () => reject(err),
-              () => reject(err)
-            )
-          }
-          if (outputClosed) cleanup()
-          else {
-            // Windows cannot remove an open destination, so wait for destruction to close its handle.
-            output.once('close', cleanup)
-            output.destroy()
-          }
+    if (seasons.length === 0) return { zips: [], failed: [] }
+    const archiveDir = await resolveArchivePath(root, leagueFolder)
+    // Validate the entire batch first so a later invalid selection cannot leave earlier zip writes behind.
+    const plans = await Promise.all(
+      seasons.map(async (season) => {
+        const seasonDir = join(archiveDir, season.name)
+        if (!(await exists(seasonDir))) {
+          throw new UserFacingError(`"${season.name}" has no archive folder for ${leagueFolder}`)
         }
-        // Archive errors do not cover destination failures, so handle the stream or the promise can hang.
-        output.on('error', fail)
-        zip.on('error', fail)
-        zip.on('warning', (err: Error) => {
-          fail(
-            new UserFacingError(`“${season.name}” couldn’t be zipped completely: ${err.message}`)
-          )
+        await assertInsideRoot(root, seasonDir)
+        const zipPath = await assertInsideRoot(root, join(archiveDir, `${season.name}.zip`), {
+          allowMissingLeaf: true
         })
-        zip.pipe(output)
-        zip.directory(seasonDir, season.name)
-        // Archiver reports through both the emitter and its promise; handling both prevents a rejected finalize leak.
-        void zip.finalize().catch(fail)
+        return { season, seasonDir, zipPath }
       })
-      zips.push(zipPath)
-    } catch (err) {
-      const error = toUserFacing(err)
-      firstError ??= err instanceof Error ? err : error
-      failed.push({ season: season.name, message: error.message })
-    }
-  }
+    )
+    const zips: string[] = []
+    const failed: ZipArchiveResult['failed'] = []
+    let firstError: Error | undefined
 
-  if (zips.length === 0 && firstError) throw toUserFacing(firstError)
-  return { zips, failed }
+    for (const { season, seasonDir, zipPath } of plans) {
+      try {
+        await new Promise<void>((resolvePromise, reject) => {
+          const output = createWriteStream(zipPath)
+          const zip = new ZipArchive({ zlib: { level: 9 } })
+          let archiveFailed = false
+          let outputClosed = false
+          output.on('close', () => {
+            outputClosed = true
+            if (!archiveFailed) resolvePromise()
+          })
+          const fail = (err: Error): void => {
+            if (archiveFailed) return
+            archiveFailed = true
+            zip.destroy()
+            const cleanup = (): void => {
+              // A failed archive is never useful; ignore cleanup failure so the initiating error stays actionable.
+              void rm(zipPath, { force: true }).then(
+                () => reject(err),
+                () => reject(err)
+              )
+            }
+            if (outputClosed) cleanup()
+            else {
+              // Windows cannot remove an open destination, so wait for destruction to close its handle.
+              output.once('close', cleanup)
+              output.destroy()
+            }
+          }
+          // Archive errors do not cover destination failures, so handle the stream or the promise can hang.
+          output.on('error', fail)
+          zip.on('error', fail)
+          zip.on('warning', (err: Error) => {
+            fail(
+              new UserFacingError(`“${season.name}” couldn’t be zipped completely: ${err.message}`)
+            )
+          })
+          zip.pipe(output)
+          zip.directory(seasonDir, season.name)
+          // Archiver reports through both the emitter and its promise; handling both prevents a rejected finalize leak.
+          void zip.finalize().catch(fail)
+        })
+        zips.push(zipPath)
+      } catch (err) {
+        const error = toUserFacing(err)
+        if (!(error instanceof UserFacingError))
+          reportFailure(err, 'filesystem.zip', { code: errorCode(err) ?? 'unknown' })
+        firstError ??= err instanceof Error ? err : error
+        failed.push({ season: season.name, message: error.message })
+      }
+    }
+
+    span.setAttribute('succeeded', zips.length)
+    span.setAttribute('failed', failed.length)
+    if (failed.length > 0)
+      warnOnce('archive.partial', 'Archive batch had failures', {
+        succeeded: zips.length,
+        failed: failed.length
+      })
+    if (zips.length === 0 && firstError) throw toUserFacing(firstError)
+    return { zips, failed }
+  })
 }
 
 /** Copy files into a folder, never overwriting — clashes get " (2)", " (3)", … */
 export async function importFiles(dest: string, sources: string[]): Promise<ImportFilesResult> {
-  const copied: string[] = []
-  const failed: ImportFilesResult['failed'] = []
-  let firstError: Error | undefined
-  for (const source of sources) {
-    try {
-      const ext = extname(source)
-      const stem = basename(source, ext)
-      let suffix = 1
-      while (true) {
-        const name = suffix === 1 ? `${stem}${ext}` : `${stem} (${suffix})${ext}`
-        const target = join(dest, name)
-        // Anything already at the name is taken, a dangling link included: Windows would copy
-        // through such a link rather than refuse it, where POSIX refuses under the exclusive flag.
-        const occupied = await lstat(target).then(
-          () => true,
-          (err) => {
-            if (isMissing(err)) return false
-            throw err
+  return traceOperation('filesystem.import', { attempted: sources.length }, async (span) => {
+    const copied: string[] = []
+    const failed: ImportFilesResult['failed'] = []
+    let firstError: Error | undefined
+    for (const source of sources) {
+      try {
+        const ext = extname(source)
+        const stem = basename(source, ext)
+        let suffix = 1
+        while (true) {
+          const name = suffix === 1 ? `${stem}${ext}` : `${stem} (${suffix})${ext}`
+          const target = join(dest, name)
+          // Anything already at the name is taken, a dangling link included: Windows would copy
+          // through such a link rather than refuse it, where POSIX refuses under the exclusive flag.
+          const occupied = await lstat(target).then(
+            () => true,
+            (err) => {
+              if (isMissing(err)) return false
+              throw err
+            }
+          )
+          if (occupied) {
+            suffix += 1
+            continue
           }
-        )
-        if (occupied) {
-          suffix += 1
-          continue
+          try {
+            // The exclusive flag still closes the exists/copy race between the check and the copy.
+            await copyFile(source, target, constants.COPYFILE_EXCL)
+            copied.push(target)
+            break
+          } catch (err) {
+            if (!isAlreadyExists(err)) throw err
+            suffix += 1
+          }
         }
-        try {
-          // The exclusive flag still closes the exists/copy race between the check and the copy.
-          await copyFile(source, target, constants.COPYFILE_EXCL)
-          copied.push(target)
-          break
-        } catch (err) {
-          if (!isAlreadyExists(err)) throw err
-          suffix += 1
-        }
+      } catch (err) {
+        const error = toUserFacing(err)
+        if (!(error instanceof UserFacingError))
+          reportFailure(err, 'filesystem.import', { code: errorCode(err) ?? 'unknown' })
+        firstError ??= err instanceof Error ? err : error
+        failed.push({ source, message: error.message })
       }
-    } catch (err) {
-      const error = toUserFacing(err)
-      firstError ??= err instanceof Error ? err : error
-      failed.push({ source, message: error.message })
     }
-  }
-  if (copied.length === 0 && firstError) throw toUserFacing(firstError)
-  return { copied, failed }
+    span.setAttribute('succeeded', copied.length)
+    span.setAttribute('failed', failed.length)
+    if (failed.length > 0)
+      warnOnce('import.partial', 'File import had failures', {
+        succeeded: copied.length,
+        failed: failed.length
+      })
+    if (copied.length === 0 && firstError) throw toUserFacing(firstError)
+    return { copied, failed }
+  })
 }

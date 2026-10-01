@@ -11,6 +11,10 @@ import {
   type InvokeOutputs
 } from '../shared/ipc'
 import { getRendererMetrics } from './renderer-metrics'
+import * as Sentry from '@sentry/electron/renderer'
+
+Sentry.init({ enableLogs: true })
+Sentry.setTag('surface', 'preload')
 
 export type { RendererMetrics } from './renderer-metrics'
 
@@ -70,6 +74,7 @@ if (process.contextIsolated) {
     contextBridge.exposeInMainWorld('electron', electronAPI)
     contextBridge.exposeInMainWorld('api', api)
   } catch (error) {
+    Sentry.captureException(error, { tags: { operation: 'preload.expose-api' } })
     console.error(error)
   }
 } else {

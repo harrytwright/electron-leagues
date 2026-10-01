@@ -20,6 +20,7 @@ export function ResetMembersDialog({
   const { add } = useKumoToastManager()
   const coordinator = useQueryRefresh()
   const operation = useWriteOperation({
+    operation: 'resetMembers',
     label: () => 'Deleting every member',
     write: () => window.api.resetMembers(snapshot.revision)
   })

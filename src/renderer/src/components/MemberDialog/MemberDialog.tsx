@@ -33,6 +33,7 @@ export function MemberDialog({
   const errorId = useId()
   const coordinator = useQueryRefresh()
   const operation = useWriteOperation({
+    operation: 'saveMember',
     label: (input: MemberInput) =>
       input.id === undefined
         ? `Adding ${input.firstName} ${input.lastName}`

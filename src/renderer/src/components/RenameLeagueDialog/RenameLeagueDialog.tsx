@@ -19,6 +19,7 @@ export function RenameLeagueDialog({
   const nameRef = useRef<HTMLInputElement>(null)
   const errorId = useId()
   const operation = useWriteOperation({
+    operation: 'renameLeague',
     label: (displayName: string) => `Renaming ${league.meta.name} to ${displayName}`,
     write: (displayName) => window.api.renameLeague(league.day, league.folderName, displayName)
   })
