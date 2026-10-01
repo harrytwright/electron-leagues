@@ -1,5 +1,6 @@
 import { lstat, stat, utimes } from 'node:fs/promises'
 import { join } from 'node:path'
+import { traceOperation, warnOnce } from '../../shared/telemetry'
 import {
   applyAgeRules,
   disabledMembersSnapshot,
@@ -113,41 +114,52 @@ export async function buildMembersSnapshot(
   root: string,
   tree: LeaguesTree
 ): Promise<MembersSnapshot> {
-  // The revision is taken before the content it names, so a write landing in between
-  // leaves the snapshot already stale and the next save is refused, never accepted.
-  const revision = await fileRevision(membersFilePath(root))
-  const master = await readAppJson(membersFilePath(root), membersFileSchema)
-  if (master.status === 'missing') return disabledMembersSnapshot()
-  const problems: MembersProblem[] = []
-  if (master.status === 'invalid') {
-    problems.push({ kind: 'invalid-file', path: membersFilePath(root), message: master.message })
-  }
-  const seasons: RosterSeason[] = []
-  const reads = await Promise.all(
-    seasonLocations(root, tree).map(async (location) => {
-      const revision = await fileRevision(seasonFilePath(location.path))
-      return { location, revision, read: await readSeasonFile(location.path) }
-    })
-  )
-  for (const { location, read, revision } of reads) {
-    if (read.status === 'missing') continue
-    if (read.status === 'invalid') {
-      problems.push({ kind: 'invalid-file', path: location.path, message: read.message })
-      continue
+  return traceOperation('members.snapshot', {}, async (span) => {
+    // The revision is taken before the content it names, so a write landing in between
+    // leaves the snapshot already stale and the next save is refused, never accepted.
+    const revision = await fileRevision(membersFilePath(root))
+    const master = await readAppJson(membersFilePath(root), membersFileSchema)
+    if (master.status === 'missing') return disabledMembersSnapshot()
+    const problems: MembersProblem[] = []
+    if (master.status === 'invalid') {
+      problems.push({ kind: 'invalid-file', path: membersFilePath(root), message: master.message })
     }
-    seasons.push({ ...location, revision, file: read.value })
-  }
-  const snapshot: MembersSnapshot = {
-    enabled: true,
-    revision,
-    nextId: master.status === 'ok' ? master.value.nextId : 1,
-    members: master.status === 'ok' ? master.value.members : [],
-    seasons,
-    problems
-  }
-  // Without a readable master list every roster row would read as unlinked; one problem is enough.
-  if (master.status === 'ok') snapshot.problems.push(...findRosterProblems(snapshot))
-  return snapshot
+    const seasons: RosterSeason[] = []
+    const reads = await Promise.all(
+      seasonLocations(root, tree).map(async (location) => {
+        const revision = await fileRevision(seasonFilePath(location.path))
+        return { location, revision, read: await readSeasonFile(location.path) }
+      })
+    )
+    for (const { location, read, revision } of reads) {
+      if (read.status === 'missing') continue
+      if (read.status === 'invalid') {
+        problems.push({ kind: 'invalid-file', path: location.path, message: read.message })
+        continue
+      }
+      seasons.push({ ...location, revision, file: read.value })
+    }
+    const snapshot: MembersSnapshot = {
+      enabled: true,
+      revision,
+      nextId: master.status === 'ok' ? master.value.nextId : 1,
+      members: master.status === 'ok' ? master.value.members : [],
+      seasons,
+      problems
+    }
+    // Without a readable master list every roster row would read as unlinked; one problem is enough.
+    if (master.status === 'ok') snapshot.problems.push(...findRosterProblems(snapshot))
+    span.setAttribute('members', snapshot.members.length)
+    span.setAttribute('seasons', snapshot.seasons.length)
+    span.setAttribute('problems', snapshot.problems.length)
+    const counts = new Map<string, number>()
+    for (const problem of snapshot.problems)
+      counts.set(problem.kind, (counts.get(problem.kind) ?? 0) + 1)
+    for (const [kind, count] of counts) {
+      warnOnce(`members:${root}:${kind}:${count}`, 'Members data needs attention', { kind, count })
+    }
+    return snapshot
+  })
 }
 
 /** A write must start from a readable master list, and from the copy the editor loaded. */
@@ -161,7 +173,7 @@ export async function readMasterForWrite(
     throw new UserFacingError('The members database is not enabled for this location')
   }
   if (master.status === 'invalid') throw new UserFacingError(master.message)
-  if ((await fileRevision(path)) !== expected) throw new UserFacingError(STALE_MESSAGE)
+  if ((await fileRevision(path)) !== expected) throw new UserFacingError(STALE_MESSAGE, 'stale')
   return master.value
 }
 
@@ -397,7 +409,7 @@ export async function saveSeason(
     if (current.status === 'missing') {
       throw new UserFacingError('This season has no roster file; older seasons are not backfilled')
     }
-    if ((await fileRevision(path)) !== expected) throw new UserFacingError(STALE_MESSAGE)
+    if ((await fileRevision(path)) !== expected) throw new UserFacingError(STALE_MESSAGE, 'stale')
     const teamIds = new Set(file.teams.map((team) => team.id))
     if (teamIds.size !== file.teams.length) throw new UserFacingError('Team ids must be unique')
     const teamNumbers = new Set(file.teams.map((team) => team.teamNo))

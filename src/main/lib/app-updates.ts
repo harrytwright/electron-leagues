@@ -1,5 +1,6 @@
 import type { AppUpdater, ProgressInfo, UpdateDownloadedEvent } from 'electron-updater'
 import type { AppUpdatePhase, AppUpdateStatus } from '../../shared/app-update'
+import { recordEvent, traceOperation } from '../../shared/telemetry'
 
 interface UpdateSource {
   checkForUpdates: AppUpdater['checkForUpdates']
@@ -91,11 +92,24 @@ export function createAppUpdates(
     },
     start(updater) {
       let inFlight: Promise<UpdateCheckOutcome> | null = null
+      let failureReported = false
+      let checkStarted = performance.now()
+      let downloadStarted: number | null = null
       const reportError = (error: Error): void => {
+        if (failureReported) return
+        failureReported = true
+        recordEvent('app_update_failed', {
+          phase: status.update.kind,
+          duration_ms: Math.round(performance.now() - (downloadStarted ?? checkStarted))
+        })
         if (status.update.kind !== 'idle') setPhase(idle)
         onError(error)
       }
       const onDownloaded = (update: UpdateDownloadedEvent): void => {
+        recordEvent('app_update_downloaded', {
+          available_version: update.version,
+          duration_ms: Math.round(performance.now() - (downloadStarted ?? checkStarted))
+        })
         setPhase({ kind: 'ready', version: update.version })
       }
       const onProgress = ({ percent }: ProgressInfo): void => {
@@ -105,18 +119,28 @@ export function createAppUpdates(
         setPhase({ ...update, percent: wholePercent })
       }
       const startCheck = (): Promise<UpdateCheckOutcome> => {
+        failureReported = false
+        checkStarted = performance.now()
+        downloadStarted = null
+        recordEvent('app_update_check_started')
         const outcome = Promise.withResolvers<UpdateCheckOutcome>()
         inFlight = outcome.promise
         setPhase({ kind: 'checking' })
         void (async () => {
           try {
-            const result = await updater.checkForUpdates()
+            const result = await traceOperation('update.check', {}, () => updater.checkForUpdates())
+            if (!failureReported)
+              recordEvent('app_update_checked', {
+                available: result?.isUpdateAvailable ?? false,
+                duration_ms: Math.round(performance.now() - checkStarted)
+              })
             if (!result?.isUpdateAvailable) {
               if (status.update.kind === 'checking') setPhase(idle)
               outcome.resolve({ kind: 'up-to-date' })
               return
             }
             const { version: available } = result.updateInfo
+            downloadStarted = performance.now()
             if (status.update.kind === 'checking') {
               setPhase({ kind: 'downloading', version: available, percent: null })
             }
@@ -125,7 +149,11 @@ export function createAppUpdates(
                 ? { kind: 'ready', version: status.update.version }
                 : { kind: 'downloading', version: available }
             )
-            await result.downloadPromise
+            await traceOperation(
+              'update.download',
+              { available_version: available },
+              async () => result.downloadPromise
+            )
           } catch (error) {
             const failure = error instanceof Error ? error : new Error(String(error))
             reportError(failure)
@@ -152,7 +180,10 @@ export function createAppUpdates(
           status.update.kind === 'ready'
             ? Promise.resolve({ kind: 'ready', version: status.update.version })
             : (inFlight ?? startCheck()),
-        install: () => updater.quitAndInstall()
+        install: () => {
+          failureReported = false
+          updater.quitAndInstall()
+        }
       }
       check()
       const interval = setInterval(check, 4 * 60 * 60 * 1000)

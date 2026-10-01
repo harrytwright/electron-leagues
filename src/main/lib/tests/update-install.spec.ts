@@ -75,6 +75,21 @@ describe('createUpdateInstaller', () => {
     expect(onInstallFailed).toHaveBeenCalledOnce()
   })
 
+  it('reports a synchronous installation failure after the flush', async () => {
+    const onInstallFailed = vi.fn()
+    const installer = createUpdateInstaller({
+      isReady: () => true,
+      isFileOperationRunning: () => false,
+      flushBeforeQuit: async () => {},
+      install: () => {
+        throw new Error('installer could not start')
+      },
+      onInstallFailed
+    })
+    await expect(installer.request()).resolves.toBe('failed')
+    expect(onInstallFailed).toHaveBeenCalledOnce()
+  })
+
   it('reports an updater error after the flush once', async () => {
     const { installer, onInstallFailed } = setup()
     await installer.request()

@@ -644,6 +644,7 @@ export function MergeMemberPane({
     choices.guardianContact !== undefined
   const frozen = selectionFrozen || saveState.kind === 'written'
   const operation = useWriteOperation({
+    operation: 'mergeMemberGroup',
     label: () => `Merging ${selectedIds.length} members`,
     write: window.api.mergeMemberGroup,
     refreshQueryKey: membersQueryKey

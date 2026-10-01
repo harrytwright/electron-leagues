@@ -39,6 +39,7 @@ import {
 import { assertAbsolutePath, resolveLiveSeasonRoot } from './paths'
 import { withRootLock } from './root-lock'
 import { readXlsxTable } from './xlsx'
+import { traceOperation } from '../../shared/telemetry'
 
 const MAX_IMPORT_BYTES = 20 * 1024 * 1024
 const SAMPLE_ROWS = 5
@@ -54,27 +55,37 @@ function decodeExport(bytes: Buffer): string {
 
 /** Read a picked or dropped export from wherever it is; nothing is copied into the location. */
 export async function readImportTable(path: string): Promise<DelimitedTable> {
-  assertAbsolutePath(path, 'Invalid export path')
-  if (!isImportFileName(basename(path))) {
-    throw new UserFacingError('Exports are read from .xlsx, .csv, .tsv or .txt files')
-  }
-  let bytes: Buffer
-  try {
-    const info = await stat(path)
-    if (!info.isFile()) throw new UserFacingError(`“${basename(path)}” is not a file`)
-    if (info.size > MAX_IMPORT_BYTES) {
-      throw new UserFacingError(`“${basename(path)}” is too large to be a bowler export`)
+  return traceOperation(
+    'import.read',
+    { format: isWorkbookFileName(basename(path)) ? 'xlsx' : 'delimited' },
+    async (span) => {
+      assertAbsolutePath(path, 'Invalid export path')
+      if (!isImportFileName(basename(path))) {
+        throw new UserFacingError('Exports are read from .xlsx, .csv, .tsv or .txt files')
+      }
+      let bytes: Buffer
+      try {
+        const info = await stat(path)
+        if (!info.isFile()) throw new UserFacingError(`“${basename(path)}” is not a file`)
+        if (info.size > MAX_IMPORT_BYTES) {
+          throw new UserFacingError(`“${basename(path)}” is too large to be a bowler export`)
+        }
+        bytes = await readFile(path)
+        span.setAttribute('input_bytes', bytes.length)
+      } catch (err) {
+        if (err instanceof UserFacingError) throw err
+        throw toUserFacing(err)
+      }
+      const table = isWorkbookFileName(basename(path))
+        ? readXlsxTable(bytes)
+        : parseDelimited(decodeExport(bytes))
+      if (table.columns.length === 0)
+        throw new UserFacingError(`“${basename(path)}” has no header row`)
+      span.setAttribute('rows', table.rows.length)
+      span.setAttribute('columns', table.columns.length)
+      return table
     }
-    bytes = await readFile(path)
-  } catch (err) {
-    if (err instanceof UserFacingError) throw err
-    throw toUserFacing(err)
-  }
-  const table = isWorkbookFileName(basename(path))
-    ? readXlsxTable(bytes)
-    : parseDelimited(decodeExport(bytes))
-  if (table.columns.length === 0) throw new UserFacingError(`“${basename(path)}” has no header row`)
-  return table
+  )
 }
 
 /** A mapping remembered for one location and one header layout. */
@@ -171,7 +182,8 @@ const SOURCE_CHANGED_MESSAGE =
   'The export changed since it was read, so nothing was saved. Start again from the file.'
 
 async function readPlannedTable(path: string, expected: FileRevision): Promise<DelimitedTable> {
-  if ((await fileRevision(path)) !== expected) throw new UserFacingError(SOURCE_CHANGED_MESSAGE)
+  if ((await fileRevision(path)) !== expected)
+    throw new UserFacingError(SOURCE_CHANGED_MESSAGE, 'stale')
   return readImportTable(path)
 }
 
@@ -267,7 +279,7 @@ export async function addPlayersFromExport(
   return withRootLock(root, async () => {
     const master = await readMasterForWrite(root, request.membersRevision)
     const { seasonPath, revision } = await seasonForImport(root, request.ref)
-    if (revision !== request.seasonRevision) throw new UserFacingError(STALE_MESSAGE)
+    if (revision !== request.seasonRevision) throw new UserFacingError(STALE_MESSAGE, 'stale')
     const season = await readSeasonFile(seasonPath)
     if (season.status === 'missing') {
       throw new UserFacingError('This season has no roster file; older seasons are not backfilled')

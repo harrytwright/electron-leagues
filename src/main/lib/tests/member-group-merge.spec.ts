@@ -19,6 +19,10 @@ import {
 } from '../member-group-merge'
 import { buildMembersSnapshot, fileRevision, STALE_MESSAGE } from '../members'
 import { scanLeaguesRoot } from '../scanner'
+import { configureTelemetry } from '../../../shared/telemetry'
+import { recordTelemetry } from '../../../shared/tests/telemetry-recorder'
+
+afterEach(() => configureTelemetry(null))
 
 let root: string
 
@@ -541,6 +545,7 @@ describe('commitPreparedMemberMerge', () => {
   })
 
   test('reports every path whose rollback fails', async () => {
+    const telemetry = recordTelemetry()
     const files: PreparedMemberMergeFile[] = [
       { path: '/one/meta.json', original: 'one', next: 'next-one' },
       { path: '/two/meta.json', original: 'two', next: 'next-two' }
@@ -561,5 +566,15 @@ describe('commitPreparedMemberMerge', () => {
       'Could not restore: /two/meta.json (rollback failed)'
     )
     expect(contents.get('/one/meta.json')).toBe('one')
+    expect(telemetry.exception.mock.calls.map(([, operation]) => operation)).toEqual([
+      'members.merge.rollback',
+      'members.merge.write'
+    ])
+    expect(telemetry.exception.mock.calls[1][2]).toEqual({
+      attempted_files: 2,
+      rollback_failures: 1,
+      code: 'unknown'
+    })
+    expect(JSON.stringify(telemetry.exception.mock.calls)).not.toContain('/two/meta.json')
   })
 })

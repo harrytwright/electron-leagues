@@ -69,7 +69,10 @@ describe("anti-slop rule fixtures", () => {
 		const report = await runOxlint(fixturesConfig, fixturesRoot);
 		diagnosticsByFile = new Map();
 		for (const diagnostic of report.diagnostics) {
-			const relative = path.relative(fixturesRoot, diagnostic.filename);
+			const filename = diagnostic.filename.startsWith("file:")
+				? fileURLToPath(diagnostic.filename)
+				: diagnostic.filename;
+			const relative = path.relative(fixturesRoot, filename);
 			const existing = diagnosticsByFile.get(relative) ?? [];
 			existing.push(diagnostic);
 			diagnosticsByFile.set(relative, existing);

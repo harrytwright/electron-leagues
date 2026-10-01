@@ -24,6 +24,7 @@ export function useImportFiles(dest: string | undefined): FileImporter {
   const lifecycle = useRef({ dest, generation: 0, mounted: true })
   const { add } = useKumoToastManager()
   const operation = useWriteOperation({
+    operation: 'importFiles',
     label: ({ paths }: ImportVariables) => `Importing ${plural(paths.length, 'file')}`,
     write: ({ destination, paths }) => window.api.importFiles(destination, paths)
   })

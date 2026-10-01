@@ -1,5 +1,6 @@
 import { realpath } from 'node:fs/promises'
 import { toUserFacing } from './fs-errors'
+import { traceOperation } from '../../shared/telemetry'
 
 const tasks = new Map<string, Promise<void>>()
 
@@ -12,7 +13,9 @@ export async function withRootLock<T>(root: string, run: () => Promise<T>): Prom
     throw toUserFacing(err)
   })
   const previous = tasks.get(key) ?? Promise.resolve()
-  const task = previous.then(run)
+  const task = traceOperation('filesystem.queue', {}, async () => previous).then(() =>
+    traceOperation('filesystem.write', {}, run)
+  )
   // A failed operation releases the queue too; each caller still receives its own error.
   const settled = task.then(
     () => {},

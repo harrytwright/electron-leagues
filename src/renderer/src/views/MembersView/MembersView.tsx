@@ -79,6 +79,7 @@ function describeProblem(problem: MembersProblem): string {
 function EnableMembers({ root }: { root: string }): React.JSX.Element {
   const { add } = useKumoToastManager()
   const operation = useWriteOperation({
+    operation: 'enableMembers',
     label: () => 'Enabling members',
     write: () => window.api.enableMembers()
   })
@@ -176,11 +177,13 @@ function MembersTable({
   const coordinator = useQueryRefresh()
   const { add } = useKumoToastManager()
   const renumber = useWriteOperation({
+    operation: 'renumberDuplicates',
     label: () => 'Renumbering members',
     write: ({ id, keepIndex }: { id: number; keepIndex: number }) =>
       window.api.renumberDuplicates(id, keepIndex, snapshot.revision)
   })
   const repair = useWriteOperation({
+    operation: 'repairRosters',
     label: () => 'Tidying rosters',
     write: () => window.api.repairRosters(snapshot.revision),
     refreshQueryKey: membersQueryKey

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { recordEvent } from '@shared/telemetry'
 import { Button, Dialog, Radio, Table, Text, useKumoToastManager } from '@cloudflare/kumo'
 import {
   mappingProblem,
@@ -196,6 +197,7 @@ export function MbdSyncDialog({
   const [openedFor, setOpenedFor] = useState(path)
   const { add } = useKumoToastManager()
   const sync = useWriteOperation({
+    operation: 'syncMbd',
     label: () => 'Syncing from the MBD',
     write: ({ mapping, decisions, revision, sourceRevision }: SyncVariables) =>
       window.api.syncMbd(path ?? '', mapping, decisions, revision, sourceRevision)
@@ -318,7 +320,16 @@ export function MbdSyncDialog({
   }
 
   return (
-    <TaskDialog open={path !== null} onOpenChange={(open) => !busy && onOpenChange(open)} size="lg">
+    <TaskDialog
+      open={path !== null}
+      onOpenChange={(open) => {
+        if (busy) return
+        if (!open && step.kind !== 'done')
+          recordEvent('import_cancelled', { kind: 'mbd', step: step.kind })
+        onOpenChange(open)
+      }}
+      size="lg"
+    >
       <TaskDialog.Header
         title={step.kind === 'done' ? 'Sync finished' : 'Sync from the Master Bowler Database'}
         description={description()}

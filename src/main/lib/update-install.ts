@@ -1,3 +1,5 @@
+import { recordEvent, reportFailure } from '../../shared/telemetry'
+
 export type UpdateInstallOutcome =
   'installing' | 'failed' | 'not-ready' | 'busy' | 'already-requested'
 
@@ -41,12 +43,26 @@ export function createUpdateInstaller({
   return {
     async request() {
       if (installRequested) return 'already-requested'
-      if (!isReady()) return 'not-ready'
-      if (isFileOperationRunning()) return 'busy'
+      if (!isReady()) {
+        recordEvent('app_update_install_refused', { reason: 'not-ready' })
+        return 'not-ready'
+      }
+      if (isFileOperationRunning()) {
+        recordEvent('app_update_install_refused', { reason: 'busy' })
+        return 'busy'
+      }
       installRequested = true
+      recordEvent('app_update_install_requested')
       await flushBeforeQuit()
       installingAfterFlush = true
-      if (install()) return 'installing'
+      try {
+        if (install()) return 'installing'
+      } catch (error) {
+        reportFailure(error, 'update.install')
+        failInstall()
+        return 'failed'
+      }
+      reportFailure(new Error('Updater refused installation after flushing'), 'update.install')
       failInstall()
       return 'failed'
     },

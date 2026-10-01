@@ -1,8 +1,10 @@
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { compareDirectoryEntries, listDirEntries, scanLeaguesRoot } from '../scanner'
+import { configureTelemetry } from '../../../shared/telemetry'
+import { recordTelemetry } from '../../../shared/tests/telemetry-recorder'
 
 let root: string
 
@@ -23,11 +25,55 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  configureTelemetry(null)
   vi.restoreAllMocks()
   await rm(root, { recursive: true, force: true })
 })
 
 describe('scanLeaguesRoot', () => {
+  test('reports a missing selected root instead of returning an empty tree', async () => {
+    await expect(scanLeaguesRoot(join(root, 'gone'))).rejects.toMatchObject({ reason: 'missing' })
+  })
+
+  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'reports an unreadable league instead of returning empty seasons',
+    async () => {
+      const telemetry = recordTelemetry()
+      const league = join(root, 'monday/Private League')
+      await mkdir(league, { recursive: true })
+      await chmod(league, 0o000)
+      try {
+        await expect(scanLeaguesRoot(root, { heal: true })).rejects.toMatchObject({
+          reason: 'permission'
+        })
+        expect(telemetry.warning).toHaveBeenCalledWith('Directory scan failed', { code: 'EACCES' })
+        expect(JSON.stringify(telemetry.warning.mock.calls)).not.toContain('Private League')
+      } finally {
+        await chmod(league, 0o700)
+      }
+    }
+  )
+
+  test('records metadata recovery once and measures the recovered tree', async () => {
+    const telemetry = recordTelemetry()
+    await makeTree({ 'monday/Pairs/meta.json': '{invalid', 'monday/Pairs/2026-27': null })
+    await scanLeaguesRoot(root, { heal: true })
+    await scanLeaguesRoot(root, { heal: true })
+    expect(telemetry.warning.mock.calls.map(([message]) => message)).toEqual([
+      'League metadata needs healing',
+      'League metadata healed'
+    ])
+    expect(telemetry.spans[0]).toEqual({
+      name: 'filesystem.scan',
+      attributes: { heal: true, leagues: 1, seasons: 1, root_entries: 1 }
+    })
+  })
+
+  test('does not heal over a metadata read failure', async () => {
+    await makeTree({ 'monday/Pairs/meta.json': null })
+    await expect(scanLeaguesRoot(root, { heal: true })).rejects.toThrow()
+  })
+
   test('finds leagues under weekday folders with sorted, statused seasons', async () => {
     await makeTree({
       'monday/Mens Triples/2025-26/Rules.docx': 'x',

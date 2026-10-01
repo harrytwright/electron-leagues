@@ -20,6 +20,7 @@ export function DeleteMemberDialog({
   const { add } = useKumoToastManager()
   const coordinator = useQueryRefresh()
   const operation = useWriteOperation({
+    operation: 'deleteMember',
     label: () => `Deleting ${member ? memberDisplayName(member) : 'member'}`,
     write: (id: number) => window.api.deleteMember(id, snapshot.revision)
   })
