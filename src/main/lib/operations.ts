@@ -1,4 +1,3 @@
-import { ZipArchive } from 'archiver'
 import { constants, createWriteStream } from 'node:fs'
 import {
   copyFile,
@@ -596,6 +595,7 @@ export async function zipArchivedSeasons(
   )
   const zips: string[] = []
   const failed: ZipArchiveResult['failed'] = []
+  const { ZipArchive } = await import('archiver')
   let firstError: Error | undefined
 
   for (const { season, seasonDir, zipPath } of plans) {

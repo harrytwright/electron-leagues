@@ -936,4 +936,7 @@ app.on('window-all-closed', () => {
 // Defer the first quit so PostHog/Sentry finish flushing; both flushes
 // carry their own short timeouts, so this can't hang the app.
 // Installing flushes first, so the updater's own quit is not deferred again.
-app.on('before-quit', (event) => quitFlush.beforeQuit(event, () => app.quit()))
+app.on('before-quit', (event) => {
+  for (const window of BrowserWindow.getAllWindows()) window.hide()
+  quitFlush.beforeQuit(event, () => app.quit())
+})

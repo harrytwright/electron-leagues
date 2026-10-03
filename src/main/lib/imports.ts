@@ -71,7 +71,7 @@ export async function readImportTable(path: string): Promise<DelimitedTable> {
     throw toUserFacing(err)
   }
   const table = isWorkbookFileName(basename(path))
-    ? readXlsxTable(bytes)
+    ? await readXlsxTable(bytes)
     : parseDelimited(decodeExport(bytes))
   if (table.columns.length === 0) throw new UserFacingError(`“${basename(path)}” has no header row`)
   return table

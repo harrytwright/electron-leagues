@@ -1,4 +1,4 @@
-import AdmZip from 'adm-zip'
+import type AdmZip from 'adm-zip'
 import type { DelimitedTable } from '../../shared/imports'
 import { UserFacingError } from './fs-errors'
 
@@ -85,7 +85,8 @@ function firstSheetPath(zip: AdmZip): string {
  * shared and inline strings, numbers as typed, dates as ISO days, blanks as empty.
  * Only what a bowler export needs; formulas are read by their cached value.
  */
-export function readXlsxTable(bytes: Buffer): DelimitedTable {
+export async function readXlsxTable(bytes: Buffer): Promise<DelimitedTable> {
+  const { default: AdmZip } = await import('adm-zip')
   let zip: AdmZip
   try {
     zip = new AdmZip(bytes)

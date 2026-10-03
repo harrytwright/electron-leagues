@@ -98,7 +98,13 @@ async function scanLeague(
   root: string,
   heal: boolean
 ): Promise<LeagueNode> {
-  const entries = await listEntries(leagueDir.path)
+  const archivePath = archivePathFor(root, leagueDir.name)
+  const metaPath = join(leagueDir.path, META_FILE)
+  const [entries, archiveEntries, existing] = await Promise.all([
+    listEntries(leagueDir.path),
+    listEntries(archivePath),
+    readExistingMeta(metaPath)
+  ])
 
   const seasonFolders: { entry: FileEntry; season: SeasonName }[] = []
   const otherEntries: FileEntry[] = []
@@ -112,14 +118,10 @@ async function scanLeague(
   }
   seasonFolders.sort((a, b) => compareSeasonNames(a.season, b.season))
 
-  const archivePath = archivePathFor(root, leagueDir.name)
-  const archiveEntries = await listEntries(archivePath)
   const archivedSeasons = sortSeasonNames(
     archiveEntries.filter((e) => e.kind === 'folder').map((e) => e.name)
   )
 
-  const metaPath = join(leagueDir.path, META_FILE)
-  const existing = await readExistingMeta(metaPath)
   const meta = healMeta(existing.input, {
     folderName: leagueDir.name,
     day,
@@ -184,17 +186,23 @@ export async function scanLeaguesRoot(
     LeagueNode[]
   >
   const unrecognisedRootEntries: FileEntry[] = []
+  const dayScans: Promise<void>[] = []
 
   for (const entry of rootEntries) {
     if (entry.name.startsWith('_')) continue
     if (entry.kind === 'folder' && isWeekday(entry.name)) {
       const day = entry.name
-      const leagueDirs = (await listEntries(entry.path)).filter((e) => e.kind === 'folder')
-      days[day] = await Promise.all(leagueDirs.map((dir) => scanLeague(day, dir, root, heal)))
+      dayScans.push(
+        listEntries(entry.path).then(async (children) => {
+          const leagueDirs = children.filter((e) => e.kind === 'folder')
+          days[day] = await Promise.all(leagueDirs.map((dir) => scanLeague(day, dir, root, heal)))
+        })
+      )
     } else {
       unrecognisedRootEntries.push(entry)
     }
   }
+  await Promise.all(dayScans)
 
   const specialDirs = new Set(rootEntries.filter((e) => e.kind === 'folder').map((e) => e.name))
 
