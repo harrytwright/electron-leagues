@@ -10,7 +10,8 @@ import {
 import type { DirEntry, FileEntry, LeagueNode, LeaguesTree, SeasonNode } from '../../shared/tree'
 import { isWeekday, WEEKDAYS, type Weekday } from '../../shared/weekday'
 import { isReservedFileName } from '../../shared/members'
-import { isMissing } from './fs-errors'
+import { errorCode, isMissing, toUserFacing } from './fs-errors'
+import { traceOperation, warnOnce } from '../../shared/telemetry'
 import { META_FILE, MetaSymlinkError, serialiseLeagueMeta, writeLeagueMeta } from './league-meta'
 import { archivePathFor } from './paths'
 
@@ -63,7 +64,7 @@ export async function listDirEntries(dir: string): Promise<DirEntry[]> {
   return listed.filter((e): e is DirEntry => e !== null).sort(compareDirectoryEntries)
 }
 
-async function listEntries(dir: string): Promise<FileEntry[]> {
+async function listEntries(dir: string, missingAllowed = true): Promise<FileEntry[]> {
   try {
     const entries = await readdir(dir, { withFileTypes: true })
     return entries
@@ -73,8 +74,10 @@ async function listEntries(dir: string): Promise<FileEntry[]> {
         path: join(dir, e.name),
         kind: e.isDirectory() ? ('folder' as const) : ('file' as const)
       }))
-  } catch {
-    return []
+  } catch (error) {
+    if (missingAllowed && isMissing(error)) return []
+    warnOnce(`scan:${dir}`, 'Directory scan failed', { code: errorCode(error) ?? 'unknown' })
+    throw toUserFacing(error)
   }
 }
 
@@ -86,9 +89,17 @@ interface ExistingMeta {
 async function readExistingMeta(path: string): Promise<ExistingMeta> {
   try {
     const raw = await readFile(path, 'utf8')
-    return { raw, input: parseLeagueMetaInput(JSON.parse(raw)) }
-  } catch {
-    return { raw: null, input: null }
+    const input = parseLeagueMetaInput(JSON.parse(raw))
+    if (input === null)
+      warnOnce(`meta:${path}`, 'League metadata needs healing', { reason: 'invalid-shape' })
+    return { raw, input }
+  } catch (error) {
+    if (isMissing(error)) return { raw: null, input: null }
+    if (error instanceof SyntaxError) {
+      warnOnce(`meta:${path}`, 'League metadata needs healing', { reason: 'invalid-json' })
+      return { raw: null, input: null }
+    }
+    throw toUserFacing(error)
   }
 }
 
@@ -132,8 +143,14 @@ async function scanLeague(
     if (serialised !== existing.raw) {
       try {
         await writeLeagueMeta(leagueDir.path, meta)
+        warnOnce(`healed:${metaPath}`, 'League metadata healed', {
+          reason: existing.raw === null ? 'missing-or-invalid' : 'outdated'
+        })
       } catch (err) {
         if (err instanceof MetaSymlinkError) {
+          warnOnce(`symlink:${metaPath}`, 'League metadata healing skipped', {
+            reason: 'symbolic-link'
+          })
           console.warn(`Skipped healing meta.json for ${leagueDir.path}: ${err.message}`)
         }
         // The league was removed mid-scan (e.g. just trashed); the watcher
@@ -175,36 +192,45 @@ export async function scanLeaguesRoot(
   root: string,
   opts: { heal?: boolean } = {}
 ): Promise<LeaguesTree> {
-  const heal = opts.heal ?? false
-  const rootEntries = await listEntries(root)
+  return traceOperation('filesystem.scan', { heal: opts.heal ?? false }, async (span) => {
+    const heal = opts.heal ?? false
+    const rootEntries = await listEntries(root, false)
 
-  // SAFETY: fromEntries over the full WEEKDAYS tuple yields exactly one entry per Weekday key.
-  const days = Object.fromEntries(WEEKDAYS.map((d) => [d, [] as LeagueNode[]])) as Record<
-    Weekday,
-    LeagueNode[]
-  >
-  const unrecognisedRootEntries: FileEntry[] = []
+    // SAFETY: fromEntries over the full WEEKDAYS tuple yields exactly one entry per Weekday key.
+    const days = Object.fromEntries(WEEKDAYS.map((d) => [d, [] as LeagueNode[]])) as Record<
+      Weekday,
+      LeagueNode[]
+    >
+    const unrecognisedRootEntries: FileEntry[] = []
 
-  for (const entry of rootEntries) {
-    if (entry.name.startsWith('_')) continue
-    if (entry.kind === 'folder' && isWeekday(entry.name)) {
-      const day = entry.name
-      const leagueDirs = (await listEntries(entry.path)).filter((e) => e.kind === 'folder')
-      days[day] = await Promise.all(leagueDirs.map((dir) => scanLeague(day, dir, root, heal)))
-    } else {
-      unrecognisedRootEntries.push(entry)
+    for (const entry of rootEntries) {
+      if (entry.name.startsWith('_')) continue
+      if (entry.kind === 'folder' && isWeekday(entry.name)) {
+        const day = entry.name
+        const leagueDirs = (await listEntries(entry.path)).filter((e) => e.kind === 'folder')
+        days[day] = await Promise.all(leagueDirs.map((dir) => scanLeague(day, dir, root, heal)))
+      } else {
+        unrecognisedRootEntries.push(entry)
+      }
     }
-  }
 
-  const specialDirs = new Set(rootEntries.filter((e) => e.kind === 'folder').map((e) => e.name))
+    const specialDirs = new Set(rootEntries.filter((e) => e.kind === 'folder').map((e) => e.name))
+    const leagues = Object.values(days).flat()
+    span.setAttribute('leagues', leagues.length)
+    span.setAttribute(
+      'seasons',
+      leagues.reduce((count, league) => count + league.seasons.length, 0)
+    )
+    span.setAttribute('root_entries', rootEntries.length)
 
-  return {
-    root,
-    days,
-    templatesPath: join(root, '_templates'),
-    sharedPath: join(root, '_shared'),
-    hasTemplates: specialDirs.has('_templates'),
-    hasShared: specialDirs.has('_shared'),
-    unrecognisedRootEntries
-  }
+    return {
+      root,
+      days,
+      templatesPath: join(root, '_templates'),
+      sharedPath: join(root, '_shared'),
+      hasTemplates: specialDirs.has('_templates'),
+      hasShared: specialDirs.has('_shared'),
+      unrecognisedRootEntries
+    }
+  })
 }

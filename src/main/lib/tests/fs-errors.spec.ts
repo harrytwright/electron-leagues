@@ -36,10 +36,10 @@ describe('toUserFacing', () => {
     expect(toUserFacing(fsError('EPERM')).message).toMatch(/permission denied/)
     expect(toUserFacing(fsError('EACCES')).message).toMatch(/read or changed/)
     expect(toUserFacing(fsError('ENOSPC'))).toEqual(
-      new UserFacingError('There isn’t enough free space to complete that operation')
+      new UserFacingError('There isn’t enough free space to complete that operation', 'space')
     )
     expect(toUserFacing(fsError('EISDIR'))).toEqual(
-      new UserFacingError('A folder already exists where the file should be created')
+      new UserFacingError('A folder already exists where the file should be created', 'conflict')
     )
   })
 

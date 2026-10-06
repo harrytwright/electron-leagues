@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { recordEvent } from '@shared/telemetry'
 import { Button, Checkbox, Dialog, Select, Text, useKumoToastManager } from '@cloudflare/kumo'
 import {
   mappingProblem,
@@ -101,6 +102,7 @@ export function RosterImportDialog({
   const { add } = useKumoToastManager()
   const ref = { day: season.day, leagueFolder: season.leagueFolder, seasonName: season.season }
   const importer = useWriteOperation({
+    operation: 'addPlayersFromExport',
     label: () => `Adding players to ${season.leagueName} ${season.season}`,
     write: (variables: ImportVariables) =>
       window.api.addPlayersFromExport(
@@ -207,7 +209,15 @@ export function RosterImportDialog({
   const busy = step.kind === 'planning' || importer.pending
 
   return (
-    <TaskDialog open={path !== null} onOpenChange={(open) => !busy && onOpenChange(open)} size="lg">
+    <TaskDialog
+      open={path !== null}
+      onOpenChange={(open) => {
+        if (busy) return
+        if (!open) recordEvent('import_cancelled', { kind: 'roster', step: step.kind })
+        onOpenChange(open)
+      }}
+      size="lg"
+    >
       <TaskDialog.Header
         title={`Add players to ${season.season} from an export`}
         description={

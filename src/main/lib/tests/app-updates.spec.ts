@@ -7,6 +7,8 @@ import type {
 } from 'electron-updater'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createAppUpdates, updateCheckMessage } from '../app-updates'
+import { configureTelemetry } from '../../../shared/telemetry'
+import { recordTelemetry } from '../../../shared/tests/telemetry-recorder'
 
 class TestUpdater extends EventEmitter {
   checkForUpdates = vi.fn<AppUpdater['checkForUpdates']>().mockResolvedValue(null)
@@ -26,7 +28,32 @@ const update: UpdateDownloadedEvent = {
   downloadedFile: '/tmp/update.zip'
 }
 
-afterEach(() => vi.useRealTimers())
+afterEach(() => {
+  vi.useRealTimers()
+  configureTelemetry(null)
+})
+
+it('reports an event and promise failure once per check, including a later retry', async () => {
+  vi.useFakeTimers()
+  const telemetry = recordTelemetry()
+  const updater = new TestUpdater()
+  updater.checkForUpdates.mockImplementation(async () => {
+    updater.emit('error', new Error('private download URL'))
+    throw new Error('private download URL')
+  })
+  const onError = vi.fn()
+  const updates = createAppUpdates('0.2.3', vi.fn(), onError)
+  const stop = updates.start(updater)
+  await expect(updates.checkNow()).resolves.toMatchObject({ kind: 'failed' })
+  expect(onError).toHaveBeenCalledOnce()
+  expect(telemetry.event.mock.calls.filter(([name]) => name === 'app_update_failed')).toHaveLength(
+    1
+  )
+  expect(JSON.stringify(telemetry.event.mock.calls)).not.toContain('private download URL')
+  await vi.advanceTimersByTimeAsync(4 * 60 * 60 * 1000)
+  expect(onError).toHaveBeenCalledTimes(2)
+  stop()
+})
 
 it('keeps the installed version and marks an update ready only after download', async () => {
   vi.useFakeTimers()

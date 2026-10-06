@@ -605,6 +605,7 @@ export function MembersWorkspace({
   const cachedSnapshot = (): MembersSnapshot =>
     queryClient.getQueryData<MembersSnapshot | null>(membersQueryKey(tree.root)) ?? snapshot
   const link = useWriteOperation({
+    operation: 'saveMember',
     label: () => 'Linking the guardian',
     write: (input: MemberInput) => window.api.saveMember(input, cachedSnapshot().revision),
     refreshQueryKey: membersQueryKey

@@ -24,6 +24,7 @@ export function DeleteResourceDialog({ target, open, onOpenChange }: Props): Rea
   const pendingErrorToast = useRef<string | null>(null)
   const { add } = useKumoToastManager()
   const operation = useWriteOperation({
+    operation: 'trashFolder',
     label: (deleting: NonNullable<Props['target']>) => `Deleting ${deleting.name}`,
     write: (deleting) => window.api.trashFolder(deleting.path)
   })

@@ -15,7 +15,9 @@ import {
   buildEditableContextMenuTemplate,
   DIAGNOSTICS_MENU_ID
 } from './lib/app-menu'
-import { capture, initAnalytics, shutdownAnalytics } from './lib/analytics'
+import { analyticsContext, capture, initAnalytics, shutdownAnalytics } from './lib/analytics'
+import { setRendererSession, withRendererSession } from './lib/renderer-sessions'
+import { reportFailure, warnOnce } from '../shared/telemetry'
 import { oneDriveStatus } from './lib/onedrive'
 import {
   createLeague,
@@ -28,7 +30,7 @@ import {
   syncSeasonWithTemplates,
   zipArchivedSeasons
 } from './lib/operations'
-import { isMissing, toUserFacing, UserFacingError } from './lib/fs-errors'
+import { errorCode, isMissing, toUserFacing, UserFacingError } from './lib/fs-errors'
 import { registerInvokeHandler, type InvokeListener, type IpcErrorReporter } from './lib/ipc-handle'
 import type { AppCommand } from '../shared/app-command'
 import type { AppUpdatePhase } from '../shared/app-update'
@@ -137,6 +139,7 @@ let rootWatcher: RootWatcher | null = null
 let menuUpdatePhaseKind: AppUpdatePhase['kind'] | null = null
 let menuFileOperationRunning = false
 let fileOperationRunning = false
+let firstWindowShown = false
 const appUpdates = createAppUpdates(
   app.getVersion(),
   (status) => {
@@ -148,6 +151,7 @@ const appUpdates = createAppUpdates(
   },
   (error) => {
     console.warn('Could not update the app:', error)
+    reportFailure(error, 'app.update', { code: errorCode(error) ?? 'unknown' })
     updateInstaller.updaterFailed()
   }
 )
@@ -179,11 +183,14 @@ function watchRoot(root: string): void {
     onChange: () => mainWindow?.webContents.send('tree:changed'),
     onError: (error, mode) => {
       console.error(error)
-      Sentry.captureException(error, { tags: { watch_mode: mode } })
+      reportFailure(error, 'filesystem.watch', { watch_mode: mode })
     },
     onFallback: (message, data) => {
       console.warn(message, { code: data.code })
-      Sentry.addBreadcrumb({ category: 'watcher', level: 'warning', message, data })
+      warnOnce(`watcher:${root}`, 'Native watcher switched to polling', {
+        code: data.code ?? 'unknown'
+      })
+      capture('watcher_fallback', { mode: 'polling', reason: 'permission' })
     }
   })
 }
@@ -236,10 +243,15 @@ async function recentRoots(): Promise<string[]> {
 }
 
 const reportIpcError: IpcErrorReporter = (error, channel) =>
-  Sentry.captureException(error, { tags: { ipc_channel: channel } })
+  reportFailure(error, 'ipc.invoke', { ipc_channel: channel, code: errorCode(error) ?? 'unknown' })
 
 function register<Name extends InvokeName>(name: Name, listener: InvokeListener<Name>): void {
-  registerInvokeHandler(ipcMain, name, listener, reportIpcError)
+  registerInvokeHandler(
+    ipcMain,
+    name,
+    (event, ...args) => withRendererSession(event.sender, () => listener(event, ...args)),
+    reportIpcError
+  )
 }
 
 function diagnosticsMenuItem(): Electron.MenuItem | undefined {
@@ -267,8 +279,10 @@ function registerIpc(): void {
   // so only PostHog needs anything over IPC.
   register('getAnalyticsConfig', () => ({
     apiKey: posthogKey() ?? null,
-    distinctId: machineId()
+    distinctId: machineId(),
+    context: analyticsContext()
   }))
+  register('setAnalyticsSession', (event, sessionId) => setRendererSession(event.sender, sessionId))
 
   register('openPermissionSettings', async () => {
     if (process.platform !== 'darwin') return
@@ -311,6 +325,7 @@ function registerIpc(): void {
     const root = resolve(path)
     const probe = await probeRoot(root)
     if (probe !== 'dir') {
+      capture('root_switch_failed', { reason: probe })
       if (probe === 'missing') {
         store.set(
           'recentRoots',
@@ -327,12 +342,20 @@ function registerIpc(): void {
 
   register('recentRoots', () => recentRoots())
 
-  register('repairLocation', () => repairReservedLocations(requireRoot(), bundledTemplatesDir()))
+  register('repairLocation', async () => {
+    const result = await repairReservedLocations(requireRoot(), bundledTemplatesDir())
+    capture('location_repaired', {
+      repaired: result.repaired.length,
+      warnings: result.warnings.length
+    })
+    return result
+  })
 
   register('forgetRoot', () => {
     envRootOverride = undefined
     store.delete('rootPath')
     stopWatching()
+    capture('root_forgotten')
   })
 
   register('scan', async () => {
@@ -389,7 +412,12 @@ function registerIpc(): void {
 
   register('zipArchive', async (_e, leagueFolder, seasons) => {
     const result = await zipArchivedSeasons(requireRoot(), leagueFolder, seasons)
-    capture('archive_zipped', { count: result.zips.length })
+    capture('archive_zipped', {
+      count: result.zips.length,
+      attempted: seasons.length,
+      failed: result.failed.length,
+      outcome: result.failed.length ? 'partial' : 'success'
+    })
     return result
   })
 
@@ -443,7 +471,12 @@ function registerIpc(): void {
     } catch (err) {
       throw toUserFacing(err)
     }
-    capture('files_imported', { count: result.copied.length })
+    capture('files_imported', {
+      count: result.copied.length,
+      attempted: sources.length,
+      failed: result.failed.length,
+      outcome: result.failed.length ? 'partial' : 'success'
+    })
     return result
   })
 
@@ -537,9 +570,15 @@ function registerIpc(): void {
     return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0]
   })
 
-  register('previewImport', (_e, path) =>
-    previewImport(requireRoot(), path, store.get('importMappings') ?? [])
-  )
+  register('previewImport', async (_e, path) => {
+    const preview = await previewImport(requireRoot(), path, store.get('importMappings') ?? [])
+    capture('import_previewed', {
+      rows: preview.rowCount,
+      columns: preview.columns.length,
+      remembered_mapping: preview.remembered
+    })
+    return preview
+  })
 
   register('planMbdSync', async (_e, path, mapping) => {
     const root = requireRoot()
@@ -548,6 +587,11 @@ function registerIpc(): void {
       'importMappings',
       rememberMapping(store.get('importMappings') ?? [], { root, signature, mapping })
     )
+    capture('import_reviewed', {
+      kind: 'mbd',
+      rows: plan.rows.length,
+      invalid: plan.invalid.length
+    })
     return { plan, revision, sourceRevision }
   })
 
@@ -559,7 +603,14 @@ function registerIpc(): void {
       revision,
       sourceRevision
     })
-    capture('mbd_synced', { rows: summary.rows, created: summary.created, merged: summary.merged })
+    capture('mbd_synced', {
+      rows: summary.rows,
+      created: summary.created,
+      merged: summary.merged,
+      skipped: summary.skipped,
+      failed: summary.failed.length,
+      outcome: summary.failed.length ? 'partial' : 'success'
+    })
     return summary
   })
 
@@ -574,6 +625,11 @@ function registerIpc(): void {
         mapping
       })
     )
+    capture('import_reviewed', {
+      kind: 'roster',
+      rows: result.plan.rows.length,
+      invalid: result.plan.invalid.length
+    })
     return {
       plan: result.plan,
       membersRevision: result.membersRevision,
@@ -606,7 +662,14 @@ function registerIpc(): void {
         seasonRevision,
         sourceRevision
       })
-      capture('players_imported', { rows: summary.rows, added: summary.added })
+      capture('players_imported', {
+        rows: summary.rows,
+        added: summary.added,
+        created: summary.created,
+        skipped: summary.skipped,
+        failed: summary.failed.length,
+        outcome: summary.failed.length ? 'partial' : 'success'
+      })
       // The sheet follows the roster here as it does after a save; a failure is retried on open.
       if (summary.added > 0) {
         try {
@@ -808,7 +871,13 @@ function createWindow(): void {
     helpWindows.close()
   })
 
-  mainWindow.on('ready-to-show', () => mainWindow?.show())
+  mainWindow.on('ready-to-show', () => {
+    createdWindow.show()
+    if (!firstWindowShown) {
+      firstWindowShown = true
+      capture('app_window_shown', { duration_ms: Math.round(process.uptime() * 1000) })
+    }
+  })
 
   openExternally(mainWindow.webContents)
 
@@ -866,6 +935,7 @@ async function quitAfterFailedInstall(): Promise<void> {
     detail: 'GoBowling Leagues will now close. Reopen it to try again.',
     buttons: ['OK']
   })
+  await Promise.allSettled([Sentry.flush(2000)])
   app.quit()
 }
 

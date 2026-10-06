@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { helpTargetSchema } from './help'
 import type { DirEntry, LeaguesTree } from './tree'
 import type { AppUpdateStatus } from './app-update'
+import type { TelemetryAttributes } from './telemetry'
 import {
   importMappingSchema,
   syncDecisionSchema,
@@ -61,7 +62,8 @@ export interface RosterPlanOutput {
 export interface InvokeOutputs {
   getAppUpdateStatus: AppUpdateStatus
   installAppUpdate: void
-  getAnalyticsConfig: { apiKey: string | null; distinctId: string }
+  getAnalyticsConfig: { apiKey: string | null; distinctId: string; context: TelemetryAttributes }
+  setAnalyticsSession: void
   openPermissionSettings: void
   getRoot: string | null
   chooseRoot: string | null
@@ -129,6 +131,11 @@ export const invokeDefinitions = {
     channel: 'analytics:config',
     args: z.tuple([]),
     failureMessage: 'Invalid analytics request'
+  },
+  setAnalyticsSession: {
+    channel: 'analytics:session',
+    args: z.tuple([z.uuid()]),
+    failureMessage: 'Invalid analytics session'
   },
   openPermissionSettings: {
     channel: 'permissions:open-settings',

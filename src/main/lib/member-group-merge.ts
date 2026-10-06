@@ -18,7 +18,7 @@ import {
   type SeasonFile
 } from '../../shared/members'
 import { assertAppJsonWritable, readAppJson, serialiseAppJson } from './app-json'
-import { toUserFacing, UserFacingError } from './fs-errors'
+import { errorCode, toUserFacing, UserFacingError } from './fs-errors'
 import {
   assertGuardianLink,
   fileRevision,
@@ -29,6 +29,7 @@ import {
 import { withRootLock } from './root-lock'
 import { scanLeaguesRoot } from './scanner'
 import { WEEKDAYS } from '../../shared/weekday'
+import { reportFailure, warnOnce } from '../../shared/telemetry'
 
 export interface PreparedMemberMergeFile {
   path: string
@@ -80,12 +81,25 @@ export async function commitPreparedMemberMerge(
           await io.guard(attemptedFile.path)
           await io.write(attemptedFile.path, attemptedFile.original)
         } catch (rollbackError) {
+          reportFailure(rollbackError, 'members.merge.rollback', {
+            attempted_files: attempted.length,
+            code: errorCode(rollbackError) ?? 'unknown'
+          })
           rollbackFailures.push({
             path: attemptedFile.path,
             message: toUserFacing(rollbackError).message
           })
         }
       }
+      const attributes = {
+        attempted_files: attempted.length,
+        rollback_failures: rollbackFailures.length,
+        code: errorCode(writeError) ?? 'unknown'
+      }
+      if (!(toUserFacing(writeError) instanceof UserFacingError) || rollbackFailures.length > 0) {
+        reportFailure(writeError, 'members.merge.write', attributes)
+      }
+      warnOnce('members.merge.recovered', 'Member merge write failed', attributes)
       const failure = `Could not save ${file.path}: ${toUserFacing(writeError).message}.`
       if (rollbackFailures.length === 0) {
         throw new UserFacingError(`${failure} Original files were restored.`)
@@ -224,7 +238,7 @@ export async function mergeMemberGroup(
     }
     if (masterRead.status === 'invalid') throw new UserFacingError(masterRead.message)
     if ((await fileRevision(masterPath)) !== request.expectedRevision) {
-      throw new UserFacingError(STALE_MESSAGE)
+      throw new UserFacingError(STALE_MESSAGE, 'stale')
     }
     const sources = selectedMembers(masterRead.value, request)
     let survivor: Member
@@ -400,7 +414,7 @@ export async function repairRosters(
     }
     if (masterRead.status === 'invalid') throw new UserFacingError(masterRead.message)
     if ((await fileRevision(masterPath)) !== expectedRevision) {
-      throw new UserFacingError(STALE_MESSAGE)
+      throw new UserFacingError(STALE_MESSAGE, 'stale')
     }
     const counts = new Map<number, number>()
     for (const member of masterRead.value.members) {

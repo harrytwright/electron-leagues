@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { recordEvent } from '@shared/telemetry'
 import { skipToken, useQuery } from '@tanstack/react-query'
 import { isPermissionDeniedMessage } from '@shared/fs-messages'
 import { AppProviders } from '@renderer/providers/AppProviders'
@@ -183,6 +184,22 @@ function LocationContent({ root }: LocationContentProps): React.JSX.Element {
   const remembered = useWorkspace((workspace) =>
     rootPath !== null ? workspace.locations[rootPath]?.selection : undefined
   )
+  const firstReady = useRef(false)
+  const selectionKind = tree.data ? restoreSelection(tree.data, remembered ?? null).kind : null
+  const selectedFolder =
+    selectionKind === 'league' && remembered?.kind === 'league' ? remembered.folderName : null
+  useEffect(() => {
+    if (!firstReady.current && !root.isPending && (root.data === null || tree.data)) {
+      firstReady.current = true
+      recordEvent('workspace_ready', {
+        duration_ms: Math.round(performance.now()),
+        has_location: root.data !== null
+      })
+    }
+  }, [root.isPending, root.data, tree.data])
+  useEffect(() => {
+    if (selectionKind) recordEvent('workspace_viewed', { view: selectionKind })
+  }, [selectionKind, selectedFolder, rootPath])
 
   useEffect(() => {
     setWorkspaceRoot(root.data ?? null)

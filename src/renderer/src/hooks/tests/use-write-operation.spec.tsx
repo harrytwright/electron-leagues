@@ -1,6 +1,8 @@
 import { act, waitFor } from '@testing-library/react'
 import { useQuery } from '@tanstack/react-query'
-import { expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
+import { configureTelemetry } from '@shared/telemetry'
+import { recordTelemetry } from '@shared/tests/telemetry-recorder'
 import type { LeaguesTree } from '@shared/tree'
 import { OperationFeedbackContext } from '@renderer/contexts/OperationFeedbackContext'
 import { useOperationFeedback } from '../use-operation-feedback'
@@ -12,6 +14,8 @@ import { treeQuery, treeQueryKey } from '../../queries/tree'
 import { makeDirEntry, makeTree } from '../../tests/fixtures'
 import { installMockApi } from '../../tests/mock-api'
 import { renderHookWithProviders } from '../../tests/render-helpers'
+
+afterEach(() => configureTelemetry(null))
 
 interface Deferred<T> {
   promise: Promise<T>
@@ -102,6 +106,7 @@ it('refreshes an observed tree and resolves refreshed after a successful write',
 })
 
 it('returns a formatted refresh failure and stays pending through the refresh', async () => {
+  const telemetry = recordTelemetry()
   const scan = deferred<LeaguesTree | null>()
   const api = installMockApi({ scan: vi.fn(() => scan.promise) })
   const client = readyClient()
@@ -145,6 +150,14 @@ it('returns a formatted refresh failure and stays pending through the refresh', 
   })
   expect(result.current.operation.pending).toBe(false)
   expect(result.current.feedback.activity).toBeNull()
+  expect(telemetry.event).toHaveBeenCalledWith('write_completed', {
+    operation: 'write',
+    outcome: 'refresh-failed',
+    duration_ms: expect.any(Number)
+  })
+  expect(telemetry.exception).not.toHaveBeenCalled()
+  expect(JSON.stringify(telemetry.spans)).not.toContain('scores')
+  expect(JSON.stringify(telemetry.event.mock.calls)).not.toContain('/root')
 })
 
 it('defers refresh after a root change and marks the captured caches stale', async () => {

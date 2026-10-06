@@ -105,8 +105,10 @@ export function installMockApi(overrides: Partial<RendererApi> = {}): RendererAp
     openHelp: vi.fn<RendererApi['openHelp']>().mockResolvedValue(undefined),
     getAnalyticsConfig: vi.fn<RendererApi['getAnalyticsConfig']>().mockResolvedValue({
       apiKey: null,
-      distinctId: 'test'
+      distinctId: 'test',
+      context: { app_session_id: 'test', app_version: 'test', environment: 'test' }
     }),
+    setAnalyticsSession: vi.fn<RendererApi['setAnalyticsSession']>().mockResolvedValue(undefined),
     openPermissionSettings: vi
       .fn<RendererApi['openPermissionSettings']>()
       .mockResolvedValue(undefined),

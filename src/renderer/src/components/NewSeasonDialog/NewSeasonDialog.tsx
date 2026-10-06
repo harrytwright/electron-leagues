@@ -53,6 +53,7 @@ export function NewSeasonDialog({
   const [wasOpen, setWasOpen] = useState(open)
   const nameRef = useRef<HTMLInputElement>(null)
   const operation = useWriteOperation({
+    operation: 'createSeason',
     label: () => 'Creating season',
     write: (request: CreateSeasonRequest) => window.api.createSeason(request)
   })

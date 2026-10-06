@@ -1,4 +1,5 @@
 import type { QueryClient, QueryFilters, QueryKey } from '@tanstack/react-query'
+import { traceOperation } from '@shared/telemetry'
 
 const ROOT_QUERY_PREFIX = ['root'] as const
 
@@ -53,7 +54,7 @@ export function createRefreshCoordinator(client: QueryClient): RefreshCoordinato
         ? { queryKey: options.queryKey }
         : routineRefreshFilter()
       const run: RefreshRun = {
-        promise: (async () => {
+        promise: traceOperation('ui.refresh', {}, async () => {
           // Invalidation alone reuses an in-flight initial fetch with no data, so cancel first.
           // Cancellation prevents obsolete renderer results; it does not stop main-process work.
           await client.cancelQueries(filter)
@@ -61,7 +62,7 @@ export function createRefreshCoordinator(client: QueryClient): RefreshCoordinato
             { ...filter, refetchType: 'active' },
             { throwOnError: true }
           )
-        })()
+        })
       }
       latestRun = run
       return awaitLatest(run, options.throwOnError ?? false)

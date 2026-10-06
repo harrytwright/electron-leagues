@@ -39,6 +39,7 @@ export function CreateRosterDialog({
   const fieldRef = useRef<HTMLDivElement>(null)
   const task = useDialogTask({ open, onOpenChange, fieldRef })
   const operation = useWriteOperation({
+    operation: 'createSeasonRoster',
     label: () => `Setting up the ${season.seasonName} roster`,
     write: (request: RosterRequest) => window.api.createSeasonRoster(season, request)
   })

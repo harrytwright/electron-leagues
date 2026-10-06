@@ -26,6 +26,7 @@ export function NewLeagueDialog({ open, onOpenChange, onCreated }: Props): React
   const [wasOpen, setWasOpen] = useState(open)
   const nameRef = useRef<HTMLInputElement>(null)
   const operation = useWriteOperation({
+    operation: 'createLeague',
     label: () => 'Creating league',
     write: ({ day: selectedDay, name: leagueName }: CreateLeagueVariables) =>
       window.api.createLeague(selectedDay, leagueName)

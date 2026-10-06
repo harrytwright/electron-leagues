@@ -26,7 +26,8 @@ import {
   renameLeague,
   repairReservedLocations,
   syncSeasonWithTemplates,
-  zipArchivedSeasons
+  zipArchivedSeasons,
+  type CreateSeasonOptions
 } from '../operations'
 import { UserFacingError } from '../fs-errors'
 import { seasonFileSchema, type SeasonFile } from '../../../shared/members'
@@ -35,6 +36,10 @@ import { FILE_RULES } from '../template-workflows'
 import { resolveNewLiveSeasonRoot } from '../paths'
 import { enableMembers, writeSeasonFile } from '../members'
 import { scanLeaguesRoot } from '../scanner'
+import { configureTelemetry } from '../../../shared/telemetry'
+import { recordTelemetry } from '../../../shared/tests/telemetry-recorder'
+
+afterEach(() => configureTelemetry(null))
 
 let root: string
 let outside: string
@@ -329,6 +334,32 @@ describe('renameLeague', () => {
     expect(await exists(join(root, '_archives/Pairs/2023-24'))).toBe(true)
   })
 
+  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'reads the archive before renaming any folders',
+    async () => {
+      const leaguePath = await createLeague(root, 'monday', 'Pairs')
+      const meta = await readFile(join(leaguePath, 'meta.json'), 'utf8')
+      await makeTree(root, { '_archives/Pairs/2023-24/Rules.docx': 'old rules' })
+      const archive = join(root, '_archives/Pairs')
+      const renamedArchive = join(root, '_archives/Doubles')
+      await chmod(archive, 0o300)
+      try {
+        await expect(
+          renameLeague({ root, day: 'monday', leagueFolder: 'Pairs', displayName: 'Doubles' })
+        ).rejects.toMatchObject({ reason: 'permission' })
+        expect(await exists(leaguePath)).toBe(true)
+        expect(await exists(join(root, 'monday/Doubles'))).toBe(false)
+        expect(await exists(archive)).toBe(true)
+        expect(await exists(renamedArchive)).toBe(false)
+        expect(await readFile(join(leaguePath, 'meta.json'), 'utf8')).toBe(meta)
+      } finally {
+        for (const path of [archive, renamedArchive]) {
+          if (await exists(path)) await chmod(path, 0o700)
+        }
+      }
+    }
+  )
+
   test('rejects a missing league and a symlinked meta.json before moving anything', async () => {
     await expect(
       renameLeague({ root, day: 'monday', leagueFolder: 'Ghost', displayName: 'Spirit' })
@@ -350,6 +381,70 @@ describe('renameLeague', () => {
 })
 
 describe('createSeason', () => {
+  test('reads league metadata before writing or archiving a season and permits a retry', async () => {
+    await enableMembers(root)
+    const leaguePath = await createLeague(root, 'monday', 'Pairs')
+    const metaPath = join(leaguePath, 'meta.json')
+    const originalMeta = await readFile(metaPath, 'utf8')
+    await makeTree(root, {
+      '_templates/Rules.docx': 'template rules',
+      'monday/Pairs/2023-24/Rules.docx': 'old rules',
+      'monday/Pairs/2024-25/Rules.docx': 'previous rules'
+    })
+    await rm(metaPath)
+    await mkdir(metaPath)
+    const request: CreateSeasonOptions = {
+      root,
+      day: 'monday',
+      leagueFolder: 'Pairs',
+      seasonName: '2025-26',
+      source: 'templates',
+      archiveOldest: true
+    }
+
+    await expect(createSeason(request)).rejects.toMatchObject({ reason: 'conflict' })
+    expect((await readdir(leaguePath)).sort()).toEqual(['2023-24', '2024-25', 'meta.json'])
+    expect(await readFile(join(leaguePath, '2023-24/Rules.docx'), 'utf8')).toBe('old rules')
+    expect(await exists(join(root, '_archives/Pairs/2023-24'))).toBe(false)
+
+    await rm(metaPath, { recursive: true })
+    await writeFile(metaPath, originalMeta)
+    await expect(createSeason(request)).resolves.toMatchObject({ archived: '2023-24' })
+    expect(await exists(join(leaguePath, '2025-26/meta.json'))).toBe(true)
+    expect(await readFile(join(leaguePath, '2025-26/Rules.docx'), 'utf8')).toBe('template rules')
+  })
+
+  test.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+    'reads the archive before creating or moving any seasons',
+    async () => {
+      const leaguePath = await createLeague(root, 'monday', 'Pairs')
+      await makeTree(root, {
+        '_archives/Pairs/2022-23/Rules.docx': 'archived rules',
+        'monday/Pairs/2023-24/Rules.docx': 'old rules',
+        'monday/Pairs/2024-25/Rules.docx': 'previous rules'
+      })
+      const archive = join(root, '_archives/Pairs')
+      await chmod(archive, 0o300)
+      try {
+        await expect(
+          createSeason({
+            root,
+            day: 'monday',
+            leagueFolder: 'Pairs',
+            seasonName: '2025-26',
+            source: 'previous',
+            archiveOldest: true
+          })
+        ).rejects.toMatchObject({ reason: 'permission' })
+        expect((await readdir(leaguePath)).sort()).toEqual(['2023-24', '2024-25', 'meta.json'])
+        expect(await exists(join(archive, '2023-24'))).toBe(false)
+      } finally {
+        await chmod(archive, 0o700)
+      }
+      expect(await readdir(archive)).toEqual(['2022-23'])
+    }
+  )
+
   test('rejects a league folder that escapes its weekday', async () => {
     await expect(
       createSeason({
@@ -1151,7 +1246,7 @@ describe('zipArchivedSeasons', () => {
     })
 
     await expect(zipArchivedSeasons(root, 'Mens Triples', ['2025-26'])).rejects.toEqual(
-      new UserFacingError('That folder can’t be read or changed (permission denied)')
+      new UserFacingError('That folder can’t be read or changed (permission denied)', 'permission')
     )
     expect(await exists(join(root, '_archives/Mens Triples/2025-26.zip'))).toBe(false)
   })
@@ -1182,6 +1277,30 @@ describe('zipArchivedSeasons', () => {
     )
     expect(await exists(join(root, '_archives/Mens Triples/2024-25.zip'))).toBe(false)
     expect(await exists(join(root, '_archives/Mens Triples/2025-26.zip'))).toBe(true)
+  })
+
+  test('captures an unexpected partial archive failure even when the batch resolves', async () => {
+    const telemetry = recordTelemetry()
+    await makeTree(root, {
+      '_archives/Pairs/2024-25/Rules.docx': 'rules',
+      '_archives/Pairs/2025-26/Rules.docx': 'rules'
+    })
+    const fault = new Error('unexpected archive failure')
+    vi.spyOn(ZipArchive.prototype, 'finalize').mockImplementationOnce(function (
+      this: ZipArchive
+    ): Promise<void> {
+      this.emit('error', fault)
+      return Promise.reject(fault)
+    })
+    const result = await zipArchivedSeasons(root, 'Pairs', ['2024-25', '2025-26'])
+    expect(result.zips).toHaveLength(1)
+    expect(result.failed).toHaveLength(1)
+    expect(telemetry.exception).toHaveBeenCalledExactlyOnceWith(
+      expect.any(Error),
+      'filesystem.zip',
+      { code: 'unknown' }
+    )
+    expect(telemetry.spans[0].attributes).toEqual({ attempted: 2, succeeded: 1, failed: 1 })
   })
 
   test.skipIf(process.platform === 'win32')(
@@ -1269,6 +1388,7 @@ describe('importFiles', () => {
   })
 
   test('copies the rest when one source is missing', async () => {
+    const telemetry = recordTelemetry()
     await makeTree(root, { 'monday/Mens Triples/2025-26': null })
     await makeTree(outside, { 'a.pdf': 'a', 'c.pdf': 'c' })
     const dest = join(root, 'monday/Mens Triples/2025-26')
@@ -1282,6 +1402,12 @@ describe('importFiles', () => {
     })
     expect(await readFile(join(dest, 'a.pdf'), 'utf8')).toBe('a')
     expect(await readFile(join(dest, 'c.pdf'), 'utf8')).toBe('c')
+    expect(telemetry.exception).not.toHaveBeenCalled()
+    expect(telemetry.warning).toHaveBeenCalledWith('File import had failures', {
+      succeeded: 2,
+      failed: 1
+    })
+    expect(telemetry.spans[0].attributes).toEqual({ attempted: 3, succeeded: 2, failed: 1 })
   })
 
   test('rejects when every source fails', async () => {

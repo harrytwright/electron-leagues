@@ -1,7 +1,15 @@
 import { PERMISSION_DENIED_MESSAGE } from '../../shared/fs-messages'
 
 /** An expected failure the user can act on: shown as a message, never reported as a bug. */
-export class UserFacingError extends Error {}
+export class UserFacingError extends Error {
+  constructor(
+    message: string,
+    readonly reason:
+      'validation' | 'missing' | 'permission' | 'space' | 'conflict' | 'stale' = 'validation'
+  ) {
+    super(message)
+  }
+}
 
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- catch clauses hand us `unknown`; this IS the boundary normaliser
 export function errorCode(err: unknown): string | undefined {
@@ -31,15 +39,18 @@ export function isAlreadyExists(err: unknown): boolean {
 // oxlint-disable-next-line anti-slop/no-unknown-parameters -- see errorCode
 export function toUserFacing(err: unknown): Error {
   if (err instanceof UserFacingError) return err
-  if (isMissing(err)) return new UserFacingError('That folder no longer exists')
+  if (isMissing(err)) return new UserFacingError('That folder no longer exists', 'missing')
   if (isPermissionDenied(err)) {
-    return new UserFacingError(PERMISSION_DENIED_MESSAGE)
+    return new UserFacingError(PERMISSION_DENIED_MESSAGE, 'permission')
   }
   if (errorCode(err) === 'ENOSPC') {
-    return new UserFacingError('There isn’t enough free space to complete that operation')
+    return new UserFacingError('There isn’t enough free space to complete that operation', 'space')
   }
   if (errorCode(err) === 'EISDIR') {
-    return new UserFacingError('A folder already exists where the file should be created')
+    return new UserFacingError(
+      'A folder already exists where the file should be created',
+      'conflict'
+    )
   }
   return err instanceof Error ? err : new Error(String(err))
 }
